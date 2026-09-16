@@ -50,12 +50,10 @@ on:
         default: false
         type: boolean
 
+# Least privilege by default. `version`, `wiki` and `release` opt up in their own
+# blocks; nothing else writes anything or needs a GCP identity.
 permissions:
-  # contents: write because the version job rolls CHANGELOG.md and pushes the
-  # release tag to main, the wiki job publishes the wiki and records the
-  # submodule pointer, and the release job creates the Release.
-  contents: write
-  id-token: write   # GCP workload-identity federation
+  contents: read
 
 jobs:
 
@@ -70,6 +68,9 @@ jobs:
     name: Version
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # commit the rolled CHANGELOG and push the tag to main
+      id-token: write   # GCP workload-identity federation, for the App token
     # Deliberately NO release-notes output. GitHub refuses to set a job output
     # whose value contains a registered secret, and the notes always contain
     # `kubed-io` — every PR link generated for this repo does — which is a
@@ -114,6 +115,9 @@ jobs:
       with:
         client-id: ${{ fromJson(steps.secrets.outputs.github_app).github_app_client_id }}
         private-key: ${{ fromJson(steps.secrets.outputs.github_app).github_app_private_key }}
+        # Without a permission-* input the token carries every permission the
+        # App is installed with; a commit and a push need contents alone.
+        permission-contents: write
 
     - name: Checkout
       uses: actions/checkout@v7
@@ -207,6 +211,7 @@ jobs:
     uses: ./.github/workflows/wiki.yml
     with:
       push: true
+      tag: ${{ needs.version.outputs.tag }}
 
   release:
     name: Release

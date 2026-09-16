@@ -54,6 +54,11 @@ on:
         type: boolean
         required: false
         default: false
+      tag:
+        description: Git tag to generate the wiki from (empty = the triggering ref)
+        type: string
+        required: false
+        default: ''
 
 # One publisher at a time. Two runs racing to push the same generated pages is a
 # guaranteed non-fast-forward, and the loser fails for no useful reason.
@@ -105,10 +110,16 @@ jobs:
       with:
         client-id: ${{ fromJson(steps.secrets.outputs.github_app).github_app_client_id }}
         private-key: ${{ fromJson(steps.secrets.outputs.github_app).github_app_private_key }}
+        # Without a permission-* input the token carries every permission the
+        # App is installed with; a commit and a push need contents alone.
+        permission-contents: write
 
     - name: Checkout
       uses: actions/checkout@v7
       with:
+        # publish.yml passes the release tag, so the wiki describes the same tree
+        # as the image and the package; every other trigger leaves it empty.
+        ref: ${{ inputs.tag }}
         # The wiki submodule is the thing being published, so it has to be here.
         submodules: true
         # And its credential has to survive the checkout: the push below runs
@@ -185,10 +196,9 @@ jobs:
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         remote="https://x-access-token:${TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git"
         # Land the pointer on what the branch is NOW, not on what was checked
-        # out. The checkout is github.sha, and on a release that is already one
-        # behind: publish.yml calls this after its version job pushed the rolled
-        # CHANGELOG to main, so a commit on top of the checkout could never
-        # fast-forward. Only the wiki/ submodule's own HEAD has to survive the
+        # out: github.sha is one behind once publish.yml's version job has pushed
+        # the rolled CHANGELOG, and a release tag is a detached checkout, so a
+        # commit on top of either could never fast-forward. Only the wiki/ submodule's own HEAD has to survive the
         # switch, and it does — the outer commit is rebuilt from the new tip.
         {
           git fetch origin "$GITHUB_REF_NAME" &&
