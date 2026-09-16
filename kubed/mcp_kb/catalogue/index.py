@@ -77,12 +77,7 @@ class SkillRow:
 
 @dataclass(frozen=True)
 class PromptRow:
-    """A ``FilePrompt``, flattened to JSON-safe fields.
-
-    ``FilePrompt`` gains its own ``path`` attribute in a later task; until then
-    the harvester knows the path a prompt came from and this takes it as an
-    argument rather than reading it off the prompt.
-    """
+    """A ``FilePrompt``, flattened to JSON-safe fields."""
 
     path: str
     pack: str

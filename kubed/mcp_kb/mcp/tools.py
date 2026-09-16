@@ -6,11 +6,10 @@ returns, ``read_resource`` takes the URI ``resources/read`` takes. An agent that
 knows how to drive MCP resources already knows how to drive these, because the
 vocabulary is the same one -- list addresses, read an address.
 
-That is the whole design rule here. The previous surface invented a second
-vocabulary (``read_skill(skill, file)``, ``read_pack_file(pack, file)``) for the
-same act, which meant a model had to learn where a file lived before it could
-ask for it -- and a reference inside a SKILL.md does not say which side of that
-line it falls on.
+That is the whole design rule here. A second vocabulary for the same act --
+``read_skill(skill, file)`` beside ``read_pack_file(pack, file)`` -- makes a
+model learn where a file lives before it can ask for it, and a reference inside
+a SKILL.md does not say which side of that line it falls on.
 
 Progressive disclosure survives the collapse, because it moved into the address
 space rather than into the tool list::

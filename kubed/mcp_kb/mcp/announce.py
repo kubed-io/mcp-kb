@@ -84,13 +84,11 @@ def _can_remember() -> bool:
 
     Anything that is not an HTTP request -- stdio, in-memory -- has no such
     header to check, so this defaults to True for it. That default is
-    optimistic, not a guarantee: under FastMCP 4.0.3 neither actually keeps one
-    continuous session either -- ``test_a_sessionless_connection_is_told_...``
-    shows the real in-memory transport minting a fresh state key per request,
-    the same as a sessionless HTTP client. The state calls this makes for them
-    are therefore wasted, not merely redundant, but harmless: ``AnnounceChanges``
-    already guards every one of them against a state store that will not read
-    them back.
+    optimistic, not a guarantee: under FastMCP 4.0.3 neither keeps one
+    continuous session either, minting a fresh state key per request just as a
+    sessionless HTTP client does. The state calls made for them are therefore
+    wasted, not merely redundant, but harmless: ``AnnounceChanges`` guards every
+    one of them against a state store that will not read them back.
     """
     http = http_request()
     if http is None:

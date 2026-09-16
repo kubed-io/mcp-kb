@@ -25,9 +25,8 @@ The grammar, which is the whole API::
 One segment is an index, two or more is content: that is the only rule needed to
 tell them apart, and it is why the group indexes live in the pack's own
 namespace (``skill://grafana-lgtm``) rather than under it. ``selector`` accepts a
-pack or a group for the same reason the old ``pack`` argument did -- an agent
-narrowing to ``grafana-lgtm`` should not first have to learn it lives in
-``grafana``.
+pack or a group for the same reason: an agent narrowing to ``grafana-lgtm``
+should not first have to learn that it lives in ``grafana``.
 
 Pack-qualified, unlike the URIs FastMCP's ``SkillsDirectoryProvider`` mints.
 Those are keyed on the folder name alone, so two packs shipping a ``testing/``

@@ -2,11 +2,11 @@
 
 Every backend that copies a source into ``<cache>/src/<name>`` has the same
 problem, and it is not about git or about WebDAV: a refresh happens while the
-pre-swap snapshot is still serving the tree the refresh is replacing. E3 shipped
-``rmtree(dest)`` then ``rename(tmp, dest)`` and it corrupted 56 of 222
-concurrent reads on one ordinary refresh; worse, a crash inside that window left
-a half tree still carrying its completion stamp, which the next start trusted
-and served nothing out of while reporting ``ok``.
+pre-swap snapshot is still serving the tree the refresh is replacing.
+``rmtree(dest)`` then ``rename(tmp, dest)`` is the obvious way to do it, and it
+corrupted 56 of 222 concurrent reads on one ordinary refresh; worse, a crash
+inside that window leaves a half tree still carrying its completion stamp,
+which the next start trusts and serves nothing out of while reporting ``ok``.
 
 So a tree is never rewritten in place. Each *version* of a source gets a
 directory of its own under the source's home, and the backend says what a

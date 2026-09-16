@@ -192,8 +192,7 @@ class KnowledgeBase:
 
         A cache directory that cannot be written is not fatal: the catalogue is
         already built and serving. It only means the next cold start harvests
-        everything again, which is exactly what happened before there was an
-        index at all.
+        everything again, which is the cost the index exists to save.
         """
         record = Index(
             version=INDEX_VERSION,

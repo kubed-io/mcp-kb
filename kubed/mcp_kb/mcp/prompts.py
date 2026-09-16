@@ -25,7 +25,7 @@ these bodies are full of LogQL, PromQL and JSON, which all use single braces.
 
 The exposed name is ``<pack>_<file stem>``. Prompt names are one flat namespace
 per server, and two packs shipping a ``debug.md`` must not collide the way two
-skills named ``testing`` used to.
+skills named ``testing`` otherwise would.
 """
 
 from __future__ import annotations
