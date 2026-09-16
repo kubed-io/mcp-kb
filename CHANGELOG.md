@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A `files:` glob ending in `**` now means "everything underneath" on every supported interpreter. `pathlib` matched directories only before Python 3.13, so `shared/**` served a pack's shared files on one runtime and nothing at all on another, with no error either way — `patterns` normalises it to `**/*` before it reaches `glob`.
+
 ### Added
 - An `auth.username` may be an `{env:}` reference as well as a literal, so a service account whose name and password are issued together can be named once rather than repeated in the config.
 - `cache: live` on a WebDAV source: a read revalidates that one file against the server by ETag and downloads it again only when it moved, so a file edited in Nextcloud is served on the next read — a *new* file still needs a `refresh:` interval or `POST /reindex`, and a server that stops answering degrades to the cached copy instead of failing the read.

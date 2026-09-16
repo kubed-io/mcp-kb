@@ -51,10 +51,14 @@ jobs:
       # sweep the useful answer is "which versions broke", not "the first one to".
       fail-fast: false
       matrix:
-        # A pull request pays for one leg; everything else sweeps the supported
-        # range. Keep 3.14 last-listed and present in BOTH arms: `Test (3.14)` is
-        # the required status check, so it has to report on every pull request.
-        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.14"]') || fromJSON('["3.11", "3.12", "3.13", "3.14"]') }}
+        # A pull request pays for the two ends of the range; everything else
+        # sweeps it. One leg was cheaper, but every version break this project
+        # has had lives at the OLD end and so landed on main green: a trailing
+        # `**` glob that matches directories only before 3.13, and a pygit2
+        # floor that resolves to a release without the API the code calls.
+        # Keep 3.14 last-listed and present in BOTH arms: `Test (3.14)` is the
+        # required status check, so it has to report on every pull request.
+        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.11", "3.14"]') || fromJSON('["3.11", "3.12", "3.13", "3.14"]') }}
     steps:
 
     - name: Checkout

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from mcp_school.config import Include
-from mcp_school.harvest import group_of, pack_files, prompt_files, skill_dirs
+from mcp_school.harvest import group_of, pack_files, patterns, prompt_files, skill_dirs
 
 
 @pytest.fixture
@@ -95,3 +95,41 @@ def test_the_group_is_the_containing_directory_unless_that_is_a_skill_root(tree)
     assert group_of(tree / "skills/flat", tree) is None
     assert group_of(tree / ".github/skills/gh", tree) is None
     assert group_of(tree / "template", tree) is None
+
+
+@pytest.mark.unit
+def test_a_trailing_globstar_means_everything_underneath(tmp_path):
+    """`dir/**` and `dir/**/*` must find the same files on every version.
+
+    Before Python 3.13 a trailing `**` matches directories only, so this test
+    reads as a tautology on 3.13+ and as the real thing on 3.11 and 3.12 --
+    where, before `patterns` normalised it, the first form found nothing.
+    """
+    tree = tmp_path / "pack"
+    (tree / "shared" / "deep").mkdir(parents=True)
+    (tree / "shared" / "tokens.md").write_text("t")
+    (tree / "shared" / "deep" / "more.md").write_text("m")
+
+    assert pack_files(tree, Include(files=["shared/**"]), []) == pack_files(
+        tree, Include(files=["shared/**/*"]), []
+    )
+    assert pack_files(tree, Include(files=["shared/**"]), []) == [
+        "shared/deep/more.md",
+        "shared/tokens.md",
+    ]
+
+
+@pytest.mark.unit
+def test_a_trailing_globstar_is_normalised_before_it_reaches_glob():
+    """The version-independent half of the rule above.
+
+    `pathlib.glob` is what changed in 3.13, so a test that calls it can only
+    assert the old behaviour on an old interpreter. This one pins the
+    normalisation itself, and fails everywhere if it is dropped.
+    """
+    assert patterns("files", Include(files=["shared/**"])) == ("shared/**/*",)
+    assert patterns("files", Include(files=["shared/**/*"])) == ("shared/**/*",)
+    assert patterns("files", Include(files=["shared/*"])) == ("shared/*",)
+    assert patterns("skills", Include(skills=["skills/*/SKILL.md"])) == (
+        "skills/*/SKILL.md",
+    )

@@ -11,8 +11,10 @@ guard ``uris.py`` applies on read, so a glob like ``../**`` finds nothing.
 Dot directories are skipped, except the three that agent tooling conventionally
 lives in.
 
-Write a files glob as ``dir/**/*``, not ``dir/**`` -- a trailing ``**`` matches
-directories only on Python versions before 3.13.
+``dir/**`` and ``dir/**/*`` mean the same thing here: ``patterns`` normalises
+the first into the second, because a trailing ``**`` matches directories only
+before Python 3.13 and a config should not depend on which interpreter is
+running it.
 """
 
 from __future__ import annotations
@@ -57,7 +59,22 @@ CONVENTIONAL_DOTDIRS: frozenset[str] = frozenset({".github", ".claude", ".agents
 
 def patterns(kind: str, include: Include) -> tuple[str, ...]:
     explicit = getattr(include, kind)
-    return tuple(explicit) if explicit is not None else DEFAULTS[kind]
+    chosen = tuple(explicit) if explicit is not None else DEFAULTS[kind]
+    return tuple(_globstar(p) for p in chosen)
+
+
+def _globstar(pattern: str) -> str:
+    """Normalise a pattern ending in ``**`` to ``**/*``.
+
+    Before Python 3.13 a trailing ``**`` matches directories *only*, so
+    ``shared/**`` finds the folders under ``shared`` and none of the files in
+    them; from 3.13 it matches both. A config is not a place to encode an
+    interpreter version, and the failure is silent -- ``files: ["shared/**"]``
+    served penpot's 29 shared files on one runtime and nothing at all on
+    another, with no error either way. Whoever writes it means "everything
+    underneath", so that is what it becomes, identically on every version.
+    """
+    return f"{pattern}/*" if pattern.endswith("**") else pattern
 
 
 def hidden(rel: Path) -> bool:
