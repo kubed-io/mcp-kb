@@ -116,6 +116,25 @@ async def test_skills_full_enumerates_every_skill(server_url):
     assert sum(1 for u in uris if u.endswith("/SKILL.md")) == 4
 
 
+@pytest.mark.integration
+async def test_skills_full_reaches_the_mirror_too(server_url):
+    """The combination a tools-only client that syncs skills to disk sends.
+
+    ``?resources=off&skills=full`` is not two unrelated knobs: the first is why
+    the client is calling a tool at all, and the second is what it is calling it
+    for. A mirror that honours the listing shape for ``resources/list`` and
+    drops it for ``list_resources()`` hands that client the indexes and no
+    ``/SKILL.md`` at all, with no error to notice.
+    """
+    rows = json.loads(
+        await call(f"{server_url}?resources=off&skills=full", "list_resources")
+    )
+    assert "skill://flatsource/alpha/SKILL.md" in [row["uri"] for row in rows]
+    assert sum(1 for row in rows if row["uri"].endswith("/SKILL.md")) == 4
+    cheap = json.loads(await call(f"{server_url}?resources=off", "list_resources"))
+    assert not any(row["uri"].endswith("/SKILL.md") for row in cheap)
+
+
 # -- the pack pin -------------------------------------------------------------
 
 

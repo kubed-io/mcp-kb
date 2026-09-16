@@ -29,7 +29,7 @@ from collections.abc import Callable
 from fastmcp import FastMCP
 
 from ..catalogue.uris import Catalogue
-from .request import requested_scope
+from .request import full_listing, requested_scope
 
 LIST_TOOL = "list_resources"
 READ_TOOL = "read_resource"
@@ -66,7 +66,8 @@ def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> set[str]:
         This returns exactly what an MCP `resources/list` would, so a `uri` from
         here can be read with `read_resource` or with your own resource reader.
         """
-        return [entry.as_dict() for entry in catalogue().entries(requested_scope())]
+        entries = catalogue().entries(requested_scope(), full=full_listing())
+        return [entry.as_dict() for entry in entries]
 
     @mcp.tool(annotations={"title": "Read a skill resource", **READ_ONLY})
     def read_resource(uri: str) -> str:
