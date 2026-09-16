@@ -265,13 +265,6 @@ SCHEMES: dict[str, str] = {  # url scheme -> union tag
     "webdav+https": "webdav",
     "webdav+http": "webdav",
 }
-# Not read yet: the union's tags are the keys, and E6's backend registry is
-# written against this mapping rather than against a second copy of it.
-MODELS: dict[str, type[SourceBase]] = {
-    "file": FileSource,
-    "git": GitSource,
-    "webdav": WebdavSource,
-}
 
 
 def _tag(value: object) -> str | None:
