@@ -70,7 +70,7 @@ INDEX_FILE = "index.json"
 TICK_SECONDS = 5
 
 # Session state key for the generation a client has already been told about.
-GENERATION_KEY = "mcp-school.generation"
+GENERATION_KEY = "mcp-kb.generation"
 
 # The header that says an HTTP connection has a session at all.
 SESSION_HEADER = "mcp-session-id"
@@ -120,8 +120,8 @@ class AnnounceChanges(Middleware):
     so this must never turn a working request into a failed one.
     """
 
-    def __init__(self, school: School):
-        self._school = school
+    def __init__(self, knowledge_base: KnowledgeBase):
+        self._knowledge_base = knowledge_base
 
     async def on_request(self, context, call_next):
         ctx = context.fastmcp_context
@@ -130,7 +130,7 @@ class AnnounceChanges(Middleware):
         return await call_next(context)
 
     async def _announce(self, ctx) -> None:
-        generation = self._school.generation
+        generation = self._knowledge_base.generation
         try:
             told = await ctx.get_state(GENERATION_KEY)
         except Exception:  # noqa: BLE001 - no state here must not fail the request
@@ -146,7 +146,7 @@ class AnnounceChanges(Middleware):
             return
 
 
-class School:
+class KnowledgeBase:
     """An MCP server over the sources a config file names.
 
     The catalogue is served twice, because MCP clients are not all alike. As
@@ -179,7 +179,7 @@ class School:
 
         ttl = config.min_refresh_seconds
         self.mcp = FastMCP(
-            "mcp-school",
+            "mcp-kb",
             instructions=INSTRUCTIONS,
             lifespan=self._lifespan,
             # A client may hold a listing for as long as the shortest refresh

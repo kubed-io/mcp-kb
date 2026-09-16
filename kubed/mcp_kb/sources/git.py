@@ -53,7 +53,7 @@ from .export import Exports
 # Written at the root of an export: the commit it holds, then how many files it
 # took. Hidden, so harvest.py's dot-file rule keeps it out of every listing by
 # itself.
-COMMIT_FILE = ".mcp-school-commit"
+COMMIT_FILE = ".mcp-kb-commit"
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
@@ -77,7 +77,7 @@ def fingerprint_git(source: GitSource, cache: Path, root: Path) -> dict:
     """The exported commit and its extent, plus what ``ref`` points at right now.
 
     Two different commits mean the export is behind the remote, which is
-    exactly when ``School.refresh`` should rebuild -- and the same two mean it
+    exactly when ``KnowledgeBase.refresh`` should rebuild -- and the same two mean it
     is not, however long ago the clone happened. ``files`` is what makes the
     export's own integrity part of the answer: a tree that lost files since it
     was written has moved as surely as the remote has, and a rebuild is what

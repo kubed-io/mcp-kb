@@ -56,11 +56,11 @@ if TYPE_CHECKING:
 # Written at the root of an export: what every file's ETag was when it was
 # copied, which is what a live read revalidates against. Hidden, so harvest.py's
 # dot-file rule keeps it out of every listing by itself.
-ETAGS_FILE = ".mcp-school-etags.json"
+ETAGS_FILE = ".mcp-kb-etags.json"
 
 # The export's completion stamp: the version it holds, then how many files it
 # took. export.py writes it, last of all.
-VERSION_FILE = ".mcp-school-version"
+VERSION_FILE = ".mcp-kb-version"
 
 VERSION = re.compile(r"^[0-9a-f]{64}$")
 

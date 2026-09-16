@@ -1,6 +1,6 @@
-# mcp-school
+# mcp-kb
 
-A resource and prompt gateway for MCP. Serves [Agent Skills](https://code.claude.com/docs/en/skills)
+A resource and prompt catalogue for MCP. Serves [Agent Skills](https://code.claude.com/docs/en/skills)
 and prompts over MCP, so any client can discover and read them — including clients that only
 speak tools.
 
@@ -9,9 +9,9 @@ fetched at container start — see `examples/config.yaml`, the four packs this
 image used to bake, now read straight from GitHub:
 
 ```
-docker run -p 8000:8000 -v mcp-school-cache:/var/cache/mcp-school \
-  -v $PWD/examples/config.yaml:/etc/mcp-school/config.yaml:ro \
-  kubed/mcp-school:latest
+docker run -p 8000:8000 -v mcp-kb-cache:/var/cache/mcp-kb \
+  -v $PWD/examples/config.yaml:/etc/mcp-kb/config.yaml:ro \
+  kubed/mcp-kb:latest
 ```
 
 ## One address space
@@ -62,7 +62,7 @@ other — `?resources=off`, `?prompts=off`, or both, on the MCP URL (or the
 `X-MCP-Resources` / `X-MCP-Prompts` headers):
 
 ```
-http://mcp-school.flow.svc.cluster.local:8000/mcp?resources=off&prompts=off
+http://mcp-kb.flow.svc.cluster.local:8000/mcp?resources=off&prompts=off
 ```
 
 The tools are hidden from clients that have the real feature, because advertising both
@@ -203,8 +203,8 @@ interval is the honest setting there.
 
 | variable | default | meaning |
 | --- | --- | --- |
-| `CONFIG` | `/etc/mcp-school/config.yaml` | config file listing the sources to serve |
-| `CACHE_DIR` | `/var/cache/mcp-school` | directory a non-`file://` source materialises into |
+| `CONFIG` | `/etc/mcp-kb/config.yaml` | config file listing the sources to serve |
+| `CACHE_DIR` | `/var/cache/mcp-kb` | directory a non-`file://` source materialises into |
 | `TRANSPORT` | `http` | `http` or `stdio` |
 | `HOST` | `0.0.0.0` | bind address |
 | `PORT` | `8000` | port |

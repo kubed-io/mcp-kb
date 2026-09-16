@@ -17,7 +17,7 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.utilities.skills import download_skill, get_skill_manifest, list_skills
 
-from mcp_school import School
+from kubed.mcp_kb import KnowledgeBase
 from tests.conftest import make_config
 
 
@@ -32,7 +32,7 @@ def server_url(skills_dir_module, prompts_dir_module):
     """Serve the skills app on a loopback port for the duration of the module."""
     port = _free_port()
     config = make_config(skills_dir_module, prompts_dir_module)
-    app = School(config, skills_dir_module / "_cache").mcp.http_app()
+    app = KnowledgeBase(config, skills_dir_module / "_cache").mcp.http_app()
     uvicorn_config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(uvicorn_config)
     thread = threading.Thread(target=server.run, daemon=True)

@@ -1,4 +1,4 @@
-# Copilot code review — mcp-school
+# Copilot code review — mcp-kb
 
 ## Purpose & scope
 
@@ -6,8 +6,8 @@ You are reviewing pull requests for a **Python MCP server** that serves
 [Agent Skills](https://code.claude.com/docs/en/skills) — `SKILL.md` packages —
 over HTTP, so clients that cannot read a filesystem can still use them. The
 image bakes nothing: a source is a dependency declared in a config file and
-fetched at container start, into a cache volume. The package is `mcp_school`;
-it ships as a container image (`kubed/mcp-school`) with no deployment manifest
+fetched at container start, into a cache volume. The package is `kubed.mcp_kb`;
+it ships as a container image (`kubed/mcp-kb`) with no deployment manifest
 of its own — that lives with whoever installs it.
 
 **Read these repo files first — they are the source of truth, and you should back
@@ -15,7 +15,7 @@ your comments with them:**
 
 - **`AGENTS.md`** — the architectural non-negotiables and the reasoning behind
   them. This is the most important file in the repo for a reviewer.
-- **`mcp_school/uris.py`** — the `skill://` grammar, which is the API.
+- **`kubed/mcp_kb/uris.py`** — the `skill://` grammar, which is the API.
 - **`examples/config.yaml`** — the worked example, and the file you edit to add
   a pack to it.
 
@@ -83,7 +83,7 @@ to ignore you.
    the documented behaviour, not from the current implementation.
 6. **Dead code & simplification** — unused code and imports, redundant
    abstractions.
-7. **Tests** — a `mcp_school/` change should carry a test in `tests/`. `test_uris.py`
+7. **Tests** — a `kubed/mcp_kb/` change should carry a test in `tests/`. `test_uris.py`
    covers the grammar and the scope directly, without an MCP client; prefer a
    test there over one that can only reach the rule through a tool call.
 

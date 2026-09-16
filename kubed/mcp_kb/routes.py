@@ -4,7 +4,7 @@ Operational, not agent-facing: these answer "what is this pod running?" for a
 kubelet probe or a human with curl, and are deliberately outside the MCP
 protocol so checking them needs no MCP client.
 
-Both routes read the school's current snapshot when they are called, not one
+Both routes read the knowledge base's current snapshot when they are called, not one
 captured at registration, so what they report is what the server is serving
 right now.
 """
@@ -19,16 +19,16 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 if TYPE_CHECKING:
-    from .server import School
+    from .server import KnowledgeBase
 
 log = logging.getLogger(__name__)
 
 
-def register(mcp: FastMCP, school: School) -> None:
+def register(mcp: FastMCP, knowledge_base: KnowledgeBase) -> None:
     """Register the HTTP routes on ``mcp``."""
 
     def report() -> dict:
-        snapshot = school.snapshot
+        snapshot = knowledge_base.snapshot
         # A stale source is still being served from its last good harvest, so
         # its library is still here; only a failed one has nothing to list.
         libraries = sorted(
@@ -86,7 +86,7 @@ def register(mcp: FastMCP, school: School) -> None:
         for good.
         """
         try:
-            rebuilt = await school.refresh_async(force=True)
+            rebuilt = await knowledge_base.refresh_async(force=True)
         except Exception as exc:
             log.exception("reindex failed")
             return JSONResponse({"status": "error", "error": str(exc)}, status_code=500)

@@ -1,4 +1,4 @@
-# Working on mcp-school
+# Working on mcp-kb
 
 An MCP server that serves Agent Skills — `SKILL.md` packages — over HTTP so
 clients that cannot read a filesystem (n8n agents, above all) can still use
@@ -9,24 +9,24 @@ file, and it is cloned or read at container **start**, into a cache volume.
 
 | Path | What it is |
 | --- | --- |
-| `mcp_school/config.py` | the config file's schema — `Config`, `load_config`, `Library`, `FileSource`, `GitSource`, `WebdavSource` |
-| `mcp_school/harvest.py` | turns a source's `include` globs into skill dirs, prompt files and pack files |
-| `mcp_school/sources/` | turns a config source into a local directory — `file://`, `git+…`/`github://`, `webdav+…` — and fingerprints it, to detect a changed one; `export.py` is the per-version materialise git and WebDAV share |
-| `mcp_school/index.py` | `Index`/`SourceRecord`, the on-disk `index.json` a cold start reads instead of re-harvesting |
+| `kubed/mcp_kb/config.py` | the config file's schema — `Config`, `load_config`, `Library`, `FileSource`, `GitSource`, `WebdavSource` |
+| `kubed/mcp_kb/harvest.py` | turns a source's `include` globs into skill dirs, prompt files and pack files |
+| `kubed/mcp_kb/sources/` | turns a config source into a local directory — `file://`, `git+…`/`github://`, `webdav+…` — and fingerprints it, to detect a changed one; `export.py` is the per-version materialise git and WebDAV share |
+| `kubed/mcp_kb/index.py` | `Index`/`SourceRecord`, the on-disk `index.json` a cold start reads instead of re-harvesting |
 | `scripts/requirements.py` | prints the dependency list out of `pyproject.toml` for the image build |
 | `examples/config.yaml` | the worked example the image ships — the four packs as `github://` sources |
 | `config.schema.json` | `Config.model_json_schema()`, committed so an editor can validate a config live |
-| `mcp_school/skills.py` | the catalogue — `Skill`, loading, and `SkillIndex` |
-| `mcp_school/uris.py` | the `skill://` address space — `Catalogue`, the grammar |
-| `mcp_school/resources.py` | the resources, and the mirror-hiding middleware |
-| `mcp_school/tools.py` | the two mirror tools |
-| `mcp_school/request.py` | what the current request says about itself |
-| `mcp_school/live.py` | `cache: live` — the `Revalidator` a read goes through before it serves a file |
-| `mcp_school/prompts.py` | loads, renders and scopes the prompts |
-| `mcp_school/routes.py` | plain HTTP endpoints (`/health`, `/reindex`) |
-| `mcp_school/snapshot.py` | `Snapshot`, `build_snapshot` — the immutable view of the catalogue every request reads |
-| `mcp_school/server.py` | `School` — wiring, cold start, refresh, no tool bodies |
-| `mcp_school/main.py` | CLI and env parsing; the only file reading `os.environ` |
+| `kubed/mcp_kb/skills.py` | the catalogue — `Skill`, loading, and `SkillIndex` |
+| `kubed/mcp_kb/uris.py` | the `skill://` address space — `Catalogue`, the grammar |
+| `kubed/mcp_kb/resources.py` | the resources, and the mirror-hiding middleware |
+| `kubed/mcp_kb/tools.py` | the two mirror tools |
+| `kubed/mcp_kb/request.py` | what the current request says about itself |
+| `kubed/mcp_kb/live.py` | `cache: live` — the `Revalidator` a read goes through before it serves a file |
+| `kubed/mcp_kb/prompts.py` | loads, renders and scopes the prompts |
+| `kubed/mcp_kb/routes.py` | plain HTTP endpoints (`/health`, `/reindex`) |
+| `kubed/mcp_kb/snapshot.py` | `Snapshot`, `build_snapshot` — the immutable view of the catalogue every request reads |
+| `kubed/mcp_kb/server.py` | `KnowledgeBase` — wiring, cold start, refresh, no tool bodies |
+| `kubed/mcp_kb/main.py` | CLI and env parsing; the only file reading `os.environ` |
 
 ## Adding a source
 
@@ -67,14 +67,14 @@ at `skill://<pack>/<path>` rather than indexed as skills themselves.
 `config.schema.json` is `Config.model_json_schema()`; add a `#
 yaml-language-server: $schema=./config.schema.json` modeline to a config file
 for an editor to validate it live, and regenerate the committed schema with
-`mcp-school schema > config.schema.json` after touching `config.py` —
+`mcp-kb schema > config.schema.json` after touching `config.py` —
 `tests/test_schema.py` fails when the two drift.
 
 Then verify locally before pushing:
 
 ```bash
 python3 -m pytest -q
-mcp-school --config examples/config.yaml --cache-dir /tmp/mcp-school-cache \
+mcp-kb --config examples/config.yaml --cache-dir /tmp/mcp-kb-cache \
   --transport http --port 18000
 ```
 
@@ -107,7 +107,7 @@ One workflow. It does not run on a push to main.
 ```
 test    → the full 3.11 → 3.14 matrix; gates everything below
 version → rolls CHANGELOG, commits + tags main
-image   → checks out that tag, builds and pushes kubed/mcp-school:vX.Y.Z
+image   → checks out that tag, builds and pushes kubed/mcp-kb:vX.Y.Z
 package → checks out that tag, builds the sdist + wheel as a GHA artifact
 release → downloads that artifact and cuts the GitHub Release
 ```
@@ -149,7 +149,7 @@ tag it chooses.
   packs shipping a `testing/` collapse into one and the loser vanishes from the
   server entirely. Neither failure raises anything.
 - **A provider that stores a `Catalogue` serves the old generation forever** —
-  read through the getter (`lambda: school.snapshot.catalogue`), never a
+  read through the getter (`lambda: knowledge_base.snapshot.catalogue`), never a
   captured reference. A `Revalidator` has the same shape of bug and a nastier
   symptom: a refresh exports a source to a *new* directory, so one that outlived
   its snapshot goes on revalidating into a tree nothing is serving, and the edit
@@ -225,7 +225,7 @@ namespaces tool names with a prefix, and these three names are the agent's API.
   `{env: NAME}` resolver in `config.py`, which is the one other reader of the
   environment.
 - **Anything that changes what the catalogue holds** goes through
-  `School.refresh` and produces a new `Snapshot`; never mutate one.
+  `KnowledgeBase.refresh` and produces a new `Snapshot`; never mutate one.
 
 `skills.py` imports no FastMCP, which is deliberate: the catalogue is testable
 without an MCP client, and `tests/test_skills.py` exercises the scoping rules

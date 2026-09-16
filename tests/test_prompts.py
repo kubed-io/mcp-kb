@@ -7,11 +7,11 @@ from types import SimpleNamespace
 import pytest
 from fastmcp import Client
 
-from mcp_school import School, harvest
-from mcp_school.config import Include
-from mcp_school.prompts import FilePrompt, PromptProvider, load_prompt, load_prompts
-from mcp_school.scope import Scope
-from mcp_school.skills import SkillIndex
+from kubed.mcp_kb import KnowledgeBase, harvest
+from kubed.mcp_kb.config import Include
+from kubed.mcp_kb.prompts import FilePrompt, PromptProvider, load_prompt, load_prompts
+from kubed.mcp_kb.scope import Scope
+from kubed.mcp_kb.skills import SkillIndex
 from tests.conftest import load_all_prompts, load_pack_prompts, make_config
 
 pytestmark = pytest.mark.unit
@@ -105,7 +105,7 @@ def test_a_body_starting_with_a_dashed_rule_still_parses(tmp_path):
 
 
 async def test_a_client_sees_the_prompt_and_its_arguments(skills_dir, prompts_dir):
-    server = School(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
+    server = KnowledgeBase(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
     async with Client(server.mcp) as client:
         listed = {p.name: p for p in await client.list_prompts()}
     hello = listed["flatsource_hello"]
@@ -117,7 +117,7 @@ async def test_a_client_sees_the_prompt_and_its_arguments(skills_dir, prompts_di
 
 
 async def test_rendering_fills_arguments_and_defaults(skills_dir, prompts_dir):
-    server = School(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
+    server = KnowledgeBase(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
     async with Client(server.mcp) as client:
         given = await client.get_prompt(
             "flatsource_hello", {"who": "Dr K", "greeting": "Hi"}
@@ -133,14 +133,14 @@ async def test_rendering_fills_arguments_and_defaults(skills_dir, prompts_dir):
 
 
 async def test_a_missing_required_argument_is_refused(skills_dir, prompts_dir):
-    server = School(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
+    server = KnowledgeBase(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
     async with Client(server.mcp) as client:
         with pytest.raises(Exception, match="who"):
             await client.get_prompt("flatsource_hello", {})
 
 
 async def test_logql_braces_survive_rendering(skills_dir, prompts_dir):
-    server = School(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
+    server = KnowledgeBase(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
     async with Client(server.mcp) as client:
         result = await client.get_prompt("deepsource_check", {"service": "api"})
     assert text(result) == '{app="api"} |= "error"\n'
@@ -149,7 +149,7 @@ async def test_logql_braces_survive_rendering(skills_dir, prompts_dir):
 async def test_skill_packs_scopes_prompts(skills_dir, prompts_dir):
     """A prompt from an unconfigured pack is neither listed nor renderable."""
     config = make_config(skills_dir, prompts_dir, packs=["flatsource"])
-    server = School(config, skills_dir / "_cache")
+    server = KnowledgeBase(config, skills_dir / "_cache")
     async with Client(server.mcp) as client:
         assert [p.name for p in await client.list_prompts()] == ["flatsource_hello"]
         with pytest.raises(Exception, match="deepsource_check"):
@@ -160,7 +160,7 @@ async def test_skill_packs_scopes_prompts(skills_dir, prompts_dir):
 
 
 def test_visible_reads_the_snapshot_exactly_once():
-    """Two separate reads of `School.snapshot` could straddle a swap and mix
+    """Two separate reads of `KnowledgeBase.snapshot` could straddle a swap and mix
     generations (M6) -- `PromptProvider` must take one reference and derive
     both the prompts and the index from it, the way `resources.py` and
     `routes.py` already do.

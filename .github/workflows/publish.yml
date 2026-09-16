@@ -7,7 +7,7 @@ name: 🧬 Publish Version
 #   test    → the full 3.11 → 3.14 matrix. A release is the one moment the
 #             compatibility sweep has to be green, so it gates everything below.
 #   version → roll CHANGELOG [Unreleased], commit + tag on main
-#   image   → check out that tag and build+push kubed/mcp-school:<tag>
+#   image   → check out that tag and build+push kubed/mcp-kb:<tag>
 #   package → check out that tag and build the sdist + wheel → GHA artifact
 #   release → download the package artifact and cut the GitHub Release
 #
@@ -181,7 +181,7 @@ jobs:
         body: |
           [![Image Builder](${{ github.server_url }}/${{ github.repository }}/actions/workflows/image.yml/badge.svg)](${{ github.server_url }}/${{ github.repository }}/actions/workflows/image.yml)
 
-          Image: `kubed/mcp-school:${{ needs.version.outputs.tag }}`
+          Image: `kubed/mcp-kb:${{ needs.version.outputs.tag }}`
 
           ${{ needs.version.outputs.release-notes }}
 
@@ -194,7 +194,7 @@ jobs:
           echo "## Publish"
           echo ""
           echo "- **Tag**: $TAG"
-          echo "- **Image**: kubed/mcp-school:$TAG"
+          echo "- **Image**: kubed/mcp-kb:$TAG"
           echo ""
           echo "### Release Notes"
           echo ""
