@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- A `file://` source now serves material mounted from a Kubernetes ConfigMap. Every key in such a mount is a symlink through a dot-directory (`key -> ..data/key`), and hidden-ness was judged on the resolved path, so the whole mount was discarded and the source loaded zero files while reporting itself `ok`. It is judged on the requested path now; a symlink resolving outside the source root is still refused.
 - A `files:` glob ending in `**` now means "everything underneath" on every supported interpreter. `pathlib` matched directories only before Python 3.13, so `shared/**` served a pack's shared files on one runtime and nothing at all on another, with no error either way — `patterns` normalises it to `**/*` before it reaches `glob`.
 
 ### Added

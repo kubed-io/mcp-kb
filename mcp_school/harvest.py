@@ -100,7 +100,14 @@ def files(root: Path, kind: str, include: Include) -> list[Path]:
             target = hit.resolve()
             if not target.is_file() or not target.is_relative_to(base):
                 continue
-            if hidden(target.relative_to(base)):
+            # Hidden-ness is a property of the path that was asked for, not of
+            # wherever a symlink lands. A Kubernetes ConfigMap mounts every key
+            # as `key -> ..data/key -> ..<timestamp>/key`, so judging the
+            # resolved path discards the whole mount as hidden -- which is the
+            # one thing a `file://` source is for here. Containment above is
+            # the security property; the target's NAME is the filesystem's
+            # business.
+            if hidden(hit.relative_to(base)):
                 continue
             found.add(target)
     return sorted(found)

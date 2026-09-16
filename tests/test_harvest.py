@@ -133,3 +133,38 @@ def test_a_trailing_globstar_is_normalised_before_it_reaches_glob():
     assert patterns("skills", Include(skills=["skills/*/SKILL.md"])) == (
         "skills/*/SKILL.md",
     )
+
+
+@pytest.mark.unit
+def test_a_configmap_style_symlink_farm_is_harvested(tmp_path):
+    """A Kubernetes ConfigMap mount is entirely symlinks through a dot-directory.
+
+    Every key is `key -> ..data/key` and `..data -> ..<timestamp>/`, so judging
+    hidden-ness by the RESOLVED path throws the whole mount away — which made
+    `file://`, the backend that exists to serve mounted prompts, serve nothing
+    at all. Containment is the security property; the target's name is not.
+    """
+    root = tmp_path / "prompts"
+    data = root / "..2026_09_16_13_15_49.612400444"
+    data.mkdir(parents=True)
+    (data / "debug-logs.md").write_text("---\ndescription: x\n---\nbody")
+    (root / "..data").symlink_to(data)
+    (root / "debug-logs.md").symlink_to(root / "..data" / "debug-logs.md")
+
+    found = prompt_files(root, Include(skills=[], prompts=["*.md"]))
+
+    assert [p.name for p in found] == ["debug-logs.md"]
+    assert found[0].read_text().endswith("body")
+
+
+@pytest.mark.unit
+def test_a_symlink_out_of_the_root_is_still_refused(tmp_path):
+    """The other half: judging the requested path must not weaken containment."""
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "secret.md").write_text("---\ndescription: x\n---\nno")
+    root = tmp_path / "prompts"
+    root.mkdir()
+    (root / "secret.md").symlink_to(outside / "secret.md")
+
+    assert prompt_files(root, Include(skills=[], prompts=["*.md"])) == []
