@@ -19,7 +19,7 @@ running it.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 from .config import Include
@@ -88,37 +88,77 @@ def hidden(rel: Path) -> bool:
     )
 
 
+def _matches(base: Path, pattern: str) -> Iterator[Path]:
+    """Every glob hit that is safely inside ``base``, resolved.
+
+    Shared by ``files`` and ``skill_dirs`` so the guards are written once: a
+    hit that escapes the root is rejected whether it turns out to be a file or
+    a directory.
+    """
+    for hit in base.glob(pattern):
+        # A pattern like "../**" can walk out of base and straight back in
+        # -- resolve() then quietly collapses the ".." and the hit looks
+        # like a plain interior file. Reject the escape before resolving.
+        # config.py's Include validator refuses such a pattern before it
+        # ever reaches here; this is defence in depth, not the first line.
+        if ".." in hit.relative_to(base).parts:
+            continue
+        # Hidden-ness is a property of the path that was asked for, not of
+        # wherever a symlink lands. A Kubernetes ConfigMap mounts every key
+        # as `key -> ..data/key -> ..<timestamp>/key`, so judging the
+        # resolved path discards the whole mount as hidden -- which is the
+        # one thing a `file://` source is for here. Containment below is
+        # the security property; the target's NAME is the filesystem's
+        # business.
+        if hidden(hit.relative_to(base)):
+            continue
+        target = hit.resolve()
+        if target.is_relative_to(base):
+            yield target
+
+
 def files(root: Path, kind: str, include: Include) -> list[Path]:
     """Every regular file matching the kind's globs, resolved, inside root, sorted."""
     base = root.resolve()
-    found: set[Path] = set()
-    for pattern in patterns(kind, include):
-        for hit in base.glob(pattern):
-            # A pattern like "../**" can walk out of base and straight back in
-            # -- resolve() then quietly collapses the ".." and the hit looks
-            # like a plain interior file. Reject the escape before resolving.
-            # config.py's Include validator refuses such a pattern before it
-            # ever reaches here; this is defence in depth, not the first line.
-            if ".." in hit.relative_to(base).parts:
-                continue
-            target = hit.resolve()
-            if not target.is_file() or not target.is_relative_to(base):
-                continue
-            # Hidden-ness is a property of the path that was asked for, not of
-            # wherever a symlink lands. A Kubernetes ConfigMap mounts every key
-            # as `key -> ..data/key -> ..<timestamp>/key`, so judging the
-            # resolved path discards the whole mount as hidden -- which is the
-            # one thing a `file://` source is for here. Containment above is
-            # the security property; the target's NAME is the filesystem's
-            # business.
-            if hidden(hit.relative_to(base)):
-                continue
-            found.add(target)
+    found = {
+        target
+        for pattern in patterns(kind, include)
+        for target in _matches(base, pattern)
+        if target.is_file()
+    }
     return sorted(found)
 
 
 def skill_dirs(root: Path, include: Include) -> list[Path]:
-    return [f.parent for f in files(root, "skills", include) if f.name == MAIN_FILE]
+    """The skill directories a source's ``include.skills`` globs select.
+
+    A glob may name either the ``SKILL.md`` or the *directory*, because both
+    spellings mean the same thing to whoever writes the config:
+
+        skills: ["skills/*/SKILL.md"]   # the file that makes it a skill
+        skills: ["skills/*"]            # each of those folders IS a skill
+        skills: ["skills"]              # everything under here is
+
+    A matched directory contributes every skill beneath it, so pointing at a
+    leaf registers one and pointing at a composite registers the set -- which
+    is what a folder of folders already means to a reader. Without this, the
+    directory spelling matched nothing and said nothing, the same silent empty
+    a trailing ``**`` used to give.
+    """
+    base = root.resolve()
+    found: set[Path] = set()
+    for pattern in patterns("skills", include):
+        for target in _matches(base, pattern):
+            if target.is_file():
+                if target.name == MAIN_FILE:
+                    found.add(target.parent)
+            elif target.is_dir():
+                found.update(
+                    main.parent
+                    for main in target.rglob(MAIN_FILE)
+                    if main.is_file() and not hidden(main.relative_to(base))
+                )
+    return sorted(found)
 
 
 def prompt_files(root: Path, include: Include) -> list[Path]:

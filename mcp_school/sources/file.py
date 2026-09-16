@@ -25,13 +25,17 @@ def fingerprint_file(source: FileSource, cache: Path, root: Path) -> dict:
     shares. Walked with ``os.walk`` (no globs), skipping hidden directories
     except the conventional agent-tooling ones, same as ``harvest.files``.
 
-    Only regular files count, and ``os.lstat`` is what decides: a ``stat`` would
-    resolve a symlink and fold a file outside the tree -- its size, its mtime --
-    into this source's fingerprint, so an unrelated edit elsewhere on the disk
-    would trigger a rebuild here. ``os.walk`` already declines to descend a
-    symlinked directory for the same reason.
+    Only regular files count, and a symlink counts only when it lands *inside*
+    the root -- the same rule ``harvest.files`` applies, and the two must agree.
+    Following one that escapes would fold a file elsewhere on the disk, its size
+    and its mtime, into this source's fingerprint, so an unrelated edit would
+    rebuild this source; refusing them all instead makes a Kubernetes ConfigMap
+    mount, which is *entirely* symlinks, fingerprint as empty and therefore
+    never look changed however often it is updated. ``os.walk`` still declines
+    to descend a symlinked directory.
     """
     del source, cache
+    base = root.resolve()
     files = 0
     total_bytes = 0
     newest = 0
@@ -40,8 +44,14 @@ def fingerprint_file(source: FileSource, cache: Path, root: Path) -> dict:
             d for d in dirnames if not d.startswith(".") or d in CONVENTIONAL_DOTDIRS
         ]
         for name in filenames:
+            path = Path(dirpath) / name
             try:
-                st = os.lstat(Path(dirpath) / name)
+                st = os.lstat(path)
+                if stat.S_ISLNK(st.st_mode):
+                    target = path.resolve()
+                    if not target.is_relative_to(base):
+                        continue
+                    st = target.stat()
             except OSError:
                 continue
             if not stat.S_ISREG(st.st_mode):

@@ -181,3 +181,61 @@ def test_only_a_whole_trailing_component_is_a_globstar():
     assert patterns("files", Include(files=["a/logs**"])) == ("a/logs**",)
     assert patterns("files", Include(files=["**"])) == ("**/*",)
     assert patterns("files", Include(files=["a/**"])) == ("a/**/*",)
+
+
+@pytest.mark.unit
+def test_a_skills_glob_may_name_the_directory(tmp_path):
+    """`skills/*` and `skills/*/SKILL.md` select the same skills.
+
+    A folder holding a SKILL.md *is* the skill, so naming the folder is the
+    spelling most people reach for — and it used to match nothing, silently.
+    """
+    root = tmp_path / "src"
+    for name in ("alpha", "beta"):
+        d = root / "skills" / name
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(f"---\nname: {name}\n---\nbody")
+
+    by_dir = skill_dirs(root, Include(skills=["skills/*"]))
+    by_file = skill_dirs(root, Include(skills=["skills/*/SKILL.md"]))
+
+    assert by_dir == by_file
+    assert [p.name for p in by_dir] == ["alpha", "beta"]
+
+
+@pytest.mark.unit
+def test_a_composite_folder_registers_every_skill_beneath_it(tmp_path):
+    """Naming a folder of folders registers the set, not nothing.
+
+    This is how a grouped pack reads: `skills/grafana-lgtm` is not itself a
+    skill, it holds them, and pointing at it should mean all of them.
+    """
+    root = tmp_path / "src"
+    for group, name in (("lgtm", "loki"), ("lgtm", "tempo"), ("sdk", "plugins")):
+        d = root / "skills" / group / name
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(f"---\nname: {name}\n---\nbody")
+
+    assert [p.name for p in skill_dirs(root, Include(skills=["skills/lgtm"]))] == [
+        "loki",
+        "tempo",
+    ]
+    # sorted by path, so the lgtm pair precedes sdk/plugins
+    assert [p.name for p in skill_dirs(root, Include(skills=["skills"]))] == [
+        "loki",
+        "tempo",
+        "plugins",
+    ]
+
+
+@pytest.mark.unit
+def test_a_directory_glob_does_not_reach_outside_the_root(tmp_path):
+    """The directory spelling must not become a way around containment."""
+    outside = tmp_path / "elsewhere" / "secret"
+    outside.mkdir(parents=True)
+    (outside / "SKILL.md").write_text("---\nname: secret\n---\nno")
+    root = tmp_path / "src"
+    (root / "skills").mkdir(parents=True)
+    (root / "skills" / "linked").symlink_to(outside)
+
+    assert skill_dirs(root, Include(skills=["skills/*"])) == []
