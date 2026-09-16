@@ -168,3 +168,16 @@ def test_a_symlink_out_of_the_root_is_still_refused(tmp_path):
     (root / "secret.md").symlink_to(outside / "secret.md")
 
     assert prompt_files(root, Include(skills=[], prompts=["*.md"])) == []
+
+
+@pytest.mark.unit
+def test_only_a_whole_trailing_component_is_a_globstar():
+    """`logs**` is not a globstar: it matches names beginning with "logs".
+
+    Rewriting it to `logs**/*` would silently change it to mean the descendants
+    of those names instead — a different set, and empty for a plain file.
+    """
+    assert patterns("files", Include(files=["logs**"])) == ("logs**",)
+    assert patterns("files", Include(files=["a/logs**"])) == ("a/logs**",)
+    assert patterns("files", Include(files=["**"])) == ("**/*",)
+    assert patterns("files", Include(files=["a/**"])) == ("a/**/*",)

@@ -64,7 +64,7 @@ def patterns(kind: str, include: Include) -> tuple[str, ...]:
 
 
 def _globstar(pattern: str) -> str:
-    """Normalise a pattern ending in ``**`` to ``**/*``.
+    """Normalise a pattern whose last *component* is ``**`` to ``**/*``.
 
     Before Python 3.13 a trailing ``**`` matches directories *only*, so
     ``shared/**`` finds the folders under ``shared`` and none of the files in
@@ -73,8 +73,12 @@ def _globstar(pattern: str) -> str:
     served penpot's 29 shared files on one runtime and nothing at all on
     another, with no error either way. Whoever writes it means "everything
     underneath", so that is what it becomes, identically on every version.
+
+    Only a whole component counts. ``logs**`` is not a globstar at all -- it
+    matches names beginning with "logs", so rewriting it to ``logs**/*`` would
+    quietly change it to mean the descendants of those names instead.
     """
-    return f"{pattern}/*" if pattern.endswith("**") else pattern
+    return f"{pattern}/*" if pattern == "**" or pattern.endswith("/**") else pattern
 
 
 def hidden(rel: Path) -> bool:

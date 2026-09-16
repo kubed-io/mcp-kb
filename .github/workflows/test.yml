@@ -6,7 +6,9 @@ name: 🧪 Test
 #
 # The matrix is event-shaped, and that is the whole design of this file:
 #
-#   pull_request     3.14 only — the fast gate a contributor waits on
+#   pull_request     3.11 + 3.14 — the fast gate a contributor waits on, at
+#                    both ends of the range, because every version break this
+#                    project has had lives at the old end
 #   push: main       3.11 → 3.14 — the compatibility sweep, run once the change
 #                    has already landed, because that is where a break in an old
 #                    interpreter is cheap to find and nobody is blocked on it
