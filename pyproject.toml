@@ -72,6 +72,9 @@ test = [
   # imported directly, so declared here or CI fails where the pod passed.
   "wsgidav",
   "cheroot",
+  # tests/test_openapi.py validates the built document against the spec
+  # itself, not just against its own hand-written assertions.
+  "openapi-spec-validator",
 ]
 
 [build-system]
@@ -101,6 +104,7 @@ packages = [
   "kubed.mcp_kb.catalogue",
   "kubed.mcp_kb.mcp",
   "kubed.mcp_kb.sources",
+  "kubed.mcp_kb.spec",
 ]
 
 [tool.pytest.ini_options]

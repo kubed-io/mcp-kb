@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `GET /openapi.yaml`: the `/health` and `/reindex` contract as OpenAPI 3.1, generated from the code that serves them.
 - `?library=` and `?tags=` (or `X-Skill-Library` / `X-Skill-Tags`) narrow a client to one library, or to anything carrying any of the tags, across resources and prompts alike.
 - `list_prompts` and `get_prompt` tools for clients without MCP prompts, shown with `?prompts=off` and returning the rendered role-tagged messages.
 - An `include.skills` glob may name the skill's directory (`skills/*`, or a composite like `skills/grafana-lgtm`) as well as its `SKILL.md`; a directory contributes every skill beneath it.
