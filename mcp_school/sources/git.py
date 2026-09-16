@@ -162,7 +162,7 @@ def _callbacks(source: GitSource) -> pygit2.RemoteCallbacks | None:
     except ConfigError as exc:
         raise SourceError(f"{source.name}: {exc}") from exc
     return pygit2.RemoteCallbacks(
-        credentials=pygit2.UserPass(source.auth.username, password)
+        credentials=pygit2.UserPass(source.auth.user(), password)
     )
 
 

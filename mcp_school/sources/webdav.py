@@ -103,7 +103,7 @@ def client(source: WebdavSource, *, timeout: float | None = None) -> WebdavFileS
     opts = {} if timeout is None else {"timeout": timeout}
     return WebdavFileSystem(
         source.base_url,
-        client=_Client(source.base_url, auth=(source.auth.username, password), **opts),
+        client=_Client(source.base_url, auth=(source.auth.user(), password), **opts),
         skip_instance_cache=True,
     )
 
