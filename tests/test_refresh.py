@@ -9,12 +9,11 @@ import pytest
 from fastmcp import Client
 from fastmcp.server.context import Context
 
-import kubed.mcp_kb.server
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.catalogue import snapshot
+from kubed.mcp_kb.catalogue import refresh, snapshot
 from kubed.mcp_kb.config import Config
+from kubed.mcp_kb.mcp.announce import _can_remember
 from kubed.mcp_kb.mcp.scope import Scope
-from kubed.mcp_kb.server import _can_remember
 from kubed.mcp_kb.sources import SourceError
 from tests.conftest import make_config
 
@@ -448,7 +447,7 @@ async def test_the_lifespan_verifies_the_index_the_server_started_from(
 async def test_the_loop_keeps_rebuilding_a_source_whose_refresh_is_due(
     skills_dir, cache, monkeypatch
 ):
-    monkeypatch.setattr(kubed.mcp_kb.server, "TICK_SECONDS", 0.01)
+    monkeypatch.setattr(refresh, "TICK_SECONDS", 0.01)
     raw = {
         "sources": [
             {**s.model_dump(mode="json"), "refresh": "1s"}
@@ -478,7 +477,7 @@ async def test_an_unchanged_source_is_examined_once_per_interval_not_every_tick(
     record -- so a source that is checked and found unchanged never advances
     it, and is due again on the very next tick, forever.
     """
-    monkeypatch.setattr(kubed.mcp_kb.server, "TICK_SECONDS", 0.02)
+    monkeypatch.setattr(refresh, "TICK_SECONDS", 0.02)
     raw = {
         "sources": [
             {**s.model_dump(mode="json"), "refresh": "1s"}
@@ -490,14 +489,14 @@ async def test_an_unchanged_source_is_examined_once_per_interval_not_every_tick(
     # The fingerprint walk, not `materialise`, is the expensive step an
     # unchanged source repeats -- `build_source` (and `materialise` with it)
     # is only ever reached once a fingerprint actually moves.
-    real_fingerprint = kubed.mcp_kb.server.fingerprint
+    real_fingerprint = refresh.fingerprint
     calls = []
 
     def counting_fingerprint(source, cache_dir, root):
         calls.append(source.name)
         return real_fingerprint(source, cache_dir, root)
 
-    monkeypatch.setattr(kubed.mcp_kb.server, "fingerprint", counting_fingerprint)
+    monkeypatch.setattr(refresh, "fingerprint", counting_fingerprint)
 
     async with Client(knowledge_base.mcp):
         await asyncio.sleep(1.3)  # a little over one interval, at 50 ticks/s
@@ -516,7 +515,7 @@ async def test_a_persistently_failing_source_is_not_retried_every_tick(
     source that keeps failing the same way never advances `built` either --
     which must not turn into a per-tick retry storm once a source is remote.
     """
-    monkeypatch.setattr(kubed.mcp_kb.server, "TICK_SECONDS", 0.02)
+    monkeypatch.setattr(refresh, "TICK_SECONDS", 0.02)
     raw = {"sources": [s.model_dump(mode="json") for s in make_config(skills_dir).sources]}
     raw["sources"].append(
         {"name": "gone", "url": f"file://{skills_dir / 'nope'}", "refresh": "1s"}

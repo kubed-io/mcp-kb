@@ -6,7 +6,8 @@ transport. Turning a config source into a directory is ``sources``'s job;
 deciding what in it counts as a skill, a prompt or a pack-level file is
 ``catalogue/harvest.py``'s; building one immutable view of all of it is
 ``catalogue/snapshot.py``'s; the catalogue itself lives in
-``catalogue/skills.py``, ``mcp/prompts.py`` and ``catalogue/uris.py``. This
+``catalogue/skills.py``, ``mcp/prompts.py`` and ``catalogue/uris.py``; and
+deciding when a source is looked at again is ``catalogue/refresh.py``'s. This
 module walks the config in source order, connects the pieces, and owns the
 one mutable thing in the process: which ``Snapshot`` is current.
 
@@ -43,35 +44,24 @@ from fastmcp import FastMCP
 
 from . import routes
 from .catalogue.index import INDEX_VERSION, Index, SourceRecord, config_hash, now
+from .catalogue.refresh import Schedule, keep_last_good, loop, moved, same_failure
 from .catalogue.skills import PackResources, SkillIndex
 from .catalogue.snapshot import (
-    SERVABLE,
     Snapshot,
     build_snapshot,
     build_source,
     record_from_index,
-    stale,
 )
 from .catalogue.uris import Catalogue
-from .config import Config, Source
+from .config import Config
 from .mcp import prompts, resources, tools
-from .mcp.announce import (  # noqa: F401 - re-exported for tests
-    AnnounceChanges,
-    _can_remember,
-)
+from .mcp.announce import AnnounceChanges
 from .mcp.prompts import FilePrompt
 from .mcp.request import client_reads_resources, client_uses_prompts
-from .sources import SourceError, fingerprint
 
 log = logging.getLogger(__name__)
 
 INDEX_FILE = "index.json"
-
-# How often the background loop wakes to ask what is due. A source's own
-# ``refresh`` decides when it is actually rebuilt; this only bounds how late
-# that can be, and a short tick costs nothing because a tick with nothing due
-# does no work at all.
-TICK_SECONDS = 5
 
 INSTRUCTIONS = """\
 This server hosts Agent Skills: instruction packages that teach you how to \
@@ -109,12 +99,9 @@ class KnowledgeBase:
         # Every write of self._records and self.snapshot happens under this,
         # so two refreshes triggered at once still swap in a single order.
         self._lock = threading.Lock()
-        # When each source was last examined, keyed by monotonic time rather
-        # than a record's `built` -- `built` only moves when a rebuild actually
-        # replaces a record, and scheduling off it is what let an unchanged (or
-        # persistently failing) source come due on every tick forever. See
-        # `_due`.
-        self._checked: dict[str, float] = {}
+        # When each source was last examined; see catalogue/refresh.py, which
+        # decides what that means and when one comes due again.
+        self.schedule = Schedule()
 
         self._records = self._cold_start()
         self.snapshot: Snapshot = build_snapshot(config, self._records, generation=0)
@@ -244,19 +231,19 @@ class KnowledgeBase:
                 if names is not None and source.name not in names:
                     continue
                 current = records.get(source.name)
-                # Examined, whether or not it turns out stale -- this is what
-                # `_due` schedules off, so it must move on every check, not
-                # only on a rebuild.
-                self._checked[source.name] = checked_at
+                # Examined, whether or not it turns out stale -- the schedule
+                # runs off this, so it must move on every check and not only
+                # on a rebuild.
+                self.schedule.examined(source.name, checked_at)
                 if (
                     not force
                     and current is not None
-                    and not self._stale(source, current)
+                    and not moved(source, self.cache, current)
                 ):
                     continue
                 built = build_source(self.config, source, self.cache)
-                fresh = _keep_last_good(current, built)
-                if _same_failure(current, fresh):
+                fresh = keep_last_good(current, built)
+                if same_failure(current, fresh):
                     continue
                 records[source.name] = fresh
                 rebuilt.append(source.name)
@@ -277,91 +264,19 @@ class KnowledgeBase:
         """``refresh`` off the event loop, because all of it blocks."""
         return await asyncio.to_thread(self.refresh, **kwargs)
 
-    def _stale(self, source: Source, record: SourceRecord) -> bool:
-        """Whether ``source`` has moved on since ``record`` was built.
-
-        Anything not ``"ok"`` is due unconditionally, a record already marked
-        stale included. Its fingerprint is the last good one, so a source that
-        came back without changing would still match it and would go on being
-        reported stale forever; only an actual rebuild can clear that.
-        """
-        if record.status != "ok" or record.root is None:
-            return True
-        root = Path(record.root)
-        if not root.is_dir():
-            return True
-        try:
-            return fingerprint(source, self.cache, root) != record.fingerprint
-        except SourceError:
-            return True
-
     # -- keeping it current --------------------------------------------------
 
     @contextlib.asynccontextmanager
     async def _lifespan(self, server: FastMCP) -> AsyncIterator[dict]:
         """Run the refresh loop for as long as the server is up."""
         del server
-        task = asyncio.create_task(self._refresh_loop())
+        task = asyncio.create_task(loop(self))
         try:
             yield {}
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-
-    async def _refresh_loop(self) -> None:
-        """One verification pass, then a pass per tick for whatever is due.
-
-        The first pass is the other half of the cold start: boot trusted the
-        index without checking a fingerprint, and this is where that check
-        happens. After it, a source is re-examined only once its own ``refresh``
-        interval has elapsed, and a config that declares no interval anywhere
-        stops here -- nothing asked to be watched.
-        """
-        await self._pass()
-        while self.config.min_refresh_seconds is not None:
-            await asyncio.sleep(TICK_SECONDS)
-            due = self._due()
-            if due:
-                await self._pass(only=due)
-
-    async def _pass(self, **kwargs) -> None:
-        """One refresh, whose failure is logged and never ends the loop.
-
-        A background task that dies takes the whole refresh with it and the
-        server goes on serving a frozen catalogue while looking healthy. That
-        silence is the failure mode this exists to prevent, so every exception
-        is caught here and the loop goes round again.
-        """
-        try:
-            rebuilt = await self.refresh_async(**kwargs)
-        except Exception:
-            log.exception("refresh pass failed")
-        else:
-            if rebuilt:
-                log.info(
-                    "rebuilt %s; now at generation %d",
-                    ", ".join(rebuilt),
-                    self.generation,
-                )
-
-    def _due(self) -> list[str]:
-        """The sources whose own refresh interval has elapsed since they were
-        last *checked* -- not since their record was last *built*.
-
-        Those differ the moment a check finds nothing to rebuild: `built` stays
-        put, but the source has still been examined and must not come due
-        again until its own interval passes a second time. A source never
-        checked (``-inf``) is due immediately.
-        """
-        now = time.monotonic()
-        return [
-            source.name
-            for source in self.config.sources
-            if source.refresh_seconds is not None
-            and now - self._checked.get(source.name, float("-inf"))
-            >= source.refresh_seconds
-        ]
 
     def run(
         self, transport: str = "http", host: str = "0.0.0.0", port: int = 8000
@@ -371,39 +286,3 @@ class KnowledgeBase:
             self.mcp.run(transport="stdio")
         else:
             self.mcp.run(transport="http", host=host, port=port)
-
-
-def _keep_last_good(old: SourceRecord | None, new: SourceRecord) -> SourceRecord:
-    """``new``, unless it is a failure over a harvest worth going on serving.
-
-    A refresh reaching a source is a second chance to fail, and a remote that
-    is momentarily unreachable -- a git remote most of all -- must not empty a
-    catalogue that was complete a minute ago. So a failed *rebuild* over an
-    existing record becomes that record, marked stale and carrying the error,
-    and the skills keep being served from the tree already on disk.
-
-    Only the cold start, which has no earlier record, treats a failure as a
-    failed source. The tree is checked because rows naming a directory that is
-    gone would serve nothing: at that point the failure is the better answer.
-    """
-    if new.status != "failed" or old is None or old.status not in SERVABLE:
-        return new
-    if old.root is None or not Path(old.root).is_dir():
-        return new
-    return stale(old, new.error or "refresh failed")
-
-
-def _same_failure(old: SourceRecord | None, new: SourceRecord) -> bool:
-    """Whether a rebuild produced the same failure the record already carried.
-
-    A source that is still missing has not *changed*, and counting it as a
-    rebuild would advance the generation on every single pass -- announcing a
-    new catalogue to every client, forever, because one directory is absent.
-    The same holds for a source that is still stale for the same reason.
-    """
-    return (
-        old is not None
-        and new.status in ("failed", "stale")
-        and old.status == new.status
-        and old.error == new.error
-    )
