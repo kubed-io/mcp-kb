@@ -1579,6 +1579,9 @@ first publish rather than being discovered by it.
 
 ## Closing questions for Dr K
 
+*Superseded by §C1.22 — the name, here and in question 1, is `mcp-kb`. What was
+asked stands; only the word it was asked under changed.*
+
 Answered in the second pass: the name is `mcp-school` (§C1.16); `git+https://`
 stands, now argued from PEP 610 rather than taste (§C1.17); the cache gets an
 index and a per-source `snapshot`/`live` dial (§C1.18); reindexing or a restart

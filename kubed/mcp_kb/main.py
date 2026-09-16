@@ -25,7 +25,11 @@ DEFAULT_CACHE_DIR = Path("/var/cache/mcp-kb")
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mcp-kb", description="Serve Agent Skills over MCP."
+        prog="mcp-kb",
+        description=(
+            "Serve a knowledge base of skills, prompts and agent material "
+            "over MCP."
+        ),
     )
     parser.add_argument(
         "command",

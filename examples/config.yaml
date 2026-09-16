@@ -18,11 +18,10 @@ sources:
 - name: grafana
   url: github://grafana/skills
   ref: 51d33e71e191b409bbd25fc7be2684c610d18166
-  # Two levels, not one: this pack groups its skills, and naming the leaf is
-  # what keeps a `template/SKILL.md` sitting beside those groups from being
-  # served as a skill called "template".
+  # Not `skills/*` like the others: this pack groups its skills a level deeper,
+  # and naming the directory takes every skill under it whatever the depth.
   include:
-    skills: ["skills/*/*/SKILL.md"]
+    skills: ["skills"]
     prompts: []
 - name: penpot
   url: github://penpot/penpot-ai-kit

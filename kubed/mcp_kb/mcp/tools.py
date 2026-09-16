@@ -35,9 +35,10 @@ LIST_TOOL = "list_resources"
 READ_TOOL = "read_resource"
 MIRROR_TOOLS = {LIST_TOOL, READ_TOOL}
 
-# Both only read files baked into the image: nothing changes, a repeat call gives
-# the same answer, and nothing outside this package is reached. Left off, MCP's
-# defaults advertise a tool as destructive, and a client may confirm every read.
+# Both only read the catalogue this pod already harvested: nothing changes, a
+# repeat call gives the same answer, and no source is reached to serve one. Left
+# off, MCP's defaults advertise a tool as destructive, and a client may confirm
+# every read.
 READ_ONLY = {
     "read_only_hint": True,
     "destructive_hint": False,
