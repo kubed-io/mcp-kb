@@ -89,11 +89,17 @@ def hidden(rel: Path) -> bool:
 
 
 def _matches(base: Path, pattern: str) -> Iterator[Path]:
-    """Every glob hit that is safely inside ``base``, resolved.
+    """Every glob hit that is safely inside ``base``, as the path that matched.
 
     Shared by ``files`` and ``skill_dirs`` so the guards are written once: a
     hit that escapes the root is rejected whether it turns out to be a file or
     a directory.
+
+    The *resolved* path decides containment and nothing else. What is yielded,
+    and so what becomes a catalogue row, an index entry or a ``skill://`` path,
+    is the path the config asked for: a ConfigMap key ``shared/foo.md`` resolves
+    to ``..<timestamp>/shared/foo.md``, a name no client asked for and a
+    directory Kubernetes deletes on the next update.
     """
     for hit in base.glob(pattern):
         # A pattern like "../**" can walk out of base and straight back in
@@ -112,9 +118,8 @@ def _matches(base: Path, pattern: str) -> Iterator[Path]:
         # business.
         if hidden(hit.relative_to(base)):
             continue
-        target = inside(hit, base)
-        if target is not None:
-            yield target
+        if inside(hit, base) is not None:
+            yield hit
 
 
 def inside(path: Path, base: Path) -> Path | None:
@@ -132,13 +137,13 @@ def inside(path: Path, base: Path) -> Path | None:
 
 
 def files(root: Path, kind: str, include: Include) -> list[Path]:
-    """Every regular file matching the kind's globs, resolved, inside root, sorted."""
+    """Every regular file matching the kind's globs, inside root, sorted."""
     base = root.resolve()
     found = {
-        target
+        hit
         for pattern in patterns(kind, include)
-        for target in _matches(base, pattern)
-        if target.is_file()
+        for hit in _matches(base, pattern)
+        if hit.is_file()
     }
     return sorted(found)
 
@@ -162,18 +167,17 @@ def skill_dirs(root: Path, include: Include) -> list[Path]:
     base = root.resolve()
     found: set[Path] = set()
     for pattern in patterns("skills", include):
-        for target in _matches(base, pattern):
-            if target.is_file():
-                if target.name == MAIN_FILE:
-                    found.add(target.parent)
-            elif target.is_dir():
-                for main in target.rglob(MAIN_FILE):
+        for hit in _matches(base, pattern):
+            if hit.is_file():
+                if hit.name == MAIN_FILE:
+                    found.add(hit.parent)
+            elif hit.is_dir():
+                for main in hit.rglob(MAIN_FILE):
                     # The same guards a file glob gets: a SKILL.md symlinked out
                     # of the root must not register the directory holding it.
                     if hidden(main.relative_to(base)):
                         continue
-                    resolved = inside(main, base)
-                    if resolved is not None and resolved.is_file():
+                    if inside(main, base) is not None and main.is_file():
                         found.add(main.parent)
     return sorted(found)
 
@@ -185,16 +189,18 @@ def prompt_files(root: Path, include: Include) -> list[Path]:
 def pack_files(root: Path, include: Include, skill_dirs: Sequence[Path]) -> list[str]:
     """Pack-level files as root-relative posix paths, never one inside a skill."""
     base = root.resolve()
-    inside = tuple(d.resolve() for d in skill_dirs)
+    skills = tuple(skill_dirs)
     return [
         f.relative_to(base).as_posix()
         for f in files(root, "files", include)
-        if not any(f == d or d in f.parents for d in inside)
+        if not any(f == d or d in f.parents for d in skills)
     ]
 
 
 def group_of(skill_dir: Path, root: Path) -> str | None:
     """The directory containing a skill, unless that is one of the skill roots."""
-    parent = skill_dir.resolve().parent
+    # Not resolved: a skill reached through a symlink is grouped by where the
+    # config found it, not by the timestamp directory it happens to live in.
+    parent = skill_dir.parent
     rel = parent.relative_to(root.resolve()).as_posix()
     return None if rel in SKILL_ROOTS or rel == "." else parent.name
