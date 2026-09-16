@@ -42,8 +42,9 @@ rules:
 
   # The checkout in publish.yml MUST keep its credentials: duplocloud/version-bump
   # commits the rolled changelog and pushes the tag through the remote checkout
-  # configured — the only thing the job exists for. It uploads no artifact, so
-  # the credential has nowhere to leak to.
+  # configured — the only thing the job exists for. The one artifact that job
+  # uploads is `notes/release-notes.md`, written outside the checkout, so the
+  # credential in `.git/config` is not in anything that leaves the runner.
   artipacked:
     ignore:
     - publish.yml
@@ -54,9 +55,9 @@ rules:
     - wiki.yml
 
   # `gh release create` in a script step would work, but softprops/action-gh-release
-  # is the house standard across every kubed-io repo's publish.yml, and a release
-  # body this long is far more legible as a YAML block than as a heredoc inside a
-  # shell script. Consistency across the sibling repos is worth more here than
+  # is the house standard across every kubed-io repo's publish.yml, and it takes
+  # the composed body as `body_path:` plus the two distribution files in one
+  # declaration. Consistency across the sibling repos is worth more here than
   # dropping one dependency.
   superfluous-actions:
     ignore:

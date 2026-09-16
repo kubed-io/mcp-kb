@@ -1130,6 +1130,9 @@ def test_a_file_source_is_served_in_place(tree):
 
 ### §C1.16 — Decision (locked by Dr K, 2026-09-15): the name is `mcp-school`
 
+*Superseded by §C1.22 — the name is `mcp-kb`. The reasoning below stands; only
+the word it landed on changed.*
+
 Dr K wants `mcp` in the name and something that reads as a knowledge dump, and
 proposed two: **`mcp-school`** first, then **`mcp-resource-gateway`**. Both are
 free on PyPI, npm and `kubed-io` as of 2026-09-15, along with `mcp-library`,
@@ -1507,6 +1510,72 @@ one into the other flattens exactly what makes it a prompt. So the mirror is
 FastMCP's own `PromptsAsTools`, which keeps that shape, and prompts stay a separate
 kind. Worth revisiting only if a client appears that reads resources but will never
 call a prompt tool.
+
+---
+
+### §C1.22 — Decision (locked by Dr K, 2026-09-16): the name is `mcp-kb`
+
+`school` was the answer to §C1.16's question — a word that says "knowledge",
+collides with no product category, and earns the metaphor the chapter runs on.
+It is still all three. What it is not is *literal*: a reader meeting
+`mcp-school` for the first time has to be told what it holds, where **kb** tells
+them. Knowledge base is the category this actually is, nobody has to be taught
+the abbreviation, and it is two letters at every call site where the metaphor
+was costing seven.
+
+The general rule of §C1.16 survives intact, and is worth restating because it is
+the one that rejected `mcp-resource-gateway`: **a name that lands inside an
+existing product category inherits that category's promises.** "Knowledge base"
+promises a collection you read. That is exactly the product.
+
+| What | From | To |
+|---|---|---|
+| repo | `kubed-io/mcp-school` | `kubed-io/mcp-kb` |
+| distribution | `mcp-school` | `kubed-mcp-kb` |
+| package | `mcp_school` | `kubed.mcp_kb` |
+| console script | `mcp-school` | `mcp-kb` |
+| image | `kubed/mcp-school` | `kubed/mcp-kb` |
+| paths | `/etc/mcp-school`, `/var/cache/mcp-school` | `/etc/mcp-kb`, `/var/cache/mcp-kb` |
+| the catalogue class | `School` | `KnowledgeBase` |
+
+The `skill://` scheme, the `X-Skill-*` headers and the `CONFIG` / `CACHE_DIR`
+environment variables are deliberately unchanged: they are the contract a
+deployed client holds, and none of them says the project's name.
+
+**The distribution regains the `kubed-` prefix, and the package moves into the
+`kubed` namespace.** `kubed.mcp_kb` sits beside `kubed.selenium_flow` in a
+PEP 420 namespace package — which means **there is no `kubed/__init__.py` in
+either repository**, and a test in each asserts it. Add one and the two stop
+installing side by side, silently, in whichever environment resolves second.
+
+The one-sentence statement of §C1.1 that §C1.16 wanted for the repository
+description travels with the rename, minus the word it was wrong about: *an MCP
+knowledge base — skills, prompts and agent material collected from git, WebDAV
+and folders into one catalogue, served as resources, or as tools for clients
+without them.*
+
+**The package is organised by responsibility, on the sibling's shape.**
+`catalogue/` is what is served and how it is found, addressed and persisted;
+`sources/` is where bytes come from, with revalidation among them because
+`cache: live` is a source concern and not a serving one; `mcp/` is what an agent
+sees, and the per-request scope that shapes it; `spec/` is the OpenAPI document
+for the HTTP surface. `server.py` keeps `KnowledgeBase` and stays the
+composition root. The seams were already in the module boundaries — this only
+made the directories agree with them.
+
+**The wiki is the manual.** `README.md` advertises and links; `AGENTS.md` holds
+the rules and the traps; the wiki at `kubed-io/mcp-kb/wiki` — a submodule at
+`wiki/`, three of its pages generated from the live config models, a live
+server's tool list and the OpenAPI document — is where depth goes. A generated
+page cannot describe a server that no longer exists, and `tests/test_wiki.py`
+fails when a committed page and the generator disagree.
+
+**The first release computes from a `v0.0.1` tag on the first commit.** Nothing
+has ever shipped under either name, so the CHANGELOG's first section is `Added`
+and nothing else: there is no version for a `Changed` or a `Fixed` to be
+relative to. `duplocloud/version-bump` needs a base tag to bump from and 404s on
+an untagged repository *after* a green dry run, so the tag goes on before the
+first publish rather than being discovered by it.
 
 ## Closing questions for Dr K
 
