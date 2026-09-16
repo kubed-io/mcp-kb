@@ -213,3 +213,30 @@ async def test_a_configmap_mount_is_served_under_the_names_it_was_mounted_as(tmp
         skill = (await client.read_resource("skill://pack/alpha"))[0].text
     assert shared == "shared body"
     assert "skill body" in skill
+
+
+@pytest.mark.unit
+async def test_a_hidden_file_in_a_skill_is_not_readable_by_guessing(tmp_path):
+    """The manifest leaves hidden files out, so a read must too.
+
+    A `.env` beside a SKILL.md is exactly the file a manifest hides and a caller
+    should never get by typing its name — through the resource or the mirror.
+    """
+    skill = tmp_path / "src" / "skills" / "x"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: x\ndescription: x\n---\nbody\n")
+    (skill / ".env").write_text("SECRET=hunter2\n")
+    (skill / "notes.md").write_text("visible\n")
+    config = Config.model_validate(
+        {"sources": [{"name": "lib", "url": f"file://{tmp_path / 'src'}"}]}
+    )
+    server = KnowledgeBase(config, tmp_path / "cache")
+
+    async with Client(server.mcp) as client:
+        visible = (await client.read_resource("skill://lib/x/notes.md"))[0].text
+        with pytest.raises(Exception, match=r"[Uu]nknown|not found"):
+            await client.read_resource("skill://lib/x/.env")
+        mirrored = await call(client, "read_resource", uri="skill://lib/x/.env")
+
+    assert visible == "visible\n"
+    assert "hunter2" not in mirrored

@@ -164,6 +164,8 @@ jobs:
           fi
         } >> "$GITHUB_STEP_SUMMARY"
 
+    # The wiki's default branch is master, not main — GitHub creates it that way
+    # and does not follow the repository's own default.
     - name: Push
       if: env.PUSH == 'true' && steps.diff.outputs.changed == 'true'
       working-directory: wiki
@@ -173,17 +175,24 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git commit -m "Regenerate from ${SHA:0:8}"
-        # The wiki's default branch is master, not main — GitHub creates it that
-        # way and does not follow the repository's own default.
         git push origin HEAD:master
 
     # The submodule now points at a commit that exists only on the wiki remote.
     # Left unrecorded, a fresh clone of this repo checks out the previous wiki
-    # revision, which is a confusing thing to debug months later.
+    # revision and tests/test_wiki.py fails against the regenerated pages. So a
+    # pointer that cannot be recorded fails this job rather than passing with a
+    # warning; publish.yml's release does not depend on it, so the image and the
+    # package still ship.
     #
     # Pushed through an explicit remote rather than the persisted one, because
     # this is the one push that needs the App's identity to get past main's
     # protection.
+    #
+    # The pointer lands on what the branch is NOW, not on what was checked out:
+    # github.sha is one behind once publish.yml's version job has pushed the
+    # rolled CHANGELOG, and a release tag is a detached checkout, so a commit on
+    # top of either could never fast-forward. Only wiki/'s own HEAD has to
+    # survive the switch, and it does — the outer commit is rebuilt on the tip.
     - name: Record the Submodule Pointer
       if: env.PUSH == 'true' && steps.diff.outputs.changed == 'true'
       env:
@@ -195,18 +204,8 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         remote="https://x-access-token:${TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git"
-        # Land the pointer on what the branch is NOW, not on what was checked
-        # out: github.sha is one behind once publish.yml's version job has pushed
-        # the rolled CHANGELOG, and a release tag is a detached checkout, so a
-        # commit on top of either could never fast-forward. Only the wiki/ submodule's own HEAD has to survive the
-        # switch, and it does — the outer commit is rebuilt from the new tip.
-        {
-          git fetch origin "$GITHUB_REF_NAME" &&
-          git checkout -B "$GITHUB_REF_NAME" FETCH_HEAD &&
-          git add wiki &&
-          git commit -m "chore: bump wiki submodule [skip ci]" &&
-          git push "$remote" "HEAD:${GITHUB_REF_NAME}"
-        } || {
-          echo "::warning::Wiki published, but the submodule pointer could not be \
-          recorded — bump wiki/ by hand."
-        }
+        git fetch origin "$GITHUB_REF_NAME"
+        git checkout -B "$GITHUB_REF_NAME" FETCH_HEAD
+        git add wiki
+        git commit -m "chore: bump wiki submodule [skip ci]"
+        git push "$remote" "HEAD:${GITHUB_REF_NAME}"

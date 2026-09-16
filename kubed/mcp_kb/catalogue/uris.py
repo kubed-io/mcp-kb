@@ -383,6 +383,10 @@ class Catalogue:
                 if self._revalidate is not None:
                     self._revalidate(path)
             return _manifest_json(skill)
+        # The manifest leaves hidden files out, so a read does too: a `.env`
+        # beside a SKILL.md is not served to whoever guesses its name.
+        if hidden(Path(file)):
+            return None
         # Resolve before comparing, which is what blocks ../ and a symlink
         # pointing out of the skill directory.
         target = (skill.path / file).resolve()

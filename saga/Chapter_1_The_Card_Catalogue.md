@@ -1796,10 +1796,12 @@ nothing else is.
    pack-level files index move to file addresses; `resources/list` lists exactly
    those; `?skills=full` lists every `SKILL.md` at its new URI. Tests pin the
    listing rows and the index bodies.
-5. **URI conflicts fail the second source.** When two sources in one library
-   produce the same skill URI or the same pack-level file URI, the later source's
-   record is `failed` with the conflicting URI named, and the first keeps
-   serving. Test with two `file://` sources.
+5. **URI and prompt-name conflicts fail the second source.** When two sources in
+   one library produce the same skill URI, the same pack-level file URI or the
+   same prompt name (`<library>_<file stem>` — two `prompts/same.md` files today
+   both serve as `lib_same`, and `get_prompt` cannot tell them apart), the later
+   source's record is `failed` with the conflict named, and the first keeps
+   serving. Tests with two `file://` sources, one per kind of conflict.
 6. **Documents and the generated wiki.** `Skills.md` rewritten on the new grammar
    with the directory, index and manifest rules; `Scoping.md`, `Installing.md`,
    `Sources.md`, the README's address-space section, `AGENTS.md`'s "surface"
@@ -1813,6 +1815,20 @@ nothing else is.
    its config gaining the same `libraries:` shape, the old Deployment and Service
    deleted by hand (a different applyset prunes nothing), and `.mcp.json` pointed
    at the new Service.
+
+**Also in this pull request — review findings on #18 deferred to where the code
+is rewritten anyway:**
+
+- The listing emits one `skill://<group>` row per library when two libraries
+  share a folder name. Removed by task 4, since folder indexes move under their
+  library; task 4's listing test covers two libraries with the same folder.
+- `read_resource`'s description documents only skill-owned files, not the
+  pack-level forms `list_resources` returns. Rewritten with task 2's grammar.
+- `list_resources` is annotated `list[dict]`; it returns rows of four strings, so
+  `list[dict[str, str]]` lets a client read the row shape from `tools/list`.
+- `tests/test_wiki.py`'s shadowing guard compares nested stems only against
+  top-level pages, so two nested notes with the same basename pass while GitHub
+  addresses both at one URL. The guard counts duplicate stems across every file.
 
 **Proxy passthrough (decision 7) is recorded, not built** — it belongs to the
 `mcp+http` epic, which has not started. This pull request only ensures nothing in
