@@ -95,13 +95,11 @@ def client(source: WebdavSource, *, timeout: float | None = None) -> WebdavFileS
     is not, and ``live.py`` passes one; see ``REVALIDATE_TIMEOUT``.
     """
     try:
-        user = source.auth.user()
-        password = source.auth.password.resolve().get_secret_value()
+        user, password = source.auth.pair()
     except ConfigError as exc:
         # Config, not authentication: the variable was never set, so there is
-        # nothing to ask the server and no 401 to report. Both halves may be
-        # {env:} references, so both are resolved inside this guard -- outside
-        # it, one unset variable aborts the pass instead of failing its source.
+        # nothing to ask the server and no 401 to report. Outside this guard one
+        # unset variable aborts the pass instead of failing its own source.
         raise SourceError(f"{source.name}: {exc}") from exc
     opts = {} if timeout is None else {"timeout": timeout}
     return WebdavFileSystem(
