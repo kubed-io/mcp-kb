@@ -27,6 +27,9 @@ on:
     - wiki
     - scripts/generate_wiki.py
     - .github/workflows/wiki.yml
+    # Endpoints.md prints the OpenAPI document's title, version and
+    # description, and spec/builder.py reads all three off this file's metadata.
+    - pyproject.toml
   push:
     branches: [main]
     paths:
@@ -34,6 +37,9 @@ on:
     - wiki
     - scripts/generate_wiki.py
     - .github/workflows/wiki.yml
+    # Endpoints.md prints the OpenAPI document's title, version and
+    # description, and spec/builder.py reads all three off this file's metadata.
+    - pyproject.toml
   workflow_dispatch:
     inputs:
       push:
@@ -177,10 +183,20 @@ jobs:
         fi
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git add wiki
-        git commit -m "chore: bump wiki submodule [skip ci]"
         remote="https://x-access-token:${TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git"
-        git push "$remote" "HEAD:${GITHUB_REF_NAME}" || {
+        # Land the pointer on what the branch is NOW, not on what was checked
+        # out. The checkout is github.sha, and on a release that is already one
+        # behind: publish.yml calls this after its version job pushed the rolled
+        # CHANGELOG to main, so a commit on top of the checkout could never
+        # fast-forward. Only the wiki/ submodule's own HEAD has to survive the
+        # switch, and it does — the outer commit is rebuilt from the new tip.
+        {
+          git fetch origin "$GITHUB_REF_NAME" &&
+          git checkout -B "$GITHUB_REF_NAME" FETCH_HEAD &&
+          git add wiki &&
+          git commit -m "chore: bump wiki submodule [skip ci]" &&
+          git push "$remote" "HEAD:${GITHUB_REF_NAME}"
+        } || {
           echo "::warning::Wiki published, but the submodule pointer could not be \
           recorded — bump wiki/ by hand."
         }
