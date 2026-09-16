@@ -132,6 +132,18 @@ async def test_the_pin_hides_the_other_pack_from_the_listing(server_url):
 
 
 @pytest.mark.integration
+async def test_a_header_beats_the_same_setting_in_the_url(server_url):
+    """The header is set in a credential, by an admin; the parameter rides on a
+    URL somebody may paste. So a pasted ``?library=`` cannot reach past the pin
+    an admin already set, and the two are read in that order everywhere.
+    """
+    uris = await resource_uris(
+        f"{server_url}?library=deepsource", headers={"X-Skill-Pack": "flatsource"}
+    )
+    assert uris == ["skill://flatsource"]
+
+
+@pytest.mark.integration
 async def test_the_pin_blocks_reading_another_packs_resource(server_url):
     """The hole this closes: filtering a listing leaves guessable URIs readable,
     and every URI here is guessable by design."""
