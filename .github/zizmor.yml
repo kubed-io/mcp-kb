@@ -47,6 +47,11 @@ rules:
   artipacked:
     ignore:
     - publish.yml
+    # wiki.yml pushes the regenerated pages from inside the `wiki/` submodule,
+    # which authenticates with what checkout left in that submodule's remote —
+    # so the credential has to survive the checkout. The job uploads no
+    # artifact, so it has nowhere to leak to.
+    - wiki.yml
 
   # `gh release create` in a script step would work, but softprops/action-gh-release
   # is the house standard across every kubed-io repo's publish.yml, and a release
