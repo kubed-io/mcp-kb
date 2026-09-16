@@ -7,7 +7,7 @@ import stat
 from pathlib import Path
 
 from ..config import FileSource
-from ..harvest import CONVENTIONAL_DOTDIRS
+from ..harvest import CONVENTIONAL_DOTDIRS, inside
 from .errors import SourceError
 
 
@@ -48,8 +48,8 @@ def fingerprint_file(source: FileSource, cache: Path, root: Path) -> dict:
             try:
                 st = os.lstat(path)
                 if stat.S_ISLNK(st.st_mode):
-                    target = path.resolve()
-                    if not target.is_relative_to(base):
+                    target = inside(path, base)
+                    if target is None:
                         continue
                     st = target.stat()
             except OSError:

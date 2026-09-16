@@ -239,3 +239,41 @@ def test_a_directory_glob_does_not_reach_outside_the_root(tmp_path):
     (root / "skills" / "linked").symlink_to(outside)
 
     assert skill_dirs(root, Include(skills=["skills/*"])) == []
+
+
+@pytest.mark.unit
+def test_a_symlink_loop_fails_that_link_not_the_harvest(tmp_path, monkeypatch):
+    """Before 3.13 `resolve()` raises RuntimeError on a loop, not OSError.
+
+    Forced here so the test means the same thing on every interpreter.
+    """
+    root = tmp_path / "src"
+    good = root / "skills" / "good"
+    good.mkdir(parents=True)
+    (good / "SKILL.md").write_text("---\nname: good\n---\nbody")
+    (root / "skills" / "loop").symlink_to(root / "skills" / "loop")
+
+    real = Path.resolve
+
+    def resolve(self, strict=False):
+        if self.name == "loop":
+            raise RuntimeError(f"Symlink loop from {self}")
+        return real(self, strict)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+
+    assert [p.name for p in skill_dirs(root, Include(skills=["skills/*"]))] == ["good"]
+
+
+@pytest.mark.unit
+def test_a_skill_md_symlinked_out_of_the_root_does_not_register(tmp_path):
+    """A directory glob must contain its SKILL.md hits the way a file glob does."""
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("---\nname: leak\n---\nno")
+    root = tmp_path / "src"
+    leak = root / "skills" / "leak"
+    leak.mkdir(parents=True)
+    (leak / "SKILL.md").symlink_to(outside / "SKILL.md")
+
+    assert skill_dirs(root, Include(skills=["skills"])) == []

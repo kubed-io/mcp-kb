@@ -112,9 +112,23 @@ def _matches(base: Path, pattern: str) -> Iterator[Path]:
         # business.
         if hidden(hit.relative_to(base)):
             continue
-        target = hit.resolve()
-        if target.is_relative_to(base):
+        target = inside(hit, base)
+        if target is not None:
             yield target
+
+
+def inside(path: Path, base: Path) -> Path | None:
+    """``path`` resolved, or None when it escapes ``base`` or cannot resolve.
+
+    Before Python 3.13 a symlink loop makes ``resolve()`` raise ``RuntimeError``
+    rather than ``OSError``; one malformed link must fail that link, not the
+    whole harvest.
+    """
+    try:
+        target = path.resolve()
+    except (OSError, RuntimeError):
+        return None
+    return target if target.is_relative_to(base) else None
 
 
 def files(root: Path, kind: str, include: Include) -> list[Path]:
@@ -153,11 +167,14 @@ def skill_dirs(root: Path, include: Include) -> list[Path]:
                 if target.name == MAIN_FILE:
                     found.add(target.parent)
             elif target.is_dir():
-                found.update(
-                    main.parent
-                    for main in target.rglob(MAIN_FILE)
-                    if main.is_file() and not hidden(main.relative_to(base))
-                )
+                for main in target.rglob(MAIN_FILE):
+                    # The same guards a file glob gets: a SKILL.md symlinked out
+                    # of the root must not register the directory holding it.
+                    if hidden(main.relative_to(base)):
+                        continue
+                    resolved = inside(main, base)
+                    if resolved is not None and resolved.is_file():
+                        found.add(main.parent)
     return sorted(found)
 
 
