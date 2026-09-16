@@ -31,18 +31,30 @@ def fingerprint_file(source: FileSource, cache: Path, root: Path) -> dict:
     and its mtime, into this source's fingerprint, so an unrelated edit would
     rebuild this source; refusing them all instead makes a Kubernetes ConfigMap
     mount, which is *entirely* symlinks, fingerprint as empty and therefore
-    never look changed however often it is updated. ``os.walk`` still declines
-    to descend a symlinked directory.
+    never look changed however often it is updated. Directory links follow the
+    same rule, since a volume ``items[].path`` such as ``shared/foo.md`` mounts
+    as ``shared -> ..data/shared``; each resolved directory is walked once.
     """
     del source, cache
     base = root.resolve()
     files = 0
     total_bytes = 0
     newest = 0
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [
-            d for d in dirnames if not d.startswith(".") or d in CONVENTIONAL_DOTDIRS
-        ]
+    # Resolved directories already walked. Following in-root directory links is
+    # what reaches a mount like `shared -> ..data/shared`; this set is what stops
+    # a link back up the tree from walking forever.
+    seen = {base}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        kept = []
+        for d in dirnames:
+            if d.startswith(".") and d not in CONVENTIONAL_DOTDIRS:
+                continue
+            target = inside(Path(dirpath) / d, base)
+            if target is None or target in seen:
+                continue
+            seen.add(target)
+            kept.append(d)
+        dirnames[:] = kept
         for name in filenames:
             path = Path(dirpath) / name
             try:
