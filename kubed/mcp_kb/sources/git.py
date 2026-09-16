@@ -267,12 +267,7 @@ def _tip(source: GitSource, cache: Path) -> str:
 
 def _exports(source: GitSource, cache: Path) -> Exports:
     """This source's export space: one directory per commit, stamped with it."""
-    return Exports(
-        name=source.name,
-        home=cache / "src" / source.name,
-        stamp=COMMIT_FILE,
-        version=SHA,
-    )
+    return Exports.under(cache, source.name, stamp=COMMIT_FILE, version=SHA)
 
 
 def _export(source: GitSource, cache: Path, bare: str, commit: str) -> Path:

@@ -216,12 +216,7 @@ def fetch_file(
 
 def _exports(source: WebdavSource, cache: Path) -> Exports:
     """This source's export space: one directory per ETag set, stamped with it."""
-    return Exports(
-        name=source.name,
-        home=cache / "src" / source.name,
-        stamp=VERSION_FILE,
-        version=VERSION,
-    )
+    return Exports.under(cache, source.name, stamp=VERSION_FILE, version=VERSION)
 
 
 def _etags(source: WebdavSource, fs: WebdavFileSystem) -> dict[str, str]:

@@ -88,6 +88,17 @@ class Exports:
     stamp: str
     version: re.Pattern[str]
 
+    @classmethod
+    def under(
+        cls, cache: Path, name: str, *, stamp: str, version: re.Pattern[str]
+    ) -> Exports:
+        """``name``'s export space under ``cache``: one home, a directory per version.
+
+        The layout is the same whichever backend fills it, so it is spelled
+        here rather than once per backend that copies a tree into the cache.
+        """
+        return cls(name=name, home=cache / "src" / name, stamp=stamp, version=version)
+
     def ensure(self, version: str, build: Callable[[Path], None]) -> Path:
         """``version``'s tree under ``home``, built by ``build`` if there is none.
 
