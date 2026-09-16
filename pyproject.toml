@@ -75,6 +75,10 @@ test = [
   # tests/test_openapi.py validates the built document against the spec
   # itself, not just against its own hand-written assertions.
   "openapi-spec-validator",
+  # …and validates a real /health body against the document's own schemas, so
+  # a type cannot drift. It arrives with openapi-spec-validator either way;
+  # named here because a test imports it directly.
+  "jsonschema",
 ]
 
 [build-system]

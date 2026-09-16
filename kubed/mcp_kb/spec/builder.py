@@ -73,7 +73,15 @@ SOURCE_STATUS = {
             "failed refresh does not touch what is on disk.",
         ),
         "fingerprint": _field(
-            "string", "A cheap summary of the tree this harvest was built from."
+            "object",
+            "A cheap summary of the tree this harvest was built from, which a "
+            "refresh re-takes and compares to decide whether to rebuild. Its "
+            "keys are the backend's own and are not a contract: a `file://` "
+            "source counts `files` and `bytes` and takes the `newest` mtime, "
+            "git reports the exported `commit` with the `ref` it was resolved "
+            "from and the `remote` tip that ref names now, WebDAV the "
+            "`exported` and `remote` ETag digests with a file count for each.",
+            additionalProperties=True,
         ),
         "live": _field(
             "boolean",
