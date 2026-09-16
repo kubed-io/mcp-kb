@@ -51,8 +51,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..mcp.scope import EVERYTHING, Scope
 from .harvest import hidden
-from .scope import EVERYTHING, Scope
 from .skills import PackResources, Skill, SkillIndex
 
 SCHEME = "skill://"

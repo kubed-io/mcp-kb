@@ -7,8 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from kubed.mcp_kb.config import load_config
-from kubed.mcp_kb.index import (
+from kubed.mcp_kb.catalogue.index import (
     INDEX_VERSION,
     Index,
     PromptRow,
@@ -17,8 +16,9 @@ from kubed.mcp_kb.index import (
     config_hash,
     now,
 )
-from kubed.mcp_kb.prompts import FilePrompt
-from kubed.mcp_kb.skills import Skill
+from kubed.mcp_kb.catalogue.skills import Skill
+from kubed.mcp_kb.config import load_config
+from kubed.mcp_kb.mcp.prompts import FilePrompt
 
 
 def _skill(**overrides):
@@ -128,7 +128,7 @@ def test_the_write_is_atomic(tmp_path, monkeypatch):
         calls.append((src, dst))
         return real_replace(src, dst)
 
-    monkeypatch.setattr("kubed.mcp_kb.index.os.replace", recording_replace)
+    monkeypatch.setattr("kubed.mcp_kb.catalogue.index.os.replace", recording_replace)
 
     _index().write(path)
 
@@ -154,7 +154,7 @@ def test_two_writers_in_the_same_directory_do_not_share_a_temp_name(
         names.append(name)
         return fd, name
 
-    monkeypatch.setattr("kubed.mcp_kb.index.tempfile.mkstemp", recording_mkstemp)
+    monkeypatch.setattr("kubed.mcp_kb.catalogue.index.tempfile.mkstemp", recording_mkstemp)
 
     _index().write(path)
     _index().write(path)

@@ -29,8 +29,8 @@ from collections.abc import Callable
 
 from fastmcp import FastMCP
 
+from ..catalogue.uris import Catalogue
 from .request import requested_scope
-from .uris import Catalogue
 
 LIST_TOOL = "list_resources"
 READ_TOOL = "read_resource"

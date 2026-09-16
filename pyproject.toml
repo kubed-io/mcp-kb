@@ -96,7 +96,12 @@ mcp-kb = "kubed.mcp_kb.main:main"
 # control, and a build from an exported tarball has no such checkout to sweep.
 # tests/test_packaging.py holds this list to the tree and then proves the built
 # wheel imports with no .git present.
-packages = ["kubed.mcp_kb", "kubed.mcp_kb.sources"]
+packages = [
+  "kubed.mcp_kb",
+  "kubed.mcp_kb.catalogue",
+  "kubed.mcp_kb.mcp",
+  "kubed.mcp_kb.sources",
+]
 
 [tool.pytest.ini_options]
 minversion = "6.0"

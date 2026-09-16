@@ -4,9 +4,10 @@ Assembles a FastMCP instance from the catalogue a config file describes -- the
 address space, the resources, the mirror tools, the routes -- and runs it on a
 transport. Turning a config source into a directory is ``sources``'s job;
 deciding what in it counts as a skill, a prompt or a pack-level file is
-``harvest.py``'s; building one immutable view of all of it is ``snapshot.py``'s;
-the catalogue itself lives in ``skills.py``, ``prompts.py`` and ``uris.py``.
-This module walks the config in source order, connects the pieces, and owns the
+``catalogue/harvest.py``'s; building one immutable view of all of it is
+``catalogue/snapshot.py``'s; the catalogue itself lives in
+``catalogue/skills.py``, ``mcp/prompts.py`` and ``catalogue/uris.py``. This
+module walks the config in source order, connects the pieces, and owns the
 one mutable thing in the process: which ``Snapshot`` is current.
 
 Three rules follow from that, and every change here has to keep them:
@@ -38,17 +39,12 @@ import time
 from collections.abc import AsyncIterator, Iterable
 from pathlib import Path
 
-import mcp_types
 from fastmcp import FastMCP
-from fastmcp.server.middleware import Middleware
 
-from . import prompts, resources, routes, tools
-from .config import Config, Source
-from .index import INDEX_VERSION, Index, SourceRecord, config_hash, now
-from .prompts import FilePrompt
-from .request import client_reads_resources, client_uses_prompts, http_request
-from .skills import PackResources, SkillIndex
-from .snapshot import (
+from . import routes
+from .catalogue.index import INDEX_VERSION, Index, SourceRecord, config_hash, now
+from .catalogue.skills import PackResources, SkillIndex
+from .catalogue.snapshot import (
     SERVABLE,
     Snapshot,
     build_snapshot,
@@ -56,8 +52,16 @@ from .snapshot import (
     record_from_index,
     stale,
 )
+from .catalogue.uris import Catalogue
+from .config import Config, Source
+from .mcp import prompts, resources, tools
+from .mcp.announce import (  # noqa: F401 - re-exported for tests
+    AnnounceChanges,
+    _can_remember,
+)
+from .mcp.prompts import FilePrompt
+from .mcp.request import client_reads_resources, client_uses_prompts
 from .sources import SourceError, fingerprint
-from .uris import Catalogue
 
 log = logging.getLogger(__name__)
 
@@ -68,12 +72,6 @@ INDEX_FILE = "index.json"
 # that can be, and a short tick costs nothing because a tick with nothing due
 # does no work at all.
 TICK_SECONDS = 5
-
-# Session state key for the generation a client has already been told about.
-GENERATION_KEY = "mcp-kb.generation"
-
-# The header that says an HTTP connection has a session at all.
-SESSION_HEADER = "mcp-session-id"
 
 INSTRUCTIONS = """\
 This server hosts Agent Skills: instruction packages that teach you how to \
@@ -89,61 +87,6 @@ A skill may ship supporting files. Append `/_manifest` to its URI to list them, 
 then read one by its path under the same URI. Do not read files you have no use \
 for -- a skill citing one is not a reason to fetch it.
 """
-
-
-class AnnounceChanges(Middleware):
-    """Tell each session, once, that the catalogue it listed has been rebuilt.
-
-    MCP has no "the server changed" broadcast a stateless HTTP deployment can
-    rely on, so this rides the next request the client makes anyway: compare the
-    generation it was last told about against the live one, and if they differ,
-    send the two list-changed notifications before answering.
-
-    Once per move, per session, which is what the stored state buys. Sending on
-    every request would have every client re-listing constantly; sending only on
-    a listing would leave a client that never lists again holding stale URIs.
-
-    A session's first request stores the current generation without announcing
-    anything -- it has nothing stale to discard.
-
-    Which leaves the connections that cannot remember. MCP 2026-07-28 dropped
-    sessions, and FastMCP 4.0.3 serves such a connection by minting a fresh
-    session id per request: ``set_state`` there writes an entry nobody will
-    ever read, one per request, into a store with a day-long TTL. So an HTTP
-    request arriving without an ``mcp-session-id`` is left alone entirely --
-    correct as well as cheap, since a client with no session across requests
-    has no listing to invalidate. stdio and in-memory connections have no such
-    header to check at all, so ``_can_remember`` defaults to True for them and
-    they fall through to the state calls too -- which, under FastMCP 4.0.3,
-    turn out to be just as wasted, since those transports mint a fresh state
-    key per request as well. Wasted, not wrong: the calls are still guarded,
-    so this must never turn a working request into a failed one.
-    """
-
-    def __init__(self, knowledge_base: KnowledgeBase):
-        self._knowledge_base = knowledge_base
-
-    async def on_request(self, context, call_next):
-        ctx = context.fastmcp_context
-        if ctx is not None and _can_remember():
-            await self._announce(ctx)
-        return await call_next(context)
-
-    async def _announce(self, ctx) -> None:
-        generation = self._knowledge_base.generation
-        try:
-            told = await ctx.get_state(GENERATION_KEY)
-        except Exception:  # noqa: BLE001 - no state here must not fail the request
-            return
-        if told == generation:
-            return
-        if told is not None:
-            await ctx.send_notification(mcp_types.ResourceListChangedNotification())
-            await ctx.send_notification(mcp_types.PromptListChangedNotification())
-        try:
-            await ctx.set_state(GENERATION_KEY, generation)
-        except Exception:  # noqa: BLE001 - as above; remembering is best-effort
-            return
 
 
 class KnowledgeBase:
@@ -428,31 +371,6 @@ class KnowledgeBase:
             self.mcp.run(transport="stdio")
         else:
             self.mcp.run(transport="http", host=host, port=port)
-
-
-def _can_remember() -> bool:
-    """Whether this connection is worth trying to remember state against.
-
-    Announcing once means remembering what was announced, and the only place to
-    remember it is state keyed by the session. An HTTP request carrying no
-    ``mcp-session-id`` header has no session to key on, so it is never worth
-    trying: False.
-
-    Anything that is not an HTTP request -- stdio, in-memory -- has no such
-    header to check, so this defaults to True for it. That default is
-    optimistic, not a guarantee: under FastMCP 4.0.3 neither actually keeps one
-    continuous session either -- ``test_a_sessionless_connection_is_told_...``
-    shows the real in-memory transport minting a fresh state key per request,
-    the same as a sessionless HTTP client. The state calls this makes for them
-    are therefore wasted, not merely redundant, but harmless: ``AnnounceChanges``
-    already guards every one of them against a state store that will not read
-    them back.
-    """
-    http = http_request()
-    if http is None:
-        return True
-    _, headers = http
-    return bool(headers.get(SESSION_HEADER))
 
 
 def _keep_last_good(old: SourceRecord | None, new: SourceRecord) -> SourceRecord:

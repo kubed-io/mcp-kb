@@ -34,8 +34,8 @@ from fastmcp.server.middleware import Middleware
 from fastmcp.server.providers.base import Provider
 from fastmcp.utilities.versions import VersionSpec
 
+from ..catalogue.uris import Catalogue
 from .request import full_listing, requested_scope
-from .uris import Catalogue
 
 
 class CatalogueProvider(Provider):

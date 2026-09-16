@@ -20,7 +20,7 @@ from fastmcp.exceptions import ToolError
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
-from kubed.mcp_kb.scope import Scope
+from kubed.mcp_kb.mcp.scope import Scope
 from tests.test_header_scope import _free_port
 
 pytestmark = pytest.mark.unit
@@ -187,7 +187,7 @@ async def test_the_prompt_tools_are_held_to_the_scope(url):
 def mixed(tmp_path):
     """One library fed by two differently-tagged sources, and two libraries that
     share a group name. The shapes the simple fixture above cannot express."""
-    from kubed.mcp_kb.prompts import PromptProvider
+    from kubed.mcp_kb.mcp.prompts import PromptProvider
 
     def skill(root, *parts):
         d = root.joinpath("skills", *parts)
@@ -260,7 +260,7 @@ def test_a_selector_naming_a_group_and_a_prompts_only_library_selects_both(tmp_p
     Resources read the selector both ways; prompts treated the library name as a
     fallback for when no group matched, so the prompts-only `notes` vanished.
     """
-    from kubed.mcp_kb.prompts import PromptProvider
+    from kubed.mcp_kb.mcp.prompts import PromptProvider
 
     d = tmp_path / "alpha" / "skills" / "notes" / "x"
     d.mkdir(parents=True)

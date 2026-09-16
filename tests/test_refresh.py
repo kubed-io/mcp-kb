@@ -10,9 +10,10 @@ from fastmcp import Client
 from fastmcp.server.context import Context
 
 import kubed.mcp_kb.server
-from kubed.mcp_kb import KnowledgeBase, snapshot
+from kubed.mcp_kb import KnowledgeBase
+from kubed.mcp_kb.catalogue import snapshot
 from kubed.mcp_kb.config import Config
-from kubed.mcp_kb.scope import Scope
+from kubed.mcp_kb.mcp.scope import Scope
 from kubed.mcp_kb.server import _can_remember
 from kubed.mcp_kb.sources import SourceError
 from tests.conftest import make_config

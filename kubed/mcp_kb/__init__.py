@@ -1,10 +1,10 @@
 """Serve Agent Skills over MCP."""
 
-from .prompts import FilePrompt, load_prompts
+from .catalogue.skills import PackResources, Skill, SkillIndex, load_skills
+from .catalogue.snapshot import Snapshot
+from .catalogue.uris import Catalogue, Entry
+from .mcp.prompts import FilePrompt, load_prompts
 from .server import KnowledgeBase
-from .skills import PackResources, Skill, SkillIndex, load_skills
-from .snapshot import Snapshot
-from .uris import Catalogue, Entry
 
 __all__ = [
     "Catalogue",

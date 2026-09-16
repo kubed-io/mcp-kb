@@ -23,9 +23,10 @@ import time
 import httpx
 import pytest
 
-from kubed.mcp_kb import KnowledgeBase, live
+from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config, WebdavSource
-from kubed.mcp_kb.prompts import PromptProvider
+from kubed.mcp_kb.mcp.prompts import PromptProvider
+from kubed.mcp_kb.sources import live
 from tests.webdav_server import PASSWORD, USERNAME
 
 pytestmark = pytest.mark.unit

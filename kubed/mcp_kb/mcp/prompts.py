@@ -48,13 +48,13 @@ from fastmcp.utilities.versions import VersionSpec
 from mcp_types import ToolAnnotations
 from pydantic import Field
 
+from ..catalogue.skills import SkillIndex
 from .request import requested_scope
 from .scope import EVERYTHING, Scope
-from .skills import SkillIndex
 from .tools import READ_ONLY
 
 if TYPE_CHECKING:
-    from .snapshot import Snapshot
+    from ..catalogue.snapshot import Snapshot
 
 log = logging.getLogger(__name__)
 
