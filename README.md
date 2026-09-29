@@ -141,16 +141,15 @@ Double braces, because prompt bodies here are full of LogQL and JSON. A Claude c
 
 ## 🚀 Running it
 
-```bash
-docker run -p 8000:8000 \
-  -v mcp-kb-cache:/var/cache/mcp-kb \
-  -v "$PWD/examples/config.yaml:/etc/mcp-kb/config.yaml:ro" \
-  kubed/mcp-kb:latest
+With Docker running, start the bundled example from any directory — no clone or host config needed. This command works in PowerShell, Command Prompt and POSIX shells:
+
+```text
+docker run --name mcp-kb -d -p 127.0.0.1:8000:8000 --mount type=volume,source=mcp-kb-cache,target=/var/cache/mcp-kb kubed/mcp-kb:latest
 ```
 
-Two mounts and that is the deployment. `examples/config.yaml` serves four pinned GitHub libraries out of the box. Then point an MCP client at `http://localhost:8000/mcp`.
+The first start fetches four pinned GitHub libraries; follow progress with `docker logs -f mcp-kb`. Once ready, check `http://localhost:8000/health` and connect your MCP client to `http://localhost:8000/mcp`.
 
-The cache wants to be writable by uid **65534**, which the container runs as: a named Docker volume needs nothing, a Kubernetes `emptyDir` needs `fsGroup: 65534`.
+For custom config mounts, native Python setup on Windows or POSIX, and container lifecycle commands, see the **[Quick start](https://github.com/kubed-io/mcp-kb/wiki/Quick-Start)**.
 
 📖 [Deployment](https://github.com/kubed-io/mcp-kb/wiki/Deployment) · [Installing](https://github.com/kubed-io/mcp-kb/wiki/Installing)
 
