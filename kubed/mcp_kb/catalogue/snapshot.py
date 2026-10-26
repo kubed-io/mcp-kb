@@ -46,7 +46,7 @@ from .index import FetchRecord, PluginRecord, PromptRow, SkillRow, now
 from .prompts import FilePrompt, load_prompts, stem
 from .prompts.detect import COPILOT_SUFFIX
 from .skills import LibraryFiles, Skill, SkillIndex, load_skills, naming_problem
-from .uris import RESERVED_NAMES, SCHEME, Catalogue, _count, uri_for
+from .uris import RESERVED_NAMES, SCHEME, Catalogue, LibraryText, _count, uri_for
 
 log = logging.getLogger(__name__)
 
@@ -449,7 +449,15 @@ def build_snapshot(
         built=now(),
         index=index,
         resources=resources,
-        catalogue=Catalogue(index, resources, revalidate),
+        catalogue=Catalogue(
+            index,
+            resources,
+            revalidate,
+            [
+                LibraryText(lib.name, lib.description, lib.notes, lib.list_skills)
+                for lib in libraries
+            ],
+        ),
         prompts=tuple(prompts),
         status={
             "libraries": status_libraries,

@@ -48,7 +48,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -243,6 +243,16 @@ def mime_for(path: str) -> str:
     return guessed or "text/markdown"
 
 
+@dataclass(frozen=True)
+class LibraryText:
+    """What a library says about itself, apart from its skills."""
+
+    name: str
+    description: str = ""
+    notes: str = ""
+    list_skills: bool = True
+
+
 class Catalogue:
     """The address space: what is listed, and what each URI resolves to.
 
@@ -262,7 +272,9 @@ class Catalogue:
         index: SkillIndex,
         resources: LibraryFiles,
         revalidate: Callable[[Path], None] | None = None,
+        libraries: Sequence[LibraryText] = (),
     ):
+        self._libraries = list(libraries)
         self._index = index
         self._resources = resources
         self._revalidate = revalidate
@@ -436,6 +448,21 @@ class Catalogue:
                 }
             )
         return {"uri": uri, "frontmatter": metadata, "resources": resources}
+
+    def selected(self, scope: Scope = EVERYTHING) -> list[LibraryText]:
+        """Libraries with a skill visible in ``scope``: constructor order, then
+        any the constructor never heard of, by name."""
+        present = {s.library for s in self._index.visible(scope)}
+        known = {t.name for t in self._libraries}
+        return [t for t in self._libraries if t.name in present] + [
+            LibraryText(name) for name in sorted(present - known)
+        ]
+
+    def skill_paths(self, library: str, scope: Scope = EVERYTHING) -> list[str]:
+        """Each visible skill's address below its library, sorted."""
+        prefix = f"{library}/"
+        found = self._in_library(library, scope)
+        return sorted(s.address.removeprefix(prefix) for s in found)
 
     def _library_files(self, library: str, scope: Scope) -> list[str]:
         """The library-level files this caller may see, empty when none are.
@@ -628,8 +655,15 @@ class Catalogue:
                 " paths under the same skill."
             )
         title = f"{library}/{here}" if here else library
+        text = ""
+        if not here:
+            mine = next((t for t in self._libraries if t.name == library), None)
+            if mine is not None:
+                text = "".join(f"{x}\n" for x in (mine.description, mine.notes) if x)
+                text = f"{text}\n" if text else ""
         return (
             f"# {title} — {_count(len(under))}\n\n"
+            + text
             + "\n".join(lines)
             + "\n\n"
             + " ".join(advice)
