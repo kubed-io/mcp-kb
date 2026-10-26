@@ -824,3 +824,31 @@ def test_notes_and_list_skills_carry_through(tmp_path):
     assert result.notes == "n" and result.list_skills is False
     plain = _assembled(tmp_path, {"name": "lib", "plugins": ["p"]}, plugins)
     assert plain.notes == "" and plain.list_skills is True
+
+
+def test_a_snapshot_strips_library_text_before_the_index_uses_it(tmp_path):
+    """A YAML `notes: |` block ends in a newline; it must not double the blank
+    line, and a whitespace-only value adds no line at all."""
+    from kubed.mcp_kb.catalogue.index import SkillRow
+
+    plugin = fake_plugin("p", tmp_path)
+    rows = tuple(SkillRow(n, "", f"{n}.", str(tmp_path / n)) for n in ("a", "b"))
+    record = PluginRecord(
+        id="p", fetch=plugin.fetch.key, root=str(tmp_path), status="ok",
+        error=None, built=now(), skills=rows, prompts=(), files=(),
+        skill_dirs=(),
+    )
+
+    def index(description, notes):
+        snapshot = build_snapshot(
+            Config(),
+            [plugin],
+            [Library("lib", description, ("p",), notes=notes)],
+            {},
+            {"p": record},
+            0,
+        )
+        return snapshot.catalogue.read("skill://lib/_index.md")
+
+    assert index("D.  ", "N.\n").startswith("# lib — 2 skills\n\nD.\nN.\n\nskill://")
+    assert index("D.", "  \n").startswith("# lib — 2 skills\n\nD.\n\nskill://")

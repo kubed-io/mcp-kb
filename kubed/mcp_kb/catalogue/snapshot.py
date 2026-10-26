@@ -454,7 +454,12 @@ def build_snapshot(
             resources,
             revalidate,
             [
-                LibraryText(lib.name, lib.description, lib.notes, lib.list_skills)
+                LibraryText(
+                    lib.name,
+                    lib.description.strip(),
+                    lib.notes.strip(),
+                    lib.list_skills,
+                )
                 for lib in libraries
             ],
         ),
