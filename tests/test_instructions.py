@@ -199,8 +199,18 @@ def _library_config(root, **library):
 async def test_one_library_scope(server_url, mode):  # noqa: F811
     text = await told(server_url, mode, {"X-Skill-Library": "flatsource"})
     assert "[" not in text
-    assert "skill://flatsource/_index.md" in text
+    lines = text.splitlines()
+    assert "Skills (skill://flatsource/_index.md): alpha, beta" in lines
     assert text.endswith(RES_FOOTER)
+
+
+@pytest.mark.integration
+async def test_both_eras_are_told_the_same(server_url):  # noqa: F811
+    headers = {"X-Skill-Library": "flatsource"}
+    legacy = await told(server_url, "legacy", headers)
+    current = await told(server_url, "default", headers)
+    assert legacy == current
+    assert "alpha, beta" in legacy
 
 
 @pytest.mark.integration
@@ -209,8 +219,11 @@ async def test_unscoped_lists_every_library_without_names(server_url, mode):  # 
     text = await told(server_url, mode)
     sections = [line for line in text.splitlines() if line.startswith("[")]
     assert sections == ["[deepsource]", "[flatsource]"]
-    assert "Skills: skill://deepsource/_index.md" in text
-    assert "(" not in text.replace("<library>", "")
+    lines = text.splitlines()
+    assert "Skills: skill://deepsource/_index.md" in lines
+    assert "Skills: skill://flatsource/_index.md" in lines
+    for known in ("alpha", "beta", "gamma", "delta"):
+        assert known not in text
     assert text.endswith(RES_FOOTER)
 
 
@@ -223,7 +236,7 @@ async def test_list_skills_false(tmp_path, mode):
     with served(kb) as url:
         text = await told(url, mode)
     assert "alpha" not in text
-    assert "Skills: skill://lib/_index.md" in text
+    assert "Skills: skill://lib/_index.md" in text.splitlines()
 
 
 @pytest.mark.integration
@@ -248,8 +261,9 @@ async def test_declared_skills_extension_drops_names(tmp_path, mode):
         plain = await told(url, mode)
         declared = await told(url, mode, extension=True)
     assert "alpha" in plain
+    assert "Skills (skill://lib/_index.md): " in plain
     assert "alpha" not in declared
-    assert "Skills: skill://lib/_index.md" in declared
+    assert "Skills: skill://lib/_index.md" in declared.splitlines()
 
 
 @pytest.mark.integration
