@@ -495,3 +495,27 @@ def test_a_file_with_no_plugins_list_is_an_error(tmp_path):
 
 def test_an_unnamed_marketplace_answers_to_its_library(tmp_path):
     assert read(tmp_path, {"plugins": []}).name == "grafana"
+
+
+def test_marketplace_description_top_level_then_metadata(tmp_path):
+    both = {"description": "top", "metadata": {"description": "meta"}, "plugins": []}
+    assert read(tmp_path, both).description == "top"
+    meta = {"metadata": {"description": "meta"}, "plugins": []}
+    assert read(tmp_path, meta).description == "meta"
+    assert read(tmp_path, {"plugins": []}).description == ""
+
+
+def test_non_string_marketplace_description_is_ignored(tmp_path):
+    data = {"description": 3, "metadata": {"description": "m"}, "plugins": []}
+    assert read(tmp_path, data).description == "m"
+    assert read(tmp_path, {"description": {}, "plugins": []}).description == ""
+
+
+def test_a_blank_marketplace_description_defers_to_metadata(tmp_path):
+    catalog = {
+        "name": "m",
+        "description": " ",
+        "metadata": {"description": "Meta words."},
+        "plugins": [],
+    }
+    assert read(tmp_path, catalog).description == "Meta words."

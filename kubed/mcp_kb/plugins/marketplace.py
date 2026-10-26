@@ -44,6 +44,7 @@ class Marketplace:
     name: str
     plugins: tuple[Plugin, ...]
     skipped: tuple[dict[str, str], ...]
+    description: str = ""
 
 
 class _Skip(ValueError):
@@ -102,7 +103,14 @@ def read_marketplace(
         except _Skip as skip:
             skipped.append({"plugin": _label(raw), "reason": str(skip)})
 
+    metadata = data.get("metadata")
+    described = (_text(data.get("description")) or "").strip() or (
+        (_text(metadata.get("description")) or "").strip()
+        if isinstance(metadata, dict)
+        else None
+    )
     return Marketplace(
+        description=described or "",
         name=_text(data.get("name")) or library.name,
         plugins=tuple(plugins),
         skipped=tuple(skipped),

@@ -527,3 +527,20 @@ def test_a_username_env_reference_that_is_unset_is_an_error(monkeypatch):
     auth = BasicAuth(username={"env": "ABSENT"}, password={"env": "ABSENT"})
     with pytest.raises(ConfigError):
         auth.user()
+
+
+def test_library_notes_and_list_skills(tmp_path):
+    lib = (
+        "sources:\n- name: gh\n  url: git+https://github.com\n"
+        "plugins:\n- name: p\n  source: gh://o/r\n"
+        "libraries:\n- name: a\n  plugins: [p]\n"
+    )
+    config = load_config(write(tmp_path, lib + "  listSkills: false\n  notes: x\n"))
+    [a] = config.libraries
+    assert a.list_skills is False and a.notes == "x"
+
+    [plain] = load_config(write(tmp_path, lib)).libraries
+    assert plain.list_skills is True and plain.notes == ""
+
+    with pytest.raises(ConfigError, match="list_skills"):
+        load_config(write(tmp_path, lib + "  list_skills: false\n"))

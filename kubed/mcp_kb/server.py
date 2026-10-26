@@ -73,6 +73,7 @@ from .catalogue.uris import Catalogue
 from .config import Config
 from .mcp import prompts, resources, tools
 from .mcp.announce import AnnounceChanges
+from .mcp.instructions import ScopedInstructions
 from .mcp.pins import RefuseEmptyScope, what_is_wrong
 from .mcp.request import client_reads_resources, client_uses_prompts
 from .mcp.skills import AdvertiseLegacySkills, SkillsExtension
@@ -82,27 +83,6 @@ from .plugins.marketplace import find_marketplace, read_marketplace
 log = logging.getLogger(__name__)
 
 INDEX_FILE = "index.json"
-
-INSTRUCTIONS = """\
-This server hosts Agent Skills: instruction packages that teach you how to \
-perform a specific task. Everything it serves is a `skill://` URI, and reading \
-one is the only operation there is.
-
-Work down the address space, cheapest first. Listing gives you indexes -- one \
-per library (`skill://grafana/_index.md`), one per top-level folder of a \
-library (`skill://grafana/grafana-lgtm/_index.md`). Reading an index gives you \
-what is directly in it, as URIs: its folders' indexes, and its skills. \
-Reading a skill's URI (`skill://grafana/grafana-lgtm/loki/SKILL.md`) gives you \
-the instructions to follow.
-
-A skill may ship supporting files. Read `_manifest` in place of `SKILL.md` to \
-list them, then read one by its path under the same skill. A library may also \
-ship files outside its skills, listed at `skill://<library>/_files.md`; a path \
-a skill cites that is not inside the skill is usually one of those. Do not \
-read files you have no use for -- a skill citing one is not a reason to fetch \
-it. Only files are read: a library, a folder or a skill's own directory serves \
-nothing.
-"""
 
 
 class KnowledgeBase:
@@ -141,7 +121,6 @@ class KnowledgeBase:
         ttl = config.min_refresh_seconds
         self.mcp = FastMCP(
             "mcp-kb",
-            instructions=INSTRUCTIONS,
             lifespan=self._lifespan,
             # A client may hold a listing for as long as the shortest refresh
             # interval, which is the soonest it could possibly be wrong. That
@@ -160,6 +139,7 @@ class KnowledgeBase:
             )
         )
         self.mcp.add_middleware(AdvertiseLegacySkills())
+        self.mcp.add_middleware(ScopedInstructions(lambda: self.snapshot.catalogue))
         resource_tools = tools.register(self.mcp, lambda: self.snapshot.catalogue)
         prompt_tools = prompts.register(self.mcp, lambda: self.snapshot)
         mirrors = dict.fromkeys(resource_tools, client_reads_resources)
@@ -281,6 +261,7 @@ class KnowledgeBase:
         derived: list[Plugin] = []
         errors: dict[str, str] = {}
         skipped: dict[str, tuple[dict[str, str], ...]] = {}
+        descriptions: dict[str, str] = {}
         for name, (library, fetch, address) in markets.items():
             record = self._fetch_record(fetches, fetch, refusal_is_fatal)
             if not _serving(record):
@@ -307,6 +288,7 @@ class KnowledgeBase:
                 errors[name] = unrooted(str(exc), root)
                 continue
             derived += market.plugins
+            descriptions[name] = market.description
             if market.skipped:
                 skipped[name] = market.skipped
 
@@ -328,7 +310,11 @@ class KnowledgeBase:
             )
             completed.append(plugin)
         libraries = assemble_libraries(
-            self.config, completed, errors=errors, skipped=skipped
+            self.config,
+            completed,
+            errors=errors,
+            skipped=skipped,
+            descriptions=descriptions,
         )
         return completed, libraries, records
 

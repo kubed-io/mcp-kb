@@ -46,7 +46,7 @@ from .index import FetchRecord, PluginRecord, PromptRow, SkillRow, now
 from .prompts import FilePrompt, load_prompts, stem
 from .prompts.detect import COPILOT_SUFFIX
 from .skills import LibraryFiles, Skill, SkillIndex, load_skills, naming_problem
-from .uris import RESERVED_NAMES, SCHEME, Catalogue, _count, uri_for
+from .uris import RESERVED_NAMES, SCHEME, Catalogue, LibraryText, _count, uri_for
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +77,8 @@ class Library:
     plugins: tuple[str, ...]
     error: str | None = None
     skipped: tuple[dict[str, str], ...] = ()
+    notes: str = ""
+    list_skills: bool = True
 
 
 @dataclass(frozen=True)
@@ -303,6 +305,7 @@ def assemble_libraries(
     *,
     errors: dict[str, str] | None = None,
     skipped: dict[str, tuple[dict[str, str], ...]] | None = None,
+    descriptions: dict[str, str] | None = None,
 ) -> list[Library]:
     """Each library's plugins, in config order: marketplace, ``plugins:``, selector.
 
@@ -312,6 +315,10 @@ def assemble_libraries(
     with an ``@`` in it names a marketplace plugin that may not exist -- the
     config could not check that -- so a missing one becomes the library's
     error and the rest of the library serves.
+
+    ``descriptions`` is each marketplace library's upstream description. A
+    library's own is the first non-empty of: configured, upstream, its
+    plugins' joined by newlines.
     """
     by_id = {plugin.id: plugin for plugin in plugins}
     libraries: list[Library] = []
@@ -324,12 +331,16 @@ def assemble_libraries(
         ids += [name for name in lib.plugins if name in by_id]
         if lib.plugin_selector is not None:
             ids += [p.id for p in select(plugins, lib.plugin_selector)]
+        upstream = (descriptions or {}).get(lib.name, "")
+        own = [by_id[i].description for i in dict.fromkeys(ids)]
         if missing:
             problems.append(_no_such_plugins(missing, plugins))
         libraries.append(
             Library(
                 name=lib.name,
-                description=lib.description,
+                description=_resolved(lib.description, upstream, own),
+                notes=lib.notes,
+                list_skills=lib.list_skills,
                 plugins=tuple(dict.fromkeys(ids)),
                 error=scrub("; ".join(problems)) or None,
                 # Both of these quote fetched content -- a marketplace entry's
@@ -344,6 +355,14 @@ def assemble_libraries(
             )
         )
     return libraries
+
+
+def _resolved(configured: str, upstream: str, plugins: list[str]) -> str:
+    """The first non-blank of the three tiers; blank text must not win."""
+    joined = "\n".join(dict.fromkeys(d.strip() for d in plugins if d.strip()))
+    if configured.strip():
+        return configured.strip()
+    return scrub(upstream.strip() or joined)
 
 
 def _no_such_plugins(missing: list[str], plugins: list[Plugin]) -> str:
@@ -434,7 +453,20 @@ def build_snapshot(
         built=now(),
         index=index,
         resources=resources,
-        catalogue=Catalogue(index, resources, revalidate),
+        catalogue=Catalogue(
+            index,
+            resources,
+            revalidate,
+            [
+                LibraryText(
+                    lib.name,
+                    lib.description.strip(),
+                    lib.notes.strip(),
+                    lib.list_skills,
+                )
+                for lib in libraries
+            ],
+        ),
         prompts=tuple(prompts),
         status={
             "libraries": status_libraries,

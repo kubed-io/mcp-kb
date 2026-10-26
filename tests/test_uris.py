@@ -6,11 +6,12 @@ rather than only through whichever half happens to be convenient.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex, load_skills
-from kubed.mcp_kb.catalogue.uris import Catalogue, parse, uri_for
+from kubed.mcp_kb.catalogue.uris import Catalogue, LibraryText, parse, uri_for
 from kubed.mcp_kb.mcp.scope import Scope
 from tests.conftest import build_library_files, fake_plugin, load_all_skills
 
@@ -340,3 +341,69 @@ def test_a_full_row_carries_the_skills_labels_and_its_library(catalogue, skills_
         e for e in catalogue.entries(full=True) if e.uri == uri_for(skill)
     )
     assert row.tags == ("deep", "deepsource")
+
+
+# -- library text -------------------------------------------------------------
+
+
+def _skill(library, folder, name, tags=()):
+    from kubed.mcp_kb.catalogue.skills import Skill
+
+    return Skill(
+        name=name,
+        library=library,
+        folder=folder,
+        description=f"{name}.",
+        path=Path("/nowhere") / name,
+        plugin=library,
+        root=Path("/nowhere"),
+        tags=frozenset(tags),
+    )
+
+
+@pytest.mark.unit
+def test_selected_follows_scope_and_constructor_order():
+    skills = [_skill("a", "", "one", {"x"}), _skill("b", "", "two", {"y"})]
+    cat = Catalogue(
+        SkillIndex(skills),
+        LibraryFiles(),
+        libraries=[LibraryText("b"), LibraryText("a"), LibraryText("empty")],
+    )
+    assert [t.name for t in cat.selected()] == ["b", "a"]
+    assert [t.name for t in cat.selected(_tags({"x"}))] == ["a"]
+
+
+@pytest.mark.unit
+def test_selected_gives_an_untexted_library_a_bare_text_in_name_order():
+    skills = [_skill("z", "", "one"), _skill("m", "", "two"), _skill("k", "", "3")]
+    cat = Catalogue(
+        SkillIndex(skills), LibraryFiles(), libraries=[LibraryText("k", "D.")]
+    )
+    assert cat.selected() == [LibraryText("k", "D."), LibraryText("m"), LibraryText("z")]
+
+
+@pytest.mark.unit
+def test_skill_paths_are_paths_under_the_library():
+    skills = [_skill("lib", "x", "loki", {"t"}), _skill("lib", "y", "loki")]
+    cat = Catalogue(SkillIndex(skills), LibraryFiles())
+    assert cat.skill_paths("lib") == ["x/loki", "y/loki"]
+    assert cat.skill_paths("lib", _tags({"t"})) == ["x/loki"]
+
+
+@pytest.mark.unit
+def test_library_index_opens_with_its_text():
+    skills = [_skill("lib", "", "a"), _skill("lib", "f", "b")]
+    plain = Catalogue(SkillIndex(skills), LibraryFiles())
+    texted = Catalogue(
+        SkillIndex(skills),
+        LibraryFiles(),
+        libraries=[LibraryText("lib", "D.", "N.")],
+    )
+    before = plain.read("skill://lib/_index.md")
+    after = texted.read("skill://lib/_index.md")
+    head, rest = before.split("\n\n", 1)
+    assert after == f"{head}\n\nD.\nN.\n\n{rest}"
+    assert after.startswith("# lib — 2 skills\n\nD.\nN.\n\n")
+    assert texted.read("skill://lib/f/_index.md") == plain.read("skill://lib/f/_index.md")
+    bare = Catalogue(SkillIndex(skills), LibraryFiles(), libraries=[LibraryText("lib")])
+    assert bare.read("skill://lib/_index.md") == before

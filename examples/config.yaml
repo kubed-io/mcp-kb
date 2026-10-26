@@ -35,14 +35,20 @@ plugins:
   files: ["shared/**/*", "workflows/**/*"]
 
 libraries:
+# `description` is the library's text in the server instructions, its index and
+# /health. Leave it out and the marketplace's own is used, else its plugins'
+# descriptions. `notes` is added after either.
 - name: n8n
   description: Automation skills for n8n workflows.
   source: github://n8n-io/skills?ref=180b8415e3b73f78828cfa01e908e67f89f2a139
 - name: grafana
   description: Observability skills — Grafana, Loki and friends.
+  # Large library: point at its index in the instructions, without every name.
+  listSkills: false
   source: github://grafana/skills?ref=51d33e71e191b409bbd25fc7be2684c610d18166
 - name: penpot
   description: Design skills for Penpot.
+  notes: Start at penpot-router.
   source: github://penpot/penpot-ai-kit?ref=efbefc935ee43804502976aa5ec9659a8bb7e207
   plugins: [penpot-shared]
 - name: superpowers

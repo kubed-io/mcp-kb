@@ -17,10 +17,8 @@ from mcp_types import INVALID_PARAMS, PaginatedRequestParams, RequestParams
 from pydantic import Field
 
 from ..catalogue.uris import Catalogue
-from .request import requested_scope
+from .request import EXTENSION_ID, requested_scope
 from .scope import Scope
-
-EXTENSION_ID = "io.modelcontextprotocol/skills"
 
 
 class GetSkillParams(RequestParams):

@@ -313,11 +313,13 @@ class LibraryConfig(Strict):
 
     name: str = Field(pattern=NAME)
     description: str = ""
+    notes: str = ""
+    list_skills: bool = Field(True, alias="listSkills")
     source: str | None = None
     plugins: list[str] = Field(default_factory=list)
     plugin_selector: Selector | None = Field(default=None, alias="pluginSelector")
 
-    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     @field_validator("source")
     @classmethod
