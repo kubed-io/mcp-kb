@@ -59,6 +59,7 @@ installer's, against whatever image tag it chooses.
 | ⤷⤷ `detect.py` | which dialect a file is, strongest signal first |
 | ⤷⤷ `mcpkb.py`, `claude.py`, `copilot.py` | one module per dialect: `parse` into `Parsed`, `substitute` back out |
 | ⤷ `placeholders.py` | the two `${CLAUDE_*}` placeholders this server is the authority on |
+| ⤷ `instructions.py` | `build_instructions` — the server `instructions` for a scope and mode, as text. Imports no FastMCP |
 | ⤷ `index.py` | `Index`, `FetchRecord`, `PluginRecord` — the on-disk `index.json` a cold start reads |
 | ⤷ `snapshot.py` | `Snapshot`, `build_snapshot` — the immutable view every request reads |
 | ⤷ `refresh.py` | when a fetch is due to be looked at again, bounded to the shortest configured interval, and what a failure does to the last good one |
@@ -67,6 +68,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `HideMirrorTools` |
 | ⤷ `tools.py`, `prompts.py` | the two mirror pairs |
 | ⤷ `request.py`, `scope.py` | what the current request says about itself, and the `Scope` it becomes |
+| ⤷ `instructions.py` | `ScopedInstructions` — sets the `instructions` on each `initialize` and `server/discover` answer |
 | ⤷ `announce.py` | `AnnounceChanges` — telling a session its listing moved |
 | ⤷ `pins.py` | `RefuseEmptyScope` — a scope that names nothing fails every request, saying what there is |
 | `kubed/mcp_kb/spec/` | `builder.py`, the OpenAPI document for the HTTP surface |

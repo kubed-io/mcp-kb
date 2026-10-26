@@ -78,6 +78,8 @@ A client can be given part of the catalogue and no more, and the narrowing is a 
 
 A header beats the URL, which is what makes a scope pinned inside a credential something the caller cannot edit away. It is a plumbed constant, never a tool argument — there is no way for a model to ask for material it was not given.
 
+A client connects already knowing what each library in its scope is for: the server's instructions are built from them.
+
 📖 [Scoping](https://github.com/kubed-io/mcp-kb/wiki/Scoping)
 
 ---
