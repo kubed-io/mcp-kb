@@ -18,7 +18,7 @@ from fastmcp import Client
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue.index import PluginRecord, now
-from kubed.mcp_kb.catalogue.snapshot import Library, build_snapshot
+from kubed.mcp_kb.catalogue.snapshot import Library, assemble_libraries, build_snapshot
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.pins import what_is_wrong
 from kubed.mcp_kb.mcp.scope import Scope
@@ -766,3 +766,61 @@ async def test_nothing_under_claude_plugin_is_harvested_or_served(tmp_path):
     assert [p.name for p in kb.snapshot.prompts] == ["lib_ok"]
     assert kb.resources.files("lib") == ["prompts/ok.md"]
     assert ".claude-plugin" not in json.dumps(await _health(kb))
+
+
+def _assembled(tmp_path, library, plugins, **kwargs):
+    declared = [
+        {"name": n, "source": "lab://market"}
+        for n in (library.get("plugins") or [])
+        if "@" not in n
+    ]
+    config = _config(tmp_path, plugins=declared, libraries=[library])
+    [result] = assemble_libraries(config, plugins, **kwargs)
+    return result
+
+
+def test_description_chain(tmp_path):
+    plugins = [
+        fake_plugin("a", tmp_path, description="A words."),
+        fake_plugin("b", tmp_path, description=""),
+        fake_plugin("c", tmp_path, description="C words."),
+    ]
+    lib = {"name": "lib", "plugins": ["c", "b", "a"]}
+    upstream = {"lib": "Upstream."}
+
+    configured = _assembled(
+        tmp_path, {**lib, "description": "Mine."}, plugins, descriptions=upstream
+    )
+    assert configured.description == "Mine."
+    assert _assembled(tmp_path, lib, plugins, descriptions=upstream).description == (
+        "Upstream."
+    )
+    assert _assembled(tmp_path, lib, plugins).description == "C words.\nA words."
+
+
+def test_failed_marketplace_falls_back_to_plugin_descriptions(tmp_path):
+    plugins = [fake_plugin("p", tmp_path, description="P words.")]
+    lib = {"name": "lib", "source": "lab://market", "plugins": ["p"]}
+    result = _assembled(
+        tmp_path, lib, plugins, errors={"lib": "could not be fetched"}, descriptions={}
+    )
+    assert result.description == "P words."
+
+
+def test_fetched_descriptions_are_scrubbed(tmp_path):
+    secret = "https://user:hunter2@example.com/x"
+    plugins = [fake_plugin("p", tmp_path, description=f"see {secret}")]
+    lib = {"name": "lib", "plugins": ["p"]}
+    assert "hunter2" not in _assembled(tmp_path, lib, plugins).description
+    assert "hunter2" not in _assembled(
+        tmp_path, lib, plugins, descriptions={"lib": f"see {secret}"}
+    ).description
+
+
+def test_notes_and_list_skills_carry_through(tmp_path):
+    plugins = [fake_plugin("p", tmp_path)]
+    lib = {"name": "lib", "plugins": ["p"], "notes": "n", "listSkills": False}
+    result = _assembled(tmp_path, lib, plugins)
+    assert result.notes == "n" and result.list_skills is False
+    plain = _assembled(tmp_path, {"name": "lib", "plugins": ["p"]}, plugins)
+    assert plain.notes == "" and plain.list_skills is True

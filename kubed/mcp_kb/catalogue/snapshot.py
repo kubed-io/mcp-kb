@@ -77,6 +77,8 @@ class Library:
     plugins: tuple[str, ...]
     error: str | None = None
     skipped: tuple[dict[str, str], ...] = ()
+    notes: str = ""
+    list_skills: bool = True
 
 
 @dataclass(frozen=True)
@@ -303,6 +305,7 @@ def assemble_libraries(
     *,
     errors: dict[str, str] | None = None,
     skipped: dict[str, tuple[dict[str, str], ...]] | None = None,
+    descriptions: dict[str, str] | None = None,
 ) -> list[Library]:
     """Each library's plugins, in config order: marketplace, ``plugins:``, selector.
 
@@ -312,6 +315,10 @@ def assemble_libraries(
     with an ``@`` in it names a marketplace plugin that may not exist -- the
     config could not check that -- so a missing one becomes the library's
     error and the rest of the library serves.
+
+    ``descriptions`` is each marketplace library's upstream description. A
+    library's own is the first non-empty of: configured, upstream, its
+    plugins' joined by newlines.
     """
     by_id = {plugin.id: plugin for plugin in plugins}
     libraries: list[Library] = []
@@ -329,7 +336,15 @@ def assemble_libraries(
         libraries.append(
             Library(
                 name=lib.name,
-                description=lib.description,
+                description=lib.description
+                or scrub(
+                    (descriptions or {}).get(lib.name)
+                    or "\n".join(
+                        d for i in dict.fromkeys(ids) if (d := by_id[i].description)
+                    )
+                ),
+                notes=lib.notes,
+                list_skills=lib.list_skills,
                 plugins=tuple(dict.fromkeys(ids)),
                 error=scrub("; ".join(problems)) or None,
                 # Both of these quote fetched content -- a marketplace entry's

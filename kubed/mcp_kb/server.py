@@ -281,6 +281,7 @@ class KnowledgeBase:
         derived: list[Plugin] = []
         errors: dict[str, str] = {}
         skipped: dict[str, tuple[dict[str, str], ...]] = {}
+        descriptions: dict[str, str] = {}
         for name, (library, fetch, address) in markets.items():
             record = self._fetch_record(fetches, fetch, refusal_is_fatal)
             if not _serving(record):
@@ -307,6 +308,7 @@ class KnowledgeBase:
                 errors[name] = unrooted(str(exc), root)
                 continue
             derived += market.plugins
+            descriptions[name] = market.description
             if market.skipped:
                 skipped[name] = market.skipped
 
@@ -328,7 +330,11 @@ class KnowledgeBase:
             )
             completed.append(plugin)
         libraries = assemble_libraries(
-            self.config, completed, errors=errors, skipped=skipped
+            self.config,
+            completed,
+            errors=errors,
+            skipped=skipped,
+            descriptions=descriptions,
         )
         return completed, libraries, records
 

@@ -584,7 +584,9 @@ def test_main_exits_naming_the_source_whose_credentials_were_refused(
     monkeypatch.setenv(ENV, "not-the-password")
     config = tmp_path / "config.yaml"
     config.write_text(
-        json.dumps(_served_config(webdav, tmp_path).model_dump(mode="json"))
+        json.dumps(
+            _served_config(webdav, tmp_path).model_dump(mode="json", by_alias=True)
+        )
     )
 
     with pytest.raises(SystemExit) as raised:

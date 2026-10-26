@@ -55,6 +55,16 @@
           "title": "Description",
           "type": "string"
         },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        },
+        "listSkills": {
+          "default": true,
+          "title": "Listskills",
+          "type": "boolean"
+        },
         "source": {
           "anyOf": [
             {

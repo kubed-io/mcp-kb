@@ -3,6 +3,7 @@
 import json
 import logging
 
+import httpx
 import pytest
 from fastmcp import Client
 
@@ -264,3 +265,21 @@ async def test_a_hidden_file_in_a_skill_is_not_readable_by_guessing(tmp_path):
 
     assert visible == "visible\n"
     assert "hunter2" not in mirrored
+
+
+@pytest.mark.unit
+async def test_health_shows_the_resolved_description(tmp_path):
+    root = tmp_path / "market"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "marketplace.json").write_text(
+        json.dumps({"name": "m", "description": "Upstream words.", "plugins": []})
+    )
+    config = Config.model_validate(
+        {"libraries": [{"name": "up", "source": f"file://{root}"}]}
+    )
+    transport = httpx.ASGITransport(
+        app=KnowledgeBase(config, tmp_path / "cache").mcp.http_app()
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
+        health = (await http.get("/health")).json()
+    assert health["libraries"]["up"]["description"] == "Upstream words."
