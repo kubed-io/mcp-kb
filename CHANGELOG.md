@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
+- **BREAKING:** Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
 
 ### Fixed
 

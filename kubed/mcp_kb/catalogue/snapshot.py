@@ -359,7 +359,7 @@ def assemble_libraries(
 
 def _resolved(configured: str, upstream: str, plugins: list[str]) -> str:
     """The first non-blank of the three tiers; blank text must not win."""
-    joined = "\n".join(d.strip() for d in plugins if d.strip())
+    joined = "\n".join(dict.fromkeys(d.strip() for d in plugins if d.strip()))
     if configured.strip():
         return configured.strip()
     return scrub(upstream.strip() or joined)

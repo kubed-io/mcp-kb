@@ -798,6 +798,15 @@ def test_description_chain(tmp_path):
     assert _assembled(tmp_path, lib, plugins).description == "C words.\nA words."
 
 
+def test_plugins_sharing_a_description_resolve_to_it_once(tmp_path):
+    plugins = [
+        fake_plugin("p", tmp_path, description="Same."),
+        fake_plugin("q", tmp_path, description="Same."),
+    ]
+    lib = {"name": "lib", "plugins": ["p", "q"]}
+    assert _assembled(tmp_path, lib, plugins).description == "Same."
+
+
 def test_failed_marketplace_falls_back_to_plugin_descriptions(tmp_path):
     plugins = [fake_plugin("p", tmp_path, description="P words.")]
     lib = {"name": "lib", "source": "lab://market", "plugins": ["p"]}

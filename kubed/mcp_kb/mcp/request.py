@@ -165,5 +165,5 @@ def declared_on_discover(context) -> bool:
     try:
         session = context.fastmcp_context.session
         return client_supports_extension(session, EXTENSION_ID)
-    except Exception:  # noqa: BLE001 - absent context or session is "not declared"
+    except (RuntimeError, AttributeError):  # no context or session: not declared
         return False

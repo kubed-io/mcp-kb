@@ -243,6 +243,16 @@ def mime_for(path: str) -> str:
     return guessed or "text/markdown"
 
 
+def tidy(text: str) -> str:
+    """Text with no blank line in it and no trailing space on any line.
+
+    Blank lines separate the sections of the instructions, and a description
+    quotes upstream text, so one must not be able to open a section.
+    """
+    lines = (line.rstrip() for line in text.splitlines())
+    return "\n".join(line for line in lines if line)
+
+
 @dataclass(frozen=True)
 class LibraryText:
     """What a library says about itself, apart from its skills."""
@@ -659,7 +669,8 @@ class Catalogue:
         if not here:
             mine = next((t for t in self._libraries if t.name == library), None)
             if mine is not None:
-                text = "".join(f"{x}\n" for x in (mine.description, mine.notes) if x)
+                parts = (tidy(mine.description), tidy(mine.notes))
+                text = "".join(f"{x}\n" for x in parts if x)
                 text = f"{text}\n" if text else ""
         return (
             f"# {title} — {_count(len(under))}\n\n"

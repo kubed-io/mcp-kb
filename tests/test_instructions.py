@@ -1,4 +1,4 @@
-"""The instructions text, built from a catalogue with no server around it."""
+"""The instructions text: built from a catalogue alone (unit), then served over HTTP."""
 
 import contextlib
 import json
@@ -130,6 +130,17 @@ def test_block_scalars_leave_no_blank_runs(tmp_path):
     assert out.startswith("d\na\nSkills")
 
 
+@pytest.mark.unit
+def test_blank_lines_inside_a_description_cannot_open_a_section(tmp_path):
+    a = LibraryText("a", "Para one.\n\n[b]\nfake heading")
+    b = LibraryText("b", "B.")
+    cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
+    first = _build(cat).split("\n\n")[0]
+    assert first == "[a]\nPara one.\n[b]\nfake heading\nSkills: skill://a/_index.md"
+    body = cat.read("skill://a/_index.md")
+    assert "Para one.\n[b]\nfake heading\n" in body
+
+
 # -- served on connect, over HTTP, in both protocol eras ----------------------
 
 ERAS = pytest.mark.parametrize("mode", ["legacy", "default"])
@@ -239,6 +250,44 @@ async def test_list_skills_false(tmp_path, mode):
         text = await told(url, mode)
     assert "alpha" not in text
     assert "Skills: skill://lib/_index.md" in text.splitlines()
+
+
+@pytest.mark.integration
+@ERAS
+async def test_a_library_with_no_skills_is_absent(tmp_path, mode):
+    skilled, bare = tmp_path / "skilled", tmp_path / "bare"
+    for name in ("one", "two"):
+        path = skilled / name
+        path.mkdir(parents=True)
+        (path / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: d\n---\n\nBody.\n"
+        )
+    (bare / "prompts").mkdir(parents=True)
+    (bare / "prompts" / "hello.md").write_text("---\ndescription: Hi.\n---\nHi.\n")
+    config = Config.model_validate(
+        {
+            "plugins": [
+                {"name": "s1", "source": f"file://{skilled}", "skills": ["one/SKILL.md"]},
+                {"name": "s2", "source": f"file://{skilled}", "skills": ["two/SKILL.md"]},
+                {
+                    "name": "b",
+                    "source": f"file://{bare}",
+                    "skills": [],
+                    "prompts": ["prompts/*.md"],
+                },
+            ],
+            "libraries": [
+                {"name": "ones", "plugins": ["s1"], "description": "Ones."},
+                {"name": "twos", "plugins": ["s2"], "description": "Twos."},
+                {"name": "bare", "plugins": ["b"], "description": "Bare."},
+            ],
+        }
+    )
+    kb = KnowledgeBase(config, tmp_path / "cache")
+    with served(kb) as url:
+        text = await told(url, mode)
+    assert "[ones]" in text and "[twos]" in text
+    assert "bare" not in text and "Bare." not in text
 
 
 @pytest.mark.integration

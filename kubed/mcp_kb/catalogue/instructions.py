@@ -1,11 +1,11 @@
 """The server ``instructions`` for one request, as text.
 
 Pure: a catalogue, a scope and two flags in, a string out. No FastMCP, so the
-wording is tested without a server and Task 4 only decides when to call it.
+wording is tested without a server and the middleware only decides when to call it.
 """
 
 from ..mcp.scope import Scope
-from .uris import Catalogue, LibraryText, index_uri
+from .uris import Catalogue, LibraryText, index_uri, tidy
 
 RESOURCES_FOOTER = (
     "Read a listed skill at skill://<library>/<path>/SKILL.md; read its "
@@ -17,7 +17,7 @@ TOOLS_FOOTER = "Read these with read_resource."
 def _section(
     catalogue: Catalogue, scope: Scope, text: LibraryText, names: bool
 ) -> list[str]:
-    lines = [s for s in (text.description.strip(), text.notes.strip()) if s]
+    lines = [s for s in (tidy(text.description), tidy(text.notes)) if s]
     uri = index_uri(text.name)
     if names:
         paths = ", ".join(catalogue.skill_paths(text.name, scope))
