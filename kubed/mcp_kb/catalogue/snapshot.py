@@ -331,18 +331,14 @@ def assemble_libraries(
         ids += [name for name in lib.plugins if name in by_id]
         if lib.plugin_selector is not None:
             ids += [p.id for p in select(plugins, lib.plugin_selector)]
+        upstream = (descriptions or {}).get(lib.name, "")
+        own = [by_id[i].description for i in dict.fromkeys(ids)]
         if missing:
             problems.append(_no_such_plugins(missing, plugins))
         libraries.append(
             Library(
                 name=lib.name,
-                description=lib.description
-                or scrub(
-                    (descriptions or {}).get(lib.name)
-                    or "\n".join(
-                        d for i in dict.fromkeys(ids) if (d := by_id[i].description)
-                    )
-                ),
+                description=_resolved(lib.description, upstream, own),
                 notes=lib.notes,
                 list_skills=lib.list_skills,
                 plugins=tuple(dict.fromkeys(ids)),
@@ -359,6 +355,14 @@ def assemble_libraries(
             )
         )
     return libraries
+
+
+def _resolved(configured: str, upstream: str, plugins: list[str]) -> str:
+    """The first non-blank of the three tiers; blank text must not win."""
+    joined = "\n".join(d.strip() for d in plugins if d.strip())
+    if configured.strip():
+        return configured.strip()
+    return scrub(upstream.strip() or joined)
 
 
 def _no_such_plugins(missing: list[str], plugins: list[Plugin]) -> str:

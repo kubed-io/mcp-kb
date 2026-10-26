@@ -10,28 +10,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fastmcp.server.low_level import client_supports_extension
 from fastmcp.server.middleware import Middleware
 
 from ..catalogue.instructions import build_instructions
 from ..catalogue.uris import Catalogue
-from .request import client_reads_resources, requested_scope
-from .skills import EXTENSION_ID
-
-
-def _declared_on_initialize(context) -> bool:
-    capabilities = getattr(context.message.params, "capabilities", None)
-    extensions = getattr(capabilities, "extensions", None)
-    return bool(extensions) and EXTENSION_ID in extensions
-
-
-def _declared_on_discover(context) -> bool:
-    # Capabilities ride each request's _meta; no session means none declared.
-    try:
-        session = context.fastmcp_context.session
-        return client_supports_extension(session, EXTENSION_ID)
-    except Exception:  # noqa: BLE001 - absent context or session is "not declared"
-        return False
+from .request import (
+    client_reads_resources,
+    declared_on_discover,
+    declared_on_initialize,
+    requested_scope,
+)
 
 
 class ScopedInstructions(Middleware):
@@ -51,12 +39,14 @@ class ScopedInstructions(Middleware):
     async def on_initialize(self, context, call_next):
         result = await call_next(context)
         if result is not None:
-            result.instructions = self._text(_declared_on_initialize(context))
+            result.instructions = self._text(declared_on_initialize(context))
         return result
 
     async def on_discover(self, context, call_next):
         result = await call_next(context)
-        text = self._text(_declared_on_discover(context))
+        if result is None:
+            return result
+        text = self._text(declared_on_discover(context))
         if isinstance(result, dict):
             result["instructions"] = text
         else:

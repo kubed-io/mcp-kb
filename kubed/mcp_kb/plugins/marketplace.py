@@ -104,8 +104,10 @@ def read_marketplace(
             skipped.append({"plugin": _label(raw), "reason": str(skip)})
 
     metadata = data.get("metadata")
-    described = _text(data.get("description")) or (
-        _text(metadata.get("description")) if isinstance(metadata, dict) else None
+    described = (_text(data.get("description")) or "").strip() or (
+        (_text(metadata.get("description")) or "").strip()
+        if isinstance(metadata, dict)
+        else None
     )
     return Marketplace(
         description=described or "",

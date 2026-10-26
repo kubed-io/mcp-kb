@@ -509,3 +509,13 @@ def test_non_string_marketplace_description_is_ignored(tmp_path):
     data = {"description": 3, "metadata": {"description": "m"}, "plugins": []}
     assert read(tmp_path, data).description == "m"
     assert read(tmp_path, {"description": {}, "plugins": []}).description == ""
+
+
+def test_a_blank_marketplace_description_defers_to_metadata(tmp_path):
+    catalog = {
+        "name": "m",
+        "description": " ",
+        "metadata": {"description": "Meta words."},
+        "plugins": [],
+    }
+    assert read(tmp_path, catalog).description == "Meta words."

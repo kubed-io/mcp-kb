@@ -13,7 +13,12 @@ is what stdio is: no headers, no query string, nothing to narrow by.
 
 from __future__ import annotations
 
+from fastmcp.server.low_level import client_supports_extension
+
 from .scope import Scope
+
+# The client capability a host declares when it builds its own skill list.
+EXTENSION_ID = "io.modelcontextprotocol/skills"
 
 # Per-request scope, set once in a client's connection config -- which is how
 # one deployment serves several narrowly-scoped agents.
@@ -146,3 +151,19 @@ def full_listing() -> bool:
     """
     declared = _read(LISTING_HEADER, LISTING_PARAM)
     return bool(declared) and declared[0].strip().lower() == _FULL
+
+
+def declared_on_initialize(context) -> bool:
+    """Whether the ``initialize`` request declared the Skills extension."""
+    params = getattr(getattr(context, "message", None), "params", None)
+    extensions = getattr(getattr(params, "capabilities", None), "extensions", None)
+    return bool(extensions) and EXTENSION_ID in extensions
+
+
+def declared_on_discover(context) -> bool:
+    """Whether a 2026-07-28 request's ``_meta`` declared it; no session, no."""
+    try:
+        session = context.fastmcp_context.session
+        return client_supports_extension(session, EXTENSION_ID)
+    except Exception:  # noqa: BLE001 - absent context or session is "not declared"
+        return False

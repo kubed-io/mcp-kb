@@ -852,3 +852,22 @@ def test_a_snapshot_strips_library_text_before_the_index_uses_it(tmp_path):
 
     assert index("D.  ", "N.\n").startswith("# lib — 2 skills\n\nD.\nN.\n\nskill://")
     assert index("D.", "  \n").startswith("# lib — 2 skills\n\nD.\n\nskill://")
+
+
+@pytest.mark.parametrize(
+    ("configured", "upstream"), [("   ", None), ("", "  \n "), ("  ", " ")]
+)
+def test_a_blank_description_falls_through_to_the_next_tier(
+    tmp_path, configured, upstream
+):
+    plugin = fake_plugin("p", tmp_path, description="P words.")
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "p", "source": f"file://{tmp_path}"}],
+            "libraries": [{"name": "lib", "description": configured, "plugins": ["p"]}],
+        }
+    )
+    descriptions = None if upstream is None else {"lib": upstream}
+    [lib] = assemble_libraries(config, [plugin], descriptions=descriptions)
+    assert lib.description == "P words."
+

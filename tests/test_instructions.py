@@ -17,6 +17,8 @@ from kubed.mcp_kb.catalogue.instructions import build_instructions
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex, load_skills
 from kubed.mcp_kb.catalogue.uris import Catalogue, LibraryText
 from kubed.mcp_kb.config import Config
+from kubed.mcp_kb.mcp.instructions import ScopedInstructions
+from kubed.mcp_kb.mcp.request import declared_on_initialize
 from kubed.mcp_kb.mcp.scope import EVERYTHING, Scope
 from tests.conftest import SKILLS_GLOBS, fake_plugin, make_config
 from tests.test_header_scope import server_url  # noqa: F401 - shared HTTP fixture
@@ -153,9 +155,11 @@ def served(knowledge_base):
         if server.started:
             break
         threading.Event().wait(0.05)
-    yield f"http://127.0.0.1:{port}/mcp"
-    server.should_exit = True
-    thread.join(timeout=5)
+    try:
+        yield f"http://127.0.0.1:{port}/mcp"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
 
 
 async def told(url, mode, headers=None, extension=False):
@@ -168,18 +172,16 @@ async def told(url, mode, headers=None, extension=False):
         return client.instructions
 
 
-def _market(root, description, *skills):
+def _market(root, description, *skills, plugin_description=None):
     """A one-plugin marketplace at ``root`` whose own description is given."""
     (root / ".claude-plugin").mkdir(parents=True, exist_ok=True)
-    (root / ".claude-plugin" / "marketplace.json").write_text(
-        json.dumps(
-            {
-                "name": "m",
-                "description": description,
-                "plugins": [{"name": "p", "source": "./p"}],
-            }
-        )
-    )
+    plugin = {"name": "p", "source": "./p"}
+    if plugin_description is not None:
+        plugin["description"] = plugin_description
+    catalog = {"name": "m", "plugins": [plugin]}
+    if description is not None:
+        catalog["description"] = description
+    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps(catalog))
     for name in skills:
         path = root / "p" / "skills" / name
         path.mkdir(parents=True, exist_ok=True)
@@ -303,3 +305,106 @@ async def test_refresh_reaches_a_new_connection(tmp_path, mode):
         text = await told(url, mode)
     assert "Two." in text
     assert "One." not in text
+
+
+@pytest.mark.integration
+@ERAS
+async def test_a_tag_scope_over_two_libraries_gets_sections_and_no_names(
+    server_url, mode  # noqa: F811
+):
+    text = await told(f"{server_url}?tags=flat&tags=deep", mode)
+    lines = text.splitlines()
+    assert [x for x in lines if x.startswith("[")] == ["[deepsource]", "[flatsource]"]
+    assert "Skills: skill://deepsource/_index.md" in lines
+    assert "Skills: skill://flatsource/_index.md" in lines
+    for known in ("alpha", "beta", "gamma", "delta"):
+        assert known not in text
+
+
+@pytest.mark.integration
+@ERAS
+async def test_a_tag_that_matches_one_library_selects_it_alone(
+    server_url, mode  # noqa: F811
+):
+    text = await told(server_url, mode, {"X-Skill-Tags": "flat"})
+    assert "[" not in text
+    assert "Skills (skill://flatsource/_index.md): alpha, beta" in text.splitlines()
+    assert "deepsource" not in text
+
+
+async def _index(url, mode):
+    kwargs = {"mode": "legacy"} if mode == "legacy" else {}
+    async with Client(StreamableHttpTransport(url), **kwargs) as client:
+        parts = await client.read_resource("skill://lib/_index.md")
+    return parts[0].text
+
+
+# (configured library keys, marketplace description, plugin description,
+#  the text a client is told above the pointer)
+TEXTS = [
+    pytest.param(
+        {"description": "Mine.", "notes": "Start at alpha."},
+        "Theirs.",
+        None,
+        "Mine.\nStart at alpha.",
+        id="configured-replaces-marketplace",
+    ),
+    pytest.param(
+        {"notes": "Start at alpha."},
+        "Theirs.",
+        None,
+        "Theirs.\nStart at alpha.",
+        id="marketplace-then-notes",
+    ),
+    pytest.param({}, None, "Plugin words.", "Plugin words.", id="plugins-fallback"),
+]
+
+
+@pytest.mark.integration
+@ERAS
+@pytest.mark.parametrize(("keys", "market", "plugin", "expected"), TEXTS)
+async def test_the_text_a_library_is_told_and_its_index_open_alike(
+    tmp_path, mode, keys, market, plugin, expected
+):
+    root = tmp_path / "market"
+    _market(root, market, "alpha", plugin_description=plugin)
+    kb = KnowledgeBase(_library_config(root, **keys), tmp_path / "cache")
+    with served(kb) as url:
+        text = await told(url, mode)
+        index = await _index(url, mode)
+    assert text == (
+        expected + "\nSkills (skill://lib/_index.md): alpha\n\n" + RES_FOOTER
+    )
+    assert expected in index
+
+
+class _Context:
+    """What FastMCP hands a middleware; ``message`` is None when it could not
+    re-validate the request."""
+
+    message = None
+    fastmcp_context = None
+
+
+@pytest.mark.unit
+def test_a_missing_message_means_the_extension_is_not_declared():
+    assert declared_on_initialize(_Context()) is False
+
+
+@pytest.mark.unit
+async def test_a_missing_message_still_gets_instructions(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("penpot"): ["router"]})
+    result = type("Result", (), {"instructions": None})()
+
+    async def call_next(_context):
+        return result
+
+    mw = ScopedInstructions(lambda: cat)
+    assert await mw.on_initialize(_Context(), call_next) is result
+    assert result.instructions.startswith("Skills (skill://penpot/_index.md)")
+    # discover has no message to read, and a None answer must not raise either
+    assert await mw.on_discover(_Context(), _none) is None
+
+
+async def _none(_context):
+    return None

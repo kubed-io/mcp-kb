@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A client now connects knowing what each library in its scope is for; set a library's `description`, `notes` and `listSkills` to shape it.
 - Discover and load verified skills in MCP Skills clients through `skills/list` and `skills/get`.
 
+### Changed
+
+- Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
+
 ### Fixed
 
 - Docker quick start works without a checkout; native setup documents explicit config and cache paths on Windows and POSIX systems.
