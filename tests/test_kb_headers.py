@@ -63,6 +63,27 @@ async def test_new_header_beats_its_alias(server_url, row):  # noqa: F811
     assert await _uris(server_url, {header: value, old: other}) == expected
 
 
+@pytest.mark.parametrize(
+    ("new", "old"),
+    [
+        ("Kb-Listing", "X-Skill-Listing"),
+        ("Kb-Resource-Prefix", "X-MCP-Resource-Prefix"),
+    ],
+)
+async def test_new_header_beats_its_alias_for_listing_and_prefix(
+    server_url, new, old  # noqa: F811
+):
+    if "Listing" in new:
+        headers = {new: "index", old: "full"}
+        assert not any("SKILL.md" in u for u in await _uris(server_url, headers))
+        headers = {new: "full", old: "index"}
+        assert any("SKILL.md" in u for u in await _uris(server_url, headers))
+    else:
+        async with _client(server_url, {new: "new+", old: "old+"}) as client:
+            assert "new+skill://" in client.instructions
+            assert "old+skill://" not in client.instructions
+
+
 async def test_precedence_runs_header_then_param(server_url):  # noqa: F811
     # old header beats new param; new param beats old param
     assert await _uris(f"{server_url}?library=alpha", {"X-Skill-Library": "gamma"}) == GAMMA

@@ -216,7 +216,9 @@ class PromptProvider(Provider):
         return [
             p
             for p in prompts
-            if scope.admits(p.library, p.category, p.tags, p.library_categories)
+            if scope.admits(
+                p.library, p.category, p.tags, library_categories=p.library_categories
+            )
         ]
 
     async def _list_prompts(self) -> Sequence[Prompt]:

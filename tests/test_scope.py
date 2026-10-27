@@ -237,10 +237,10 @@ def test_the_readers_have_one_way_in(monkeypatch):
 
 def test_library_or_plugin_category_selects():
     lib = "n8n"
-    assert Scope.parse(categories=["dev"]).admits(lib, "automation", [], frozenset({"dev"}))
-    assert Scope.parse(categories=["automation"]).admits(
-        lib, "automation", [], frozenset({"dev"})
-    )
-    assert not Scope.parse(categories=["x"]).admits(
-        lib, "automation", [], frozenset({"dev"})
-    )
+    listed = frozenset({"dev"})
+    scope = Scope.parse(categories=["dev"])
+    assert scope.admits(lib, "automation", [], library_categories=listed)
+    scope = Scope.parse(categories=["automation"])
+    assert scope.admits(lib, "automation", [], library_categories=listed)
+    scope = Scope.parse(categories=["x"])
+    assert not scope.admits(lib, "automation", [], library_categories=listed)

@@ -96,6 +96,7 @@
           "default": null
         },
         "categories": {
+          "description": "The library's categories: a category scope selects every library that lists one.",
           "items": {
             "type": "string"
           },

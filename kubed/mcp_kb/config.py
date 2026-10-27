@@ -319,7 +319,13 @@ class LibraryConfig(Strict):
     source: str | None = None
     plugins: list[str] = Field(default_factory=list)
     plugin_selector: Selector | None = Field(default=None, alias="pluginSelector")
-    categories: list[str] = Field(default_factory=list)
+    categories: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The library's categories: a category scope selects every library that"
+            " lists one."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -330,7 +336,7 @@ class LibraryConfig(Strict):
         for category in categories:
             if "," in category:
                 raise ValueError("a category has no comma; list several instead")
-        return categories
+        return list(dict.fromkeys(categories))
 
     @field_validator("source")
     @classmethod

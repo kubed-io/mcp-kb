@@ -4,9 +4,9 @@ A client's scope is set once, by whoever configures it: ``?library=grafana`` on
 its MCP URL, or a ``Kb-Library`` header. A typo there used to be served
 exactly as asked -- a catalogue with nothing in it, no error, nothing in any
 log -- which from the client looks like a server that has no skills. So a scope
-that names a library the config does not declare, a category no plugin has, or
-a tag nothing carries, fails every request with an error that says what is
-there instead, and a client that cannot connect says why.
+that names a library the config does not declare, a category no library lists
+and no plugin has, or a tag nothing carries, fails every request with an error
+that says what is there instead, and a client that cannot connect says why.
 
 The error names libraries, categories and tags. That is not a leak: a scope is
 the operator's choice of what a client is given, not a boundary the model is
@@ -69,6 +69,13 @@ def what_is_wrong(scope: Scope, config: Config, snapshot: Snapshot) -> str | Non
     # and refusing a client for what its library does not *currently* carry is
     # refusing it for what happens to be served. See the module note.
     if scope.library and not _up(snapshot, scope.library):
+        return None
+    # A library's categories are config-declared like its name: one listed by
+    # a library that is down is refused for nothing it names.
+    if not scope.library and any(
+        scope.categories & set(lib.get("categories", ())) and not _up(snapshot, name)
+        for name, lib in snapshot.status.get("libraries", {}).items()
+    ):
         return None
 
     # What the plugins declare, in the library if one is named and anywhere

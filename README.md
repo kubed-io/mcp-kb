@@ -76,7 +76,7 @@ A client can be given part of the catalogue and no more, and the narrowing is a 
 | `?tag=oncall,runbooks` | `Kb-Tag` | what carries **both** tags; repeat the parameter for any-of |
 | `?library=grafana&tag=oncall` | all three | the tagged part of that one library |
 
-The old `X-Skill-*` header names still work.
+The old `X-Skill-*` header names still work, but a pin set under one no longer holds against a client-sent `Kb-` header: move pins to the `Kb-` names.
 
 A header beats the URL, which is what makes a scope pinned inside a credential something the caller cannot edit away. It is a plumbed constant, never a tool argument — there is no way for a model to ask for material it was not given.
 
@@ -183,7 +183,7 @@ Per request, on the MCP URL — each with a header form that beats it:
 | `?listing=full` | `Kb-Listing` | Lists every skill, for clients that sync them to disk |
 | `?prefix=kb+` | `Kb-Resource-Prefix` | Writes a gateway's prefix before addresses in text |
 
-The old `X-Skill-*` and `X-MCP-Resource-Prefix` names (and `?categories=`, `?tags=`, `?skills=`) still work.
+The old `X-Skill-*` and `X-MCP-Resource-Prefix` names (and `?categories=`, `?tags=`, `?skills=`) still work, though a pin under an old header yields to a client-sent `Kb-` one.
 
 `mcp-kb schema` prints the config JSON Schema, which is also committed as `config.schema.json` for an editor to validate against live.
 

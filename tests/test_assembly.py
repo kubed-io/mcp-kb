@@ -703,6 +703,28 @@ async def test_a_library_whose_marketplace_failed_is_not_refused_a_category_or_t
     assert problem.startswith("The scope names tag 'whatever'")
 
 
+async def test_a_category_listed_only_by_a_library_that_is_down_is_not_refused(
+    market, tmp_path
+):
+    """A library's categories are config-declared like its name, so a category
+    scope is refused for what it names -- not because the libraries listing it
+    happen to be failing while another serves."""
+    config = _config(
+        tmp_path,
+        libraries=[
+            {"name": "obs", "source": "lab://market"},
+            {"name": "devlib", "plugins": ["nope@obs"], "categories": ["dev"]},
+        ],
+    )
+    kb = KnowledgeBase(config, tmp_path / "cache")
+    assert kb.status["libraries"]["devlib"]["plugins"] == []
+
+    scope = Scope.parse(categories=["dev"])
+    assert what_is_wrong(scope, config, kb.snapshot) is None
+    problem = what_is_wrong(Scope.parse(categories=["nada"]), config, kb.snapshot)
+    assert problem.startswith("The scope names category 'nada'")
+
+
 # -- a marketplace or a manifest edited in place -------------------------------
 
 

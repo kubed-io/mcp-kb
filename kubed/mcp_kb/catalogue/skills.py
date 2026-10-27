@@ -10,10 +10,11 @@ that is where the globs, the dotfile rules and the skill-root conventions live.
 This module only turns what harvest already found into ``Skill`` records and a
 place to read library-level files from; it never walks a tree on its own.
 
-What a scope matches on is the *plugin's*: its category and its labels (tags
-and keywords). A skill carries them so that a scope can be decided per skill
-without reaching back to the plugin, and a library's files carry the plugin
-itself, because a file has no row of its own to copy them onto.
+What a scope matches on is the plugin's category or its library's categories,
+and the plugin's labels (tags and keywords). A skill carries them so that a
+scope can be decided per skill without reaching back to the plugin, and a
+library's files carry the plugin itself, because a file has no row of its own
+to copy them onto.
 """
 
 from __future__ import annotations
@@ -135,7 +136,9 @@ class _Root:
 
     def admits(self, scope: Scope) -> bool:
         return scope.admits_labels(
-            self.plugin.category, self.plugin.labels, self.library_categories
+            self.plugin.category,
+            self.plugin.labels,
+            library_categories=self.library_categories,
         )
 
     def holds(self, rel: str, excluded: Iterable[Path] = ()) -> Path | None:
@@ -409,5 +412,8 @@ class SkillIndex:
 
 def _admits(scope: Scope, skill: Skill) -> bool:
     return scope.admits(
-        skill.library, skill.category, skill.tags, skill.library_categories
+        skill.library,
+        skill.category,
+        skill.tags,
+        library_categories=skill.library_categories,
     )
