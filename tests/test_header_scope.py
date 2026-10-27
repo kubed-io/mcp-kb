@@ -151,7 +151,7 @@ async def test_no_header_sees_every_library(server_url):
 @pytest.mark.integration
 async def test_the_pin_hides_the_other_library_from_the_listing(server_url):
     uris = await resource_uris(server_url, headers={"X-Skill-Library": "flatsource"})
-    assert uris == ["skill://flatsource/_index.md"]
+    assert uris == ["skill://_index.md"]
 
 
 @pytest.mark.integration
@@ -163,7 +163,7 @@ async def test_a_header_beats_the_same_setting_in_the_url(server_url):
     uris = await resource_uris(
         f"{server_url}?library=deepsource", headers={"X-Skill-Library": "flatsource"}
     )
-    assert uris == ["skill://flatsource/_index.md"]
+    assert uris == ["skill://_index.md"]
 
 
 @pytest.mark.integration

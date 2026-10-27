@@ -201,12 +201,12 @@ async def test_a_prompt_tool_mistake_is_an_error_result_that_says_what_to_do(
 
 async def test_a_library_is_the_whole_library(url):
     _, resources, prompts = await _seen(url, "?library=observe")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["_index.md"]
     assert prompts == ["observe_debug"]
     assert await _skills(url, "?library=observe") == [
-        "skill://observe/alerts/SKILL.md",
-        "skill://observe/loki/SKILL.md",
-        "skill://observe/tempo/SKILL.md",
+        "skill://alerts/SKILL.md",
+        "skill://loki/SKILL.md",
+        "skill://tempo/SKILL.md",
     ]
 
 
@@ -257,10 +257,10 @@ async def test_a_repeated_category_parameter_means_any_of_them(url):
 
 async def test_tags_narrow_within_a_library(url):
     _, resources, prompts = await _seen(url, "?library=observe&tags=extra")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["_index.md"]
     assert prompts == []
     assert await _skills(url, "?library=observe&tags=extra") == [
-        "skill://observe/alerts/SKILL.md"
+        "skill://alerts/SKILL.md"
     ]
 
 
@@ -352,7 +352,7 @@ async def test_a_header_scope_is_refused_the_same_way(url):
 
 async def test_a_header_beats_the_url_parameter(url):
     _, resources, _ = await _seen(url, "?library=design", {"X-Skill-Library": "observe"})
-    assert resources == ["observe/_index.md"]
+    assert resources == ["_index.md"]
 
 
 async def test_the_prompt_tools_are_held_to_the_scope(url):

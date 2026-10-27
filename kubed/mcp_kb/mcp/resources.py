@@ -39,7 +39,7 @@ from mcp.shared.exceptions import MCPError
 from mcp_types import INVALID_PARAMS
 
 from ..catalogue.uris import Catalogue
-from .request import full_listing, requested_scope
+from .request import full_listing, requested_addressing, requested_scope
 
 
 class CatalogueProvider(Provider):
@@ -65,10 +65,11 @@ class CatalogueProvider(Provider):
 
     async def _list_resources(self) -> Sequence[Resource]:
         entries = self._catalogue().entries(requested_scope(), full=full_listing())
+        a = requested_addressing()
         return [
             TextResource(
-                uri=entry.uri,
-                name=entry.name,
+                uri=a.structured(entry.uri),
+                name=a.structured(entry.uri).removeprefix("skill://"),
                 description=entry.description,
                 mime_type=entry.mime_type,
                 tags=set(entry.tags),
@@ -84,14 +85,21 @@ class CatalogueProvider(Provider):
         self, uri: str, version: VersionSpec | None = None
     ) -> Resource | None:
         catalogue = self._catalogue()
-        body = catalogue.read(uri, requested_scope())
-        if body is None:
+        scope = requested_scope()
+        a = requested_addressing()
+        # Keep the canonical address that resolved, for its mime type.
+        hit = a.first(
+            uri,
+            lambda c: (b, c) if (b := catalogue.read(c, scope)) is not None else None,
+        )
+        if hit is None:
             return None
+        body, canonical = hit
         return TextResource(
             uri=uri,
             name=uri.removeprefix("skill://"),
-            mime_type=catalogue.mime(uri),
-            text=body,
+            mime_type=catalogue.mime(canonical),
+            text=a.text(body),
         )
 
 
@@ -117,9 +125,15 @@ class NameTheFileToRead(Middleware):
             return await call_next(context)
         except NotFoundError:
             uri = str(context.message.uri)
-            hint = self._catalogue().hint(uri, requested_scope())
+            catalogue, scope, a = (
+                self._catalogue(),
+                requested_scope(),
+                requested_addressing(),
+            )
+            hint = a.first(uri, lambda c: catalogue.hint(c, scope))
             if hint is None:
                 raise
+            hint = a.text(hint)
             raise MCPError(
                 code=INVALID_PARAMS,
                 message=f"Resource not found: {uri!r}. {hint}",
