@@ -18,6 +18,10 @@ multiplexing gateway in resources mode.
 **Spec:** `docs/superpowers/specs/2026-10-27-addressing-design.md` (binding). This plan cites its
 decisions as D1–D6 and acceptance cases as AC1–AC10.
 
+> **Revised 2026-10-27 (Dr K):** pin-shortening was dropped after implementation. Addresses always keep
+> the library segment, and only `X-MCP-Resource-Prefix` remains. The spec's *Revised* note says why. Read
+> the tasks below as history; the pin parts of Tasks 1–5 were removed in the `drop shortening` commit.
+
 ## Global Constraints
 
 - **Toolchain.** Run everything from the worktree root:
