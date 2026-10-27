@@ -1,7 +1,7 @@
 """Refusing a scope that names nothing, rather than serving it an empty catalogue.
 
 A client's scope is set once, by whoever configures it: ``?library=grafana`` on
-its MCP URL, or an ``X-Skill-Library`` header. A typo there used to be served
+its MCP URL, or a ``Kb-Library`` header. A typo there used to be served
 exactly as asked -- a catalogue with nothing in it, no error, nothing in any
 log -- which from the client looks like a server that has no skills. So a scope
 that names a library the config does not declare, a category no plugin has, or
@@ -39,13 +39,13 @@ if TYPE_CHECKING:
     from ..config import Config
 
 FOLDER_IN_LIBRARY = (
-    "A scope names a library, not a folder: use ?categories= or ?tags= to narrow"
-    " inside it."
+    "A scope names a library, not a folder: use ?category= or ?tag= (or the"
+    " Kb-Category and Kb-Tag headers) to narrow inside it."
 )
 
 COMMA_IN_CATEGORY = (
-    "A plugin has one category, so 'a,b' matches nothing; repeat ?categories= to"
-    " mean any of them."
+    "A plugin has one category, so 'a,b' matches nothing; repeat ?category= (or"
+    " the Kb-Category header) to mean any of them."
 )
 
 

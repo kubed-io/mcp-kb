@@ -128,7 +128,7 @@ async def test_http_scope_and_header_precedence(server_url):  # noqa: F811
 
     transport = StreamableHttpTransport(
         f"{server_url}?library=deepsource",
-        headers={"X-Skill-Library": "flatsource"},
+        headers={"Kb-Library": "flatsource"},
     )
     async with Client(transport) as client:
         listing = await request(client, "skills/list")

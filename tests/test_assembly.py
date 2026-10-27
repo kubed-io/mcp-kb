@@ -420,7 +420,7 @@ def manifested(tmp_path):
 
 async def test_a_manifests_keywords_join_the_plugins_labels(manifested, tmp_path):
     """Tagged nowhere but in its plugin.json, the plugin is still selectable:
-    a `pluginSelector` on the keyword picks it, `?tags=` on a real request
+    a `pluginSelector` on the keyword picks it, `?tag=` on a real request
     admits it, and /health shows the merged labels. The entry's version beats
     the manifest's; the description it left empty is the manifest's."""
     import threading
@@ -458,11 +458,11 @@ async def test_a_manifests_keywords_join_the_plugins_labels(manifested, tmp_path
         threading.Event().wait(0.05)
     try:
         async with Client(
-            StreamableHttpTransport(f"http://127.0.0.1:{port}/mcp?tags=tdd")
+            StreamableHttpTransport(f"http://127.0.0.1:{port}/mcp?tag=tdd")
         ) as client:
             names = sorted(r.name for r in await client.list_resources())
         async with Client(
-            StreamableHttpTransport(f"http://127.0.0.1:{port}/mcp?tags=testing,tdd")
+            StreamableHttpTransport(f"http://127.0.0.1:{port}/mcp?tag=testing,tdd")
         ) as client:
             both = sorted(r.name for r in await client.list_resources())
     finally:

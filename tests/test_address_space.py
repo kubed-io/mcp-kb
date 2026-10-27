@@ -8,7 +8,7 @@ library, and a second library reuses a folder and a skill name, which are the
 shapes scope and the listing have to keep apart.
 
 Every address is read over MCP from a real ``KnowledgeBase`` on a loopback
-port, because scope and the ``?skills=full`` listing exist only inside an HTTP
+port, because scope and the ``?listing=full`` listing exist only inside an HTTP
 request.
 """
 
@@ -148,9 +148,9 @@ def url(tmp_path_factory):
 def _client(url, query="", library=None, tags=None):
     headers = {}
     if library:
-        headers["X-Skill-Library"] = library
+        headers["Kb-Library"] = library
     if tags:
-        headers["X-Skill-Tags"] = tags
+        headers["Kb-Tag"] = tags
     return Client(StreamableHttpTransport(url + query, headers=headers))
 
 
@@ -543,7 +543,7 @@ async def test_the_listing_is_exactly_the_index_rows(url):
 
 
 async def test_every_listed_row_reads(url):
-    for uri, *_ in await _rows(url, "?skills=full"):
+    for uri, *_ in await _rows(url, "?listing=full"):
         assert await _read(url, uri)
 
 
@@ -616,7 +616,7 @@ async def test_the_files_index_lists_the_library_level_files(url):
 
 
 async def test_the_full_listing_adds_every_skills_instructions(url):
-    uris = [row[0] for row in await _rows(url, "?skills=full")]
+    uris = [row[0] for row in await _rows(url, "?listing=full")]
     skills = [u for u in uris if u.endswith("/SKILL.md")]
     assert skills == [
         "skill://grafana/grafana-k6/k6/SKILL.md",
@@ -689,7 +689,7 @@ async def test_a_library_slash_folder_is_refused_as_not_a_library(url):
     narrow instead."""
     with pytest.raises(Exception) as caught:
         await _rows(url, library="grafana/grafana-plugins")
-    assert "use ?categories= or ?tags= to narrow inside it" in str(caught.value)
+    assert "use ?category= or ?tag=" in str(caught.value)
 
 
 async def test_a_bare_folder_name_is_refused_as_no_such_library(url):

@@ -22,7 +22,7 @@ from kubed.mcp_kb.config import Config
 
 pytestmark = pytest.mark.integration
 
-DEV = {"X-Skill-Categories": "dev"}
+DEV = {"Kb-Category": "dev"}
 
 
 def _skill(root, name):
@@ -137,7 +137,7 @@ async def test_category_selects_libraries(server_url):
 
 
 async def test_plugin_category_still_selects(server_url):
-    uris = await _uris(server_url, {"X-Skill-Categories": "ops"})
+    uris = await _uris(server_url, {"Kb-Category": "ops"})
     assert "skill://gamma/_index.md" in uris
     assert not any(u.startswith(("skill://alpha", "skill://beta")) for u in uris)
 
@@ -145,20 +145,20 @@ async def test_plugin_category_still_selects(server_url):
 async def test_pin_and_foreign_category(server_url):
     """gamma neither lists `dev` nor has a plugin of that category: refused, as a
     pin with a category from elsewhere is today."""
-    headers = {"X-Skill-Library": "gamma", **DEV}
+    headers = {"Kb-Library": "gamma", **DEV}
     with pytest.raises(Exception, match="category 'dev'"):
         await _uris(server_url, headers)
 
 
 async def test_tag_narrows_within_categories(server_url):
-    uris = await _uris(server_url, {**DEV, "X-Skill-Tags": "x"})
+    uris = await _uris(server_url, {**DEV, "Kb-Tag": "x"})
     assert "skill://alpha/_index.md" in uris
     assert not any(u.startswith("skill://beta") for u in uris)
 
 
 async def test_unknown_category_lists_library_categories(server_url):
     with pytest.raises(Exception, match="nope") as caught:
-        await _uris(server_url, {"X-Skill-Categories": "nope"})
+        await _uris(server_url, {"Kb-Category": "nope"})
     assert "dev" in str(caught.value)
 
 

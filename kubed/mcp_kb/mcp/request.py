@@ -22,17 +22,24 @@ from .scope import Scope
 EXTENSION_ID = "io.modelcontextprotocol/skills"
 
 # Per-request scope, set once in a client's connection config -- which is how
-# one deployment serves several narrowly-scoped agents.
+# one deployment serves several narrowly-scoped agents. Each setting is a
+# header and a query parameter, plus the older names, still accepted.
 LIBRARY_PARAM = "library"
-LIBRARY_HEADER = "x-skill-library"
-CATEGORIES_PARAM = "categories"
-CATEGORIES_HEADER = "x-skill-categories"
-TAGS_PARAM = "tags"
-TAGS_HEADER = "x-skill-tags"
+LIBRARY_HEADER = "kb-library"
+LIBRARY_ALIAS = "x-skill-library"
+CATEGORY_PARAM = "category"
+CATEGORY_HEADER = "kb-category"
+CATEGORY_ALIAS = "x-skill-categories"
+CATEGORY_PARAM_ALIAS = "categories"
+TAG_PARAM = "tag"
+TAG_HEADER = "kb-tag"
+TAG_ALIAS = "x-skill-tags"
+TAG_PARAM_ALIAS = "tags"
 
 # What a gateway puts in front of kb's resource addresses, e.g. ``kb+``.
 PREFIX_PARAM = "prefix"
-PREFIX_HEADER = "x-mcp-resource-prefix"
+PREFIX_HEADER = "kb-resource-prefix"
+PREFIX_ALIAS = "x-mcp-resource-prefix"
 
 # How a client declares it cannot use MCP prompts, and so wants them as tools.
 PROMPTS_PARAM = "prompts"
@@ -45,8 +52,10 @@ _OFF = ("off", "false", "0", "no", "none")
 
 # How a skill-syncing client asks for every skill in the listing. Off by default
 # because it is the expensive shape and almost nothing needs it.
-LISTING_PARAM = "skills"
-LISTING_HEADER = "x-skill-listing"
+LISTING_PARAM = "listing"
+LISTING_HEADER = "kb-listing"
+LISTING_ALIAS = "x-skill-listing"
+LISTING_PARAM_ALIAS = "skills"
 _FULL = "full"
 
 
@@ -83,45 +92,59 @@ def http_request() -> tuple[dict[str, list[str]], dict[str, list[str]]] | None:
     )
 
 
-def _read(header: str, param: str, *aliases: str) -> list[str]:
+def _read(
+    header: str,
+    param: str,
+    alias: str | None = None,
+    param_alias: str | None = None,
+) -> list[str]:
     """What this request says for one setting: every value, or none at all.
 
-    Headers first, in the order given, then the query parameter: the header is
-    set in a credential, by an admin, where the parameter rides on a URL
-    somebody may paste without it. Off HTTP there is neither, and an empty list
-    is what every caller reads as "not narrowed, not declared".
+    Precedence: the header, its older name, the query parameter, its older
+    name. A header is set in a credential, by an admin, where a parameter rides
+    on a URL somebody may paste without it. Off HTTP there is neither, and an
+    empty list is what every caller reads as "not narrowed, not declared".
     """
     http = http_request()
     if http is None:
         return []
     params, headers = http
-    for name in (header, *aliases):
-        found = [value for value in headers.get(name, []) if value]
+    for source, name in (
+        (headers, header),
+        (headers, alias),
+        (params, param),
+        (params, param_alias),
+    ):
+        found = [value for value in source.get(name or "", []) if value]
         if found:
             return found
-    return [value for value in params.get(param, []) if value]
+    return []
 
 
 def requested_scope() -> Scope:
     """The slice of the catalogue this request is restricted to.
 
-    Read from the MCP URL (``?library=grafana&categories=observability``) or
-    headers (``X-Skill-Library``, ``X-Skill-Categories``, ``X-Skill-Tags``). It
-    is a ceiling set by whoever configured the client, not a suggestion the
-    model can widen. One library: it is the URI's first segment, so several
-    would be a different request.
+    Read from the MCP URL (``?library=grafana&category=observability``) or
+    headers (``Kb-Library``, ``Kb-Category``, ``Kb-Tag``); the older
+    ``X-Skill-Library``, ``X-Skill-Categories`` and ``X-Skill-Tags`` (and
+    ``?categories=``, ``?tags=``) still work. It is a ceiling set by whoever
+    configured the client, not a
+    suggestion the model can widen. One library: it is the URI's first segment,
+    so several would be a different request.
     """
-    library = _read(LIBRARY_HEADER, LIBRARY_PARAM)
+    library = _read(LIBRARY_HEADER, LIBRARY_PARAM, LIBRARY_ALIAS)
     return Scope.parse(
         library[0] if library else "",
-        _read(CATEGORIES_HEADER, CATEGORIES_PARAM),
-        _read(TAGS_HEADER, TAGS_PARAM),
+        _read(
+            CATEGORY_HEADER, CATEGORY_PARAM, CATEGORY_ALIAS, CATEGORY_PARAM_ALIAS
+        ),
+        _read(TAG_HEADER, TAG_PARAM, TAG_ALIAS, TAG_PARAM_ALIAS),
     )
 
 
 def requested_addressing() -> Addressing:
     """The gateway prefix this request wants in front of addresses in text."""
-    prefix = _read(PREFIX_HEADER, PREFIX_PARAM)
+    prefix = _read(PREFIX_HEADER, PREFIX_PARAM, PREFIX_ALIAS)
     # A query string decodes "+" to a space, and a valid prefix has no space.
     return Addressing.parse(prefix[0].replace(" ", "+") if prefix else "")
 
@@ -159,9 +182,12 @@ def full_listing() -> bool:
     finds them only by scanning ``resources/list`` for ``/SKILL.md``, so for
     those clients the cheap listing is an empty one. Everything else pays ~16k
     tokens per listing for rows it was going to narrow down anyway, which is why
-    this is opt-in: ``?skills=full``, or an ``X-Skill-Listing: full`` header.
+    this is opt-in: ``?listing=full`` or a ``Kb-Listing: full`` header
+    (``?skills=full`` and ``X-Skill-Listing`` also work).
     """
-    declared = _read(LISTING_HEADER, LISTING_PARAM)
+    declared = _read(
+        LISTING_HEADER, LISTING_PARAM, LISTING_ALIAS, LISTING_PARAM_ALIAS
+    )
     return bool(declared) and declared[0].strip().lower() == _FULL
 
 

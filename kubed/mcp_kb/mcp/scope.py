@@ -8,7 +8,7 @@ a subject rather than a path.
 
 One comma rule throughout, in the config and in the query string alike: a comma
 inside one value means *all of*, and separate values mean *any of*. So
-``?tags=runbooks,oncall&tags=lgtm`` is (runbooks and oncall) or lgtm. Categories
+``?tag=runbooks,oncall&tag=lgtm`` is (runbooks and oncall) or lgtm. Categories
 are the exception that proves it -- a plugin has exactly one, so a list can only
 mean any of them, and a comma in one is kept verbatim here so ``pins.py`` can
 refuse it with a message rather than silently matching nothing.

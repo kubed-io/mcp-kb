@@ -362,7 +362,7 @@ def build_spec() -> dict:
                         "Readiness, and the fastest way to see which fetches loaded."
                     ),
                     "description": (
-                        "Ignores X-Skill-Library: an operator asking what "
+                        "Ignores Kb-Library: an operator asking what "
                         "this pod serves wants the real catalogue, not one "
                         "client's scoped view of it."
                     ),

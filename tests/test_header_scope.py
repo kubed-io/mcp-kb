@@ -1,8 +1,8 @@
 """The per-request knobs, exercised over real HTTP.
 
 All three only exist inside an HTTP request, so an in-memory client cannot reach
-this code at all: ``X-Skill-Library`` (which library), ``?resources=off`` (whether the
-mirror is advertised) and ``?skills=full`` (how much the listing enumerates).
+this code at all: ``Kb-Library`` (which library), ``?resources=off`` (whether the
+mirror is advertised) and ``?listing=full`` (how much the listing enumerates).
 These tests run the ASGI app on a real port for that reason.
 """
 
@@ -114,7 +114,7 @@ async def test_the_listing_is_indexes_by_default(server_url):
 @pytest.mark.integration
 async def test_skills_full_enumerates_every_skill(server_url):
     """Skill-syncing clients find skills only by scanning for /SKILL.md."""
-    uris = await resource_uris(f"{server_url}?skills=full")
+    uris = await resource_uris(f"{server_url}?listing=full")
     assert "skill://flatsource/alpha/SKILL.md" in uris
     assert sum(1 for u in uris if u.endswith("/SKILL.md")) == 4
 
@@ -150,7 +150,7 @@ async def test_no_header_sees_every_library(server_url):
 
 @pytest.mark.integration
 async def test_the_pin_hides_the_other_library_from_the_listing(server_url):
-    uris = await resource_uris(server_url, headers={"X-Skill-Library": "flatsource"})
+    uris = await resource_uris(server_url, headers={"Kb-Library": "flatsource"})
     assert uris == ["skill://flatsource/_index.md"]
 
 
@@ -161,7 +161,7 @@ async def test_a_header_beats_the_same_setting_in_the_url(server_url):
     an admin already set, and the two are read in that order everywhere.
     """
     uris = await resource_uris(
-        f"{server_url}?library=deepsource", headers={"X-Skill-Library": "flatsource"}
+        f"{server_url}?library=deepsource", headers={"Kb-Library": "flatsource"}
     )
     assert uris == ["skill://flatsource/_index.md"]
 
@@ -170,7 +170,7 @@ async def test_a_header_beats_the_same_setting_in_the_url(server_url):
 async def test_the_pin_blocks_reading_a_resource_in_another_library(server_url):
     """The hole this closes: filtering a listing leaves guessable URIs readable,
     and every URI here is guessable by design."""
-    async with _client(server_url, {"X-Skill-Library": "flatsource"}) as client:
+    async with _client(server_url, {"Kb-Library": "flatsource"}) as client:
         with pytest.raises(Exception, match=r"nknown|not found|deepsource"):
             await client.read_resource("skill://deepsource/plugin-a/gamma/SKILL.md")
 
@@ -181,7 +181,7 @@ async def test_the_pin_blocks_the_mirror_too(server_url):
     out = await call(
         f"{server_url}?resources=off",
         "read_resource",
-        headers={"X-Skill-Library": "flatsource"},
+        headers={"Kb-Library": "flatsource"},
         uri="skill://deepsource/plugin-a/gamma/SKILL.md",
     )
     assert "No resource" in out
@@ -193,7 +193,7 @@ async def test_the_pin_narrows_the_mirrors_listing(server_url):
         await call(
             f"{server_url}?resources=off",
             "list_resources",
-            headers={"X-Skill-Library": "flatsource"},
+            headers={"Kb-Library": "flatsource"},
         )
     )
     assert [row["uri"] for row in rows] == ["skill://flatsource/_index.md"]
@@ -201,7 +201,7 @@ async def test_the_pin_narrows_the_mirrors_listing(server_url):
 
 @pytest.mark.integration
 async def test_the_pin_still_allows_its_own_library(server_url):
-    async with _client(server_url, {"X-Skill-Library": "flatsource"}) as client:
+    async with _client(server_url, {"Kb-Library": "flatsource"}) as client:
         body = (await client.read_resource("skill://flatsource/alpha/SKILL.md"))[
             0
         ].text
@@ -210,8 +210,8 @@ async def test_the_pin_still_allows_its_own_library(server_url):
 
 @pytest.mark.integration
 async def test_a_tag_header_narrows_by_the_plugins_labels(server_url):
-    """`X-Skill-Tags` admits the plugins carrying the tag, and nothing else."""
-    tagged = {"X-Skill-Tags": "deep"}
+    """`Kb-Tag` admits the plugins carrying the tag, and nothing else."""
+    tagged = {"Kb-Tag": "deep"}
     uris = await resource_uris(server_url, headers=tagged)
     assert "skill://deepsource/_index.md" in uris
     assert not any("flatsource" in u for u in uris)
@@ -225,7 +225,7 @@ async def test_a_tag_header_narrows_by_the_plugins_labels(server_url):
 @pytest.mark.integration
 async def test_the_listing_does_not_leak_other_library_names(server_url):
     """A pinned client must not learn the other libraries exist from a listing."""
-    pinned = {"X-Skill-Library": "deepsource"}
+    pinned = {"Kb-Library": "deepsource"}
     uris = await resource_uris(server_url, headers=pinned)
     assert uris
     assert not any("flatsource" in u for u in uris)
@@ -242,7 +242,7 @@ async def prompt_names(url, headers=None):
 @pytest.mark.integration
 async def test_the_pin_scopes_prompts_too(server_url):
     """Out of the pinned library, a prompt is neither listed nor renderable."""
-    pinned = {"X-Skill-Library": "flatsource"}
+    pinned = {"Kb-Library": "flatsource"}
     assert await prompt_names(server_url, pinned) == ["flatsource_hello"]
     async with _client(server_url, pinned) as client:
         with pytest.raises(Exception, match="deepsource_check"):
@@ -256,9 +256,9 @@ async def test_a_tag_pin_sees_only_the_prompts_of_the_plugins_carrying_it(server
     `deepsource_check` comes from the `deepsource-prompts` plugin, which has no
     tags; the whole library still reaches it.
     """
-    tagged = {"X-Skill-Tags": "deep"}
+    tagged = {"Kb-Tag": "deep"}
     assert await prompt_names(server_url, tagged) == []
-    whole = {"X-Skill-Library": "deepsource"}
+    whole = {"Kb-Library": "deepsource"}
     assert await prompt_names(server_url, whole) == ["deepsource_check"]
 
 
@@ -269,8 +269,8 @@ async def test_a_tag_pin_sees_only_the_prompts_of_the_plugins_carrying_it(server
 async def test_fastmcp_syncs_skills_from_the_full_listing(
     server_url, skills_dir_module, tmp_path
 ):
-    """The promise ?skills=full exists to keep, checked with FastMCP's own helpers."""
-    async with _client(f"{server_url}?skills=full") as client:
+    """The promise ?listing=full exists to keep, checked with FastMCP's own helpers."""
+    async with _client(f"{server_url}?listing=full") as client:
         found = {s.name for s in await list_skills(client)}
         manifest = await get_skill_manifest(client, "flatsource/alpha")
         downloaded = await download_skill(client, "flatsource/alpha", tmp_path)

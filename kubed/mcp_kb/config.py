@@ -228,7 +228,7 @@ class Selector(Strict):
     Across the two fields it is AND, as in every faceted search. Within
     ``categories`` it can only be OR -- a plugin has exactly one category --
     and within ``tags`` a comma means *all of* while separate items mean *any
-    of*, which is the same comma rule a request's ``?tags=`` carries.
+    of*, which is the same comma rule a request's ``?tag=`` carries.
     """
 
     categories: list[str] = Field(default_factory=list)
@@ -305,7 +305,7 @@ class PluginConfig(Strict):
 class LibraryConfig(Strict):
     """A library: a marketplace, plugins by name, or a query -- and their union.
 
-    A library carries no tags. Tagging is what a plugin does, so ``?tags=``
+    A library carries no tags. Tagging is what a plugin does, so ``?tag=``
     reaches a library only through what its plugins say, and the selector gets
     an unambiguous name of its own after Kubernetes' ``selector``. Its
     ``categories`` label it for a category scope alone: they are not any

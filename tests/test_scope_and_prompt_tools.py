@@ -217,49 +217,49 @@ async def test_a_library_of_prompts_alone_is_visible_by_name(url):
 
 
 async def test_tags_select_across_libraries(url):
-    _, resources, prompts = await _seen(url, "?tags=ops")
+    _, resources, prompts = await _seen(url, "?tag=ops")
     assert resources == ["observe/_index.md"]
     assert prompts == ["notes_standup", "observe_debug"]
 
 
 async def test_a_repeated_tag_parameter_means_any_of_them(url):
-    _, resources, _ = await _seen(url, "?tags=ui&tags=extra")
+    _, resources, _ = await _seen(url, "?tag=ui&tag=extra")
     assert resources == ["design/_index.md", "observe/_index.md"]
-    assert await _skills(url, "?tags=ui&tags=extra") == [
+    assert await _skills(url, "?tag=ui&tag=extra") == [
         "skill://design/palette/SKILL.md",
         "skill://observe/alerts/SKILL.md",
     ]
 
 
 async def test_a_comma_in_a_tag_means_all_of_them(url):
-    """`?tags=extra,ops` admits only a plugin carrying both: `observe-extra`,
+    """`?tag=extra,ops` admits only a plugin carrying both: `observe-extra`,
     not `observe` (ops alone) and not `notes` (ops alone)."""
-    _, resources, prompts = await _seen(url, "?tags=extra,ops")
+    _, resources, prompts = await _seen(url, "?tag=extra,ops")
     assert resources == ["observe/_index.md"]
     assert prompts == []
-    assert await _skills(url, "?tags=extra,ops") == ["skill://observe/alerts/SKILL.md"]
+    assert await _skills(url, "?tag=extra,ops") == ["skill://observe/alerts/SKILL.md"]
 
 
 async def test_a_category_selects_the_plugins_declaring_it(url):
-    _, resources, prompts = await _seen(url, "?categories=observability")
+    _, resources, prompts = await _seen(url, "?category=observability")
     assert resources == ["observe/_index.md"]
     assert prompts == ["observe_debug"]
-    assert await _skills(url, "?categories=observability") == [
+    assert await _skills(url, "?category=observability") == [
         "skill://observe/loki/SKILL.md",
         "skill://observe/tempo/SKILL.md",
     ]
 
 
 async def test_a_repeated_category_parameter_means_any_of_them(url):
-    _, resources, _ = await _seen(url, "?categories=observability&categories=design")
+    _, resources, _ = await _seen(url, "?category=observability&category=design")
     assert resources == ["design/_index.md", "observe/_index.md"]
 
 
 async def test_tags_narrow_within_a_library(url):
-    _, resources, prompts = await _seen(url, "?library=observe&tags=extra")
+    _, resources, prompts = await _seen(url, "?library=observe&tag=extra")
     assert resources == ["observe/_index.md"]
     assert prompts == []
-    assert await _skills(url, "?library=observe&tags=extra") == [
+    assert await _skills(url, "?library=observe&tag=extra") == [
         "skill://observe/alerts/SKILL.md"
     ]
 
@@ -272,38 +272,38 @@ REFUSED = [
         "The scope names library 'nope', and there is no such library."
         " The libraries are: blank, design, down, notes, observe.",
     ),
-    ("?tags=opps", "The scope names tag 'opps', which nothing carries. The tags are:"),
+    ("?tag=opps", "The scope names tag 'opps', which nothing carries. The tags are:"),
     ("?library=observe/loki", FOLDER_IN_LIBRARY),
     ("?library=observe/nope", FOLDER_IN_LIBRARY),
-    ("?categories=observability,design", COMMA_IN_CATEGORY),
+    ("?category=observability,design", COMMA_IN_CATEGORY),
     (
-        "?categories=nope",
+        "?category=nope",
         "The scope names category 'nope', which no plugin declares."
         " The categories are: design, observability, tooling.",
     ),
     (
-        "?library=observe&categories=design",
+        "?library=observe&category=design",
         "The scope names category 'design', which no plugin declares."
         " The categories are: observability, tooling.",
     ),
     (
-        "?library=observe&tags=ui,design",
+        "?library=observe&tag=ui,design",
         "The scope names tags 'design', 'ui', which nothing carries."
         " The tags are: extra, ops.",
     ),
     (
         # Both exist in the library; no one plugin carries the pair.
-        "?library=observe&categories=tooling&tags=ops,ui",
+        "?library=observe&category=tooling&tag=ops,ui",
         "The scope names tag 'ui', which nothing carries. The tags are: extra, ops.",
     ),
     (
         # A category one plugin has and a tag another has: nothing carries both.
-        "?library=observe&categories=observability&tags=extra",
+        "?library=observe&category=observability&tag=extra",
         "The scope names things that exist, but nothing in library 'observe'"
         " carries the combination: category observability; tags extra.",
     ),
     (
-        "?tags=ops,ui",
+        "?tag=ops,ui",
         "The scope names things that exist, but nothing in any library carries"
         " the combination: tags ops,ui.",
     ),
@@ -347,12 +347,12 @@ async def test_a_library_that_is_down_carries_no_category_or_tag_to_refuse(
 
 async def test_a_header_scope_is_refused_the_same_way(url):
     with pytest.raises(Exception, match="no such library"):
-        await _seen(url, headers={"X-Skill-Library": "nope"})
+        await _seen(url, headers={"Kb-Library": "nope"})
 
 
 async def test_a_header_beats_the_url_parameter(url):
     _, resources, prompts = await _seen(
-        url, "?library=design", {"X-Skill-Library": "observe"}
+        url, "?library=design", {"Kb-Library": "observe"}
     )
     assert resources == ["observe/_index.md"]
     assert prompts == ["observe_debug"]  # design has no prompts
