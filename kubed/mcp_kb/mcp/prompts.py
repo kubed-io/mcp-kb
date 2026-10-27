@@ -213,9 +213,11 @@ class PromptProvider(Provider):
 
     def visible(self, scope: Scope = EVERYTHING) -> list[FilePrompt]:
         prompts = self._snapshot().prompts
-        return [p for p in prompts if scope.admits(
-                p.library, p.category, p.tags, p.library_categories
-            )]
+        return [
+            p
+            for p in prompts
+            if scope.admits(p.library, p.category, p.tags, p.library_categories)
+        ]
 
     async def _list_prompts(self) -> Sequence[Prompt]:
         return [_adapt(p) for p in self.visible(requested_scope())]

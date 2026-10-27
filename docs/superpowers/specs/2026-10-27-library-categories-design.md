@@ -185,7 +185,8 @@ its rule breaks.
   - the cluster config gets `categories: [dev]` on n8n, superpowers and kubed, and `.mcp.json`'s
     `kb` gets `"Kb-Category": "dev"`;
   - the penpot and grafana routes, the cluster `mcp-kb` routes and the runner profiles switch to
-    the `Kb-` names. The aliases mean this can happen any time.
+    the `Kb-` names in the same deploy as the new image, since an old-name pin doesn't hold
+    against a client sending the `Kb-` name.
 
 ## Not in scope
 

@@ -82,7 +82,11 @@ def server_url(tmp_path_factory):
                     "categories": ["dev"],
                 },
                 {"name": "beta", "plugins": ["b-plugin"], "categories": ["dev"]},
-                {"name": "gamma", "plugins": ["g-plugin", "shared", "gamma-prompts"]},
+                {
+                    "name": "gamma",
+                    "plugins": ["g-plugin", "shared", "gamma-prompts"],
+                    "categories": [" sp ", ""],
+                },
             ],
         }
     )
@@ -169,7 +173,7 @@ def test_health_shows_library_categories(server_url):
     libraries = body["libraries"]
     assert libraries["alpha"]["categories"] == ["dev"]
     assert libraries["beta"]["categories"] == ["dev"]
-    assert libraries["gamma"]["categories"] == []
+    assert libraries["gamma"]["categories"] == ["sp"]
 
 
 async def test_category_is_per_library_for_a_shared_plugin(server_url):
@@ -194,3 +198,10 @@ async def test_prompts_follow_library_categories(server_url):
     async with _client(server_url, DEV) as client:
         names = sorted(p.name for p in await client.list_prompts())
     assert names == ["alpha_hello"]
+
+
+async def test_a_padded_library_category_still_selects(server_url):
+    assert await _uris(server_url, {"Kb-Category": "sp"}) == [
+        "skill://gamma/_files.md",
+        "skill://gamma/_index.md",
+    ]

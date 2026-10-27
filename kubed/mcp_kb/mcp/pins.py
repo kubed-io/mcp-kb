@@ -87,8 +87,8 @@ def what_is_wrong(scope: Scope, config: Config, snapshot: Snapshot) -> str | Non
     if unknown:
         return (
             f"The scope names categor{'ies' if len(unknown) > 1 else 'y'}"
-            f" {', '.join(map(repr, unknown))}, which no plugin declares. The"
-            f" categories are: {_listed(categories)}."
+            f" {', '.join(map(repr, unknown))}, which no library lists and no"
+            f" plugin declares. The categories are: {_listed(categories)}."
         )
     tags = {t for e in plugins for t in (*e.get("tags", ()), *e.get("keywords", ()))}
     unknown = sorted({tag for group in scope.tags for tag in group} - tags)

@@ -77,3 +77,8 @@ async def test_refusals_name_the_new_names(server_url):  # noqa: F811
     with pytest.raises(Exception) as caught:
         await _uris(server_url, {"Kb-Category": "a,b"})
     assert "repeat ?category=" in str(caught.value)
+
+
+async def test_an_empty_value_counts_as_not_sent(server_url):  # noqa: F811
+    headers = {"Kb-Category": "", "X-Skill-Categories": "dev"}
+    assert await _uris(server_url, headers) == DEV

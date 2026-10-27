@@ -326,6 +326,7 @@ class LibraryConfig(Strict):
     @field_validator("categories")
     @classmethod
     def _no_comma_in_category(cls, categories: list[str]) -> list[str]:
+        categories = [c.strip() for c in categories if c.strip()]
         for category in categories:
             if "," in category:
                 raise ValueError("a category has no comma; list several instead")

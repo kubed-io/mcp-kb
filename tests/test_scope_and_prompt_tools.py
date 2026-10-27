@@ -278,12 +278,14 @@ REFUSED = [
     ("?category=observability,design", COMMA_IN_CATEGORY),
     (
         "?category=nope",
-        "The scope names category 'nope', which no plugin declares."
+        "The scope names category 'nope', which no library lists and no plugin"
+        " declares."
         " The categories are: design, observability, tooling.",
     ),
     (
         "?library=observe&category=design",
-        "The scope names category 'design', which no plugin declares."
+        "The scope names category 'design', which no library lists and no plugin"
+        " declares."
         " The categories are: observability, tooling.",
     ),
     (

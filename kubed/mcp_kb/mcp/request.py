@@ -128,9 +128,8 @@ def requested_scope() -> Scope:
     headers (``Kb-Library``, ``Kb-Category``, ``Kb-Tag``); the older
     ``X-Skill-Library``, ``X-Skill-Categories`` and ``X-Skill-Tags`` (and
     ``?categories=``, ``?tags=``) still work. It is a ceiling set by whoever
-    configured the client, not a
-    suggestion the model can widen. One library: it is the URI's first segment,
-    so several would be a different request.
+    configured the client, not a suggestion the model can widen. One library:
+    it is the URI's first segment, so several would be a different request.
     """
     library = _read(LIBRARY_HEADER, LIBRARY_PARAM, LIBRARY_ALIAS)
     return Scope.parse(

@@ -50,7 +50,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `__init__.py` | `Fetch`, `Globs`, `Plugin`, and the resolution of a declared plugin. Imports no FastMCP |
 | ⤷ `marketplace.py` | somebody else's `marketplace.json`, read as plugins of ours — which entry sources are honoured, and why the rest are skipped |
 | ⤷ `manifest.py` | a plugin's own `plugin.json`: the components it says it ships |
-| ⤷ `select.py` | `pluginSelector` and `?tags=` — the comma rule, in one place |
+| ⤷ `select.py` | `pluginSelector` and `?tag=` — the comma rule, in one place |
 | `kubed/mcp_kb/catalogue/` | what is served, and how it is found, addressed and persisted |
 | ⤷ `harvest.py` | a plugin's globs, and what counts as a skill, a prompt or a library file |
 | ⤷ `skills.py` | the domain — `Skill`, `SkillIndex`, and the scoping rules. Imports no FastMCP |
