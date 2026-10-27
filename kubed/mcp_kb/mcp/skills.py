@@ -17,7 +17,7 @@ from mcp_types import INVALID_PARAMS, PaginatedRequestParams, RequestParams
 from pydantic import Field
 
 from ..catalogue.uris import Catalogue
-from .request import EXTENSION_ID, requested_scope
+from .request import EXTENSION_ID, requested_addressing, requested_scope
 from .scope import Scope
 
 
@@ -87,17 +87,18 @@ class SkillsExtension(ServerExtension):
         scope = self._scope()
         if params.cursor is not None:
             raise MCPError(code=INVALID_PARAMS, message="Invalid skills cursor")
-        catalogue = self._catalogue()
+        catalogue, a = self._catalogue(), requested_addressing()
         entries = []
         for uri in catalogue.skill_uris(scope):
-            entry = catalogue.skill_entry(uri, scope)
+            entry = catalogue.skill_entry(uri, scope, a)
             if entry is not None:
                 entries.append(entry)
         return self._result(skills=entries)
 
     async def get_skill(self, ctx, params: GetSkillParams) -> dict:
         scope = self._scope()
-        entry = self._catalogue().skill_entry(params.uri, scope)
+        catalogue, a = self._catalogue(), requested_addressing()
+        entry = a.first(params.uri, lambda c: catalogue.skill_entry(c, scope, a))
         if entry is None:
             # Out-of-scope and absent skills have exactly the same error.
             raise MCPError(code=INVALID_PARAMS, message="Skill not found")

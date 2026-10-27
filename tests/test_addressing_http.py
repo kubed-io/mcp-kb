@@ -1,5 +1,7 @@
 """Resource addresses follow the request's pin and gateway prefix, over real HTTP."""
 
+import hashlib
+import json
 import re
 import socket
 import threading
@@ -25,6 +27,11 @@ def _free_port() -> int:
 @pytest.fixture(scope="module")
 def server_url(skills_dir_module, prompts_dir_module):
     port = _free_port()
+    # Only this module's server sees it; the shared tree's counts stay put.
+    (prompts_dir_module / "flatsource" / "cite.md").write_text(
+        "---\ndescription: Cite a shared file.\n---\n"
+        "Read ${CLAUDE_PLUGIN_ROOT}/shared/x.md.\n"
+    )
     config = make_config(skills_dir_module, prompts_dir_module)
     app = KnowledgeBase(config, skills_dir_module / "_cache").mcp.http_app()
     server = uvicorn.Server(
@@ -114,3 +121,70 @@ async def test_invalid_prefix_is_ignored(server_url):
 async def test_directory_hint_is_translated(server_url):
     with pytest.raises(Exception, match=re.escape("kb+skill://alpha/SKILL.md")):
         await read(server_url, "skill://alpha", {**PIN, **PREFIX})
+
+
+BOTH = {**PIN, **PREFIX}
+
+
+async def tool(url, name, args=None, headers=None):
+    async with _client(url, headers) as client:
+        result = await client.call_tool(name, args or {})
+        return result.content[0].text
+
+
+@pytest.mark.integration
+async def test_tools_mode_with_both(server_url):
+    headers = {**BOTH, "X-MCP-Resources": "off"}
+    rows = json.loads(await tool(server_url, "list_resources", headers=headers))
+    assert "kb+skill://_index.md" in [r["uri"] for r in rows]
+    bodies = {
+        await tool(server_url, "read_resource", {"uri": uri}, headers)
+        for uri in (
+            "skill://alpha/SKILL.md",
+            "skill://flatsource/alpha/SKILL.md",
+            "kb+skill://alpha/SKILL.md",
+        )
+    }
+    assert len(bodies) == 1
+
+
+async def skills_request(url, method, headers, **params):
+    from mcp_types import Request, RequestParams
+    from pydantic import ConfigDict, TypeAdapter
+
+    class Params(RequestParams):
+        model_config = ConfigDict(extra="allow")
+
+    async with _client(url, headers) as client:
+        return await client.session.send_request(
+            Request(method=method, params=Params(**params)), TypeAdapter(dict)
+        )
+
+
+@pytest.mark.integration
+async def test_skills_extension_with_a_pin(server_url):
+    listed = (await skills_request(server_url, "skills/list", BOTH))["skills"]
+    assert listed
+    for entry in listed:
+        assert entry["uri"].startswith("skill://")
+        assert not entry["uri"].startswith("skill://flatsource/")
+        assert "kb+" not in json.dumps(entry)
+    got = await skills_request(
+        server_url, "skills/get", BOTH, uri="skill://alpha/SKILL.md"
+    )
+    entry = got["skill"]
+    main = next(r for r in entry["resources"] if r["uri"] == entry["uri"])
+    served = (await read(server_url, main["uri"], BOTH)).encode("utf-8")
+    assert main["digest"] == f"sha256:{hashlib.sha256(served).hexdigest()}"
+    assert main["size"] == len(served)
+
+
+@pytest.mark.integration
+async def test_prompt_renders_pinned_prefixed_root(server_url):
+    async def render(headers):
+        async with _client(server_url, headers) as client:
+            got = await client.get_prompt("flatsource_cite")
+            return got.messages[0].content.text
+
+    assert await render(BOTH) == "Read kb+skill://shared/x.md.\n"
+    assert await render({}) == "Read skill://flatsource/shared/x.md.\n"

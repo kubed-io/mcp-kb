@@ -57,6 +57,7 @@ import yaml
 
 from ..mcp.scope import EVERYTHING, Scope
 from . import placeholders
+from .addressing import DEFAULT, Addressing
 from .harvest import hidden, readable
 from .skills import LibraryFiles, Skill, SkillIndex
 
@@ -399,7 +400,9 @@ class Catalogue:
         """Canonical skill addresses, without generated resource indexes."""
         return sorted(uri_for(skill) for skill in self._index.visible(scope))
 
-    def skill_entry(self, uri: str, scope: Scope = EVERYTHING) -> dict | None:
+    def skill_entry(
+        self, uri: str, scope: Scope = EVERYTHING, a: Addressing = DEFAULT
+    ) -> dict | None:
         """A SEP-2640 entry, with digests of the content resources/read serves.
 
         The legacy _manifest hashes disk bytes. That is not an integrity
@@ -408,6 +411,10 @@ class Catalogue:
         substitutions and nested-skill resolution agree with resource reads.
         Invalid frontmatter remains readable as an ordinary resource but is
         not advertised as a conforming skill.
+
+        ``uri`` is canonical. Under a pin or prefix, ``a`` shortens the URIs
+        and digests the bytes ``a.text`` makes of each body, which is what
+        resources/read serves for that request.
         """
         parsed = parse(uri)
         if parsed is None:
@@ -418,7 +425,8 @@ class Catalogue:
         skill = found[0]
         if uri != uri_for(skill):
             return None
-        text = self.read(uri, scope)
+        raw = self.read(uri, scope)
+        text = None if raw is None else a.text(raw)
         if text is None or not text.startswith("---\n"):
             return None
         try:
@@ -449,15 +457,21 @@ class Catalogue:
             body = text if file_uri == uri else self.read(file_uri, scope)
             if body is None:
                 continue
+            if file_uri != uri:
+                body = a.text(body)
             content = body.encode("utf-8")
             resources.append(
                 {
-                    "uri": file_uri,
+                    "uri": a.structured(file_uri),
                     "digest": f"sha256:{hashlib.sha256(content).hexdigest()}",
                     "size": len(content),
                 }
             )
-        return {"uri": uri, "frontmatter": metadata, "resources": resources}
+        return {
+            "uri": a.structured(uri),
+            "frontmatter": metadata,
+            "resources": resources,
+        }
 
     def selected(self, scope: Scope = EVERYTHING) -> list[LibraryText]:
         """Libraries with a skill visible in ``scope``: constructor order, then

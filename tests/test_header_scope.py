@@ -196,7 +196,7 @@ async def test_the_pin_narrows_the_mirrors_listing(server_url):
             headers={"X-Skill-Library": "flatsource"},
         )
     )
-    assert [row["uri"] for row in rows] == ["skill://flatsource/_index.md"]
+    assert [row["uri"] for row in rows] == ["skill://_index.md"]
 
 
 @pytest.mark.integration
