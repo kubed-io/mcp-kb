@@ -45,6 +45,18 @@ def _plugin(root, name, skills, **extra):
     }
 
 
+def _prompts(root, name):
+    path = root / f"{name}-prompts"
+    path.mkdir(parents=True)
+    (path / "hello.md").write_text("---\ndescription: Say hello.\n---\nHello.\n")
+    return {
+        "name": f"{name}-prompts",
+        "source": f"file://{path}",
+        "skills": [],
+        "prompts": ["*.md"],
+    }
+
+
 @pytest.fixture(scope="module")
 def server_url(tmp_path_factory):
     root = tmp_path_factory.mktemp("categories")
@@ -53,6 +65,8 @@ def server_url(tmp_path_factory):
         _plugin(root, "b-plugin", ["two"]),
         _plugin(root, "g-plugin", ["three"], category="ops"),
         _plugin(root, "shared", ["common"]),
+        _prompts(root, "alpha"),
+        _prompts(root, "gamma"),
     ]
     (root / "a-plugin" / "docs").mkdir()
     (root / "a-plugin" / "docs" / "guide.md").write_text("alpha guide\n")
@@ -64,11 +78,11 @@ def server_url(tmp_path_factory):
             "libraries": [
                 {
                     "name": "alpha",
-                    "plugins": ["a-plugin", "shared"],
+                    "plugins": ["a-plugin", "shared", "alpha-prompts"],
                     "categories": ["dev"],
                 },
                 {"name": "beta", "plugins": ["b-plugin"], "categories": ["dev"]},
-                {"name": "gamma", "plugins": ["g-plugin", "shared"]},
+                {"name": "gamma", "plugins": ["g-plugin", "shared", "gamma-prompts"]},
             ],
         }
     )
@@ -174,3 +188,9 @@ async def test_library_files_follow_library_categories(server_url):
     async with _client(server_url, DEV) as client:
         with pytest.raises(Exception, match=r"nknown|not found|No resource"):
             await client.read_resource("skill://gamma/docs/guide.md")
+
+
+async def test_prompts_follow_library_categories(server_url):
+    async with _client(server_url, DEV) as client:
+        names = sorted(p.name for p in await client.list_prompts())
+    assert names == ["alpha_hello"]
