@@ -80,6 +80,9 @@ def what_is_wrong(scope: Scope, config: Config, snapshot: Snapshot) -> str | Non
         if not scope.library or scope.library in entry.get("libraries", [])
     ]
     categories = {e["category"] for e in plugins if e.get("category")}
+    for name, lib in snapshot.status.get("libraries", {}).items():
+        if not scope.library or scope.library == name:
+            categories.update(lib.get("categories", ()))
     unknown = sorted(scope.categories - categories)
     if unknown:
         return (

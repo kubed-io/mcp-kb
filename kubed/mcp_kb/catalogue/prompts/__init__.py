@@ -95,6 +95,7 @@ class FilePrompt:
     arguments: list[Argument] = field(default_factory=list)
     tags: set[str] = field(default_factory=set)
     category: str | None = None
+    library_categories: frozenset[str] = frozenset()
     live: bool = False
     defaults: dict[str, str] = field(default_factory=dict)
     dialect: str = mcpkb.NAME
@@ -220,6 +221,7 @@ def load_prompt(
     plugin: str = "",
     tags: Sequence[str] = (),
     category: str | None = None,
+    library_categories: frozenset[str] = frozenset(),
     live: bool = False,
     dialect: str = detect.AUTO,
 ) -> FilePrompt:
@@ -257,6 +259,7 @@ def load_prompt(
         library=library,
         plugin=plugin,
         category=category,
+        library_categories=library_categories,
         template=body,
         defaults=parsed.defaults,
         dialect=name,
@@ -270,6 +273,7 @@ def load_prompts(
     plugin: str = "",
     tags: Sequence[str] = (),
     category: str | None = None,
+    library_categories: frozenset[str] = frozenset(),
     live: bool = False,
     dialect: str = detect.AUTO,
     skipped: list[tuple[Path, str]] | None = None,
@@ -292,6 +296,7 @@ def load_prompts(
                     plugin=plugin,
                     tags=tags,
                     category=category,
+                    library_categories=library_categories,
                     live=live,
                     dialect=dialect,
                 )

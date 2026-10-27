@@ -73,6 +73,7 @@ class Skill:
     root: Path
     category: str | None = None
     tags: frozenset[str] = frozenset()
+    library_categories: frozenset[str] = frozenset()
 
     @property
     def address(self) -> str:
@@ -130,9 +131,12 @@ class _Root:
     # The plugin's skill directories, resolved: what the root-wide fallback
     # must not reach, since those paths are the skills' own addresses.
     skills: tuple[Path, ...] = ()
+    library_categories: frozenset[str] = frozenset()
 
     def admits(self, scope: Scope) -> bool:
-        return scope.admits_labels(self.plugin.category, self.plugin.labels)
+        return scope.admits_labels(
+            self.plugin.category, self.plugin.labels, self.library_categories
+        )
 
     def holds(self, rel: str, excluded: Iterable[Path] = ()) -> Path | None:
         """``rel`` as a file inside this root that a fallback may serve, or None.
@@ -212,6 +216,7 @@ class LibraryFiles:
         skill_dirs: Sequence[Path],
         *,
         plugin: Plugin,
+        library_categories: frozenset[str] = frozenset(),
     ) -> None:
         """Register one plugin's contribution to ``library``.
 
@@ -225,7 +230,13 @@ class LibraryFiles:
         for rel in files:
             if _inside((base / rel).resolve(), dirs):
                 raise ValueError(f"{rel!r} lies inside a skill directory")
-        entry = _Root(base=base, files=tuple(files), plugin=plugin, skills=tuple(dirs))
+        entry = _Root(
+            base=base,
+            files=tuple(files),
+            plugin=plugin,
+            skills=tuple(dirs),
+            library_categories=library_categories,
+        )
         self._roots.setdefault(library, []).append(entry)
 
     @property
@@ -397,4 +408,6 @@ class SkillIndex:
 
 
 def _admits(scope: Scope, skill: Skill) -> bool:
-    return scope.admits(skill.library, skill.category, skill.tags)
+    return scope.admits(
+        skill.library, skill.category, skill.tags, skill.library_categories
+    )

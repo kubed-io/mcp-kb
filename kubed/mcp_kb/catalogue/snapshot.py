@@ -79,6 +79,7 @@ class Library:
     skipped: tuple[dict[str, str], ...] = ()
     notes: str = ""
     list_skills: bool = True
+    categories: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -244,6 +245,7 @@ def _load_prompts(
     *,
     skipped: list[tuple[Path, str]],
     library: str = "",
+    library_categories: frozenset[str] = frozenset(),
     live: bool = False,
 ) -> list[FilePrompt]:
     """``load_prompts`` once per dialect group.
@@ -261,6 +263,7 @@ def _load_prompts(
             plugin=plugin.id,
             tags=sorted(plugin.labels),
             category=plugin.category,
+            library_categories=library_categories,
             live=live,
             dialect=dialect,
             skipped=skipped,
@@ -341,6 +344,7 @@ def assemble_libraries(
                 description=_resolved(lib.description, upstream, own),
                 notes=lib.notes,
                 list_skills=lib.list_skills,
+                categories=tuple(lib.categories),
                 plugins=tuple(dict.fromkeys(ids)),
                 error=scrub("; ".join(problems)) or None,
                 # Both of these quote fetched content -- a marketplace entry's
@@ -493,8 +497,10 @@ def _serve_library(
     it, since both are the plugin's own and the same in every library.
     """
     claims = _Claims()
+    lib_categories = frozenset(lib.categories)
     entry: dict = {
         "description": lib.description,
+        "categories": list(lib.categories),
         "plugins": list(lib.plugins),
         "skills": 0,
         "prompts": 0,
@@ -515,6 +521,7 @@ def _serve_library(
                 root=root,
                 category=plugin.category,
                 tags=plugin.labels,
+                library_categories=lib_categories,
             )
             for row in admitted[pid].skills
         ]
@@ -523,7 +530,12 @@ def _serve_library(
             groups.setdefault(row.dialect, []).append(Path(row.path))
         gone: list[tuple[Path, str]] = []
         loaded = _load_prompts(
-            plugin, groups, skipped=gone, library=lib.name, live=is_live(plugin.fetch)
+            plugin,
+            groups,
+            skipped=gone,
+            library=lib.name,
+            library_categories=lib_categories,
+            live=is_live(plugin.fetch),
         )
         vanished.setdefault(
             pid,
@@ -545,6 +557,7 @@ def _serve_library(
             files,
             [Path(d) for d in records[pid].skill_dirs],
             plugin=plugin,
+            library_categories=lib_categories,
         )
         prompts += loaded
         counts = {"skills": len(own), "prompts": len(loaded), "files": len(files)}

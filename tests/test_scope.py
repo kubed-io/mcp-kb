@@ -233,3 +233,14 @@ def test_the_readers_have_one_way_in(monkeypatch):
     )
 
     assert requested_scope().categories == frozenset({"design"})
+
+
+def test_library_or_plugin_category_selects():
+    lib = "n8n"
+    assert Scope.parse(categories=["dev"]).admits(lib, "automation", [], frozenset({"dev"}))
+    assert Scope.parse(categories=["automation"]).admits(
+        lib, "automation", [], frozenset({"dev"})
+    )
+    assert not Scope.parse(categories=["x"]).admits(
+        lib, "automation", [], frozenset({"dev"})
+    )

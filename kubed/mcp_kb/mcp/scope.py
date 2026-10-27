@@ -36,17 +36,33 @@ class Scope:
         return bool(self.library or self.categories or self.tags)
 
     def admits(
-        self, library: str, category: str | None, labels: Iterable[str]
+        self,
+        library: str,
+        category: str | None,
+        labels: Iterable[str],
+        library_categories: frozenset[str] = frozenset(),
     ) -> bool:
         """Whether something in ``library`` with that category and those labels
         is in scope."""
         if self.library and self.library != library:
             return False
-        return self.admits_labels(category, labels)
+        return self.admits_labels(category, labels, library_categories)
 
-    def admits_labels(self, category: str | None, labels: Iterable[str]) -> bool:
-        """The category and tag halves alone, for what carries no library of its own."""
-        if self.categories and category not in self.categories:
+    def admits_labels(
+        self,
+        category: str | None,
+        labels: Iterable[str],
+        library_categories: frozenset[str] = frozenset(),
+    ) -> bool:
+        """The category and tag halves alone, for what carries no library of its own.
+
+        A category matches the plugin's own or any the library lists.
+        """
+        if (
+            self.categories
+            and category not in self.categories
+            and not self.categories & library_categories
+        ):
             return False
         if not self.tags:
             return True

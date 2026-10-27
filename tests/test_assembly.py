@@ -215,6 +215,7 @@ async def test_a_library_whose_marketplace_is_missing_says_so(market, tmp_path):
 
     assert health["libraries"]["obs"] == {
         "description": "",
+        "categories": [],
         "plugins": [],
         "skills": 0,
         "prompts": 0,
@@ -602,6 +603,7 @@ async def test_a_marketplace_subdir_symlinked_out_of_the_tree_is_the_librarys_er
 
     assert health["libraries"]["far"] == {
         "description": "",
+        "categories": [],
         "plugins": [],
         "skills": 0,
         "prompts": 0,
@@ -880,3 +882,19 @@ def test_a_blank_description_falls_through_to_the_next_tier(
     [lib] = assemble_libraries(config, [plugin], descriptions=descriptions)
     assert lib.description == "P words."
 
+
+
+async def test_selector_ignores_library_categories(market, tmp_path):
+    """A library's `categories` label the library for a scope, not its plugins:
+    a selector on that category picks up nothing of a library that merely lists it."""
+    config = _config(
+        tmp_path,
+        libraries=[
+            {"name": "obs", "source": "lab://market", "categories": ["dev"]},
+            {"name": "devs", "pluginSelector": {"categories": ["dev"]}},
+        ],
+    )
+    health = await _health(KnowledgeBase(config, tmp_path / "cache"))
+
+    assert health["libraries"]["obs"]["categories"] == ["dev"]
+    assert health["libraries"]["devs"]["plugins"] == []

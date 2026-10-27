@@ -305,10 +305,11 @@ class PluginConfig(Strict):
 class LibraryConfig(Strict):
     """A library: a marketplace, plugins by name, or a query -- and their union.
 
-    A library carries no tags and no category of its own. Tagging is what a
-    plugin does, so ``?tags=`` reaches a library only through what its plugins
-    say, and the selector gets an unambiguous name of its own after
-    Kubernetes' ``selector``.
+    A library carries no tags. Tagging is what a plugin does, so ``?tags=``
+    reaches a library only through what its plugins say, and the selector gets
+    an unambiguous name of its own after Kubernetes' ``selector``. Its
+    ``categories`` label it for a category scope alone: they are not any
+    plugin's category, so a ``pluginSelector`` never reads them.
     """
 
     name: str = Field(pattern=NAME)
@@ -318,8 +319,17 @@ class LibraryConfig(Strict):
     source: str | None = None
     plugins: list[str] = Field(default_factory=list)
     plugin_selector: Selector | None = Field(default=None, alias="pluginSelector")
+    categories: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @field_validator("categories")
+    @classmethod
+    def _no_comma_in_category(cls, categories: list[str]) -> list[str]:
+        for category in categories:
+            if "," in category:
+                raise ValueError("a category has no comma; list several instead")
+        return categories
 
     @field_validator("source")
     @classmethod
