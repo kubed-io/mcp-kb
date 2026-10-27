@@ -18,6 +18,7 @@ from .request import (
     client_reads_resources,
     declared_on_discover,
     declared_on_initialize,
+    requested_addressing,
     requested_scope,
 )
 
@@ -34,6 +35,7 @@ class ScopedInstructions(Middleware):
             requested_scope(),
             resources=client_reads_resources(),
             skills_extension=declared,
+            addressing=requested_addressing(),
         )
 
     async def on_initialize(self, context, call_next):

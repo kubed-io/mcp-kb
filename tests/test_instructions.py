@@ -13,6 +13,7 @@ from fastmcp.skills import SkillsClientExtension
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import harvest
+from kubed.mcp_kb.catalogue.addressing import DEFAULT, Addressing
 from kubed.mcp_kb.catalogue.instructions import build_instructions
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex, load_skills
 from kubed.mcp_kb.catalogue.uris import Catalogue, LibraryText
@@ -213,8 +214,9 @@ async def test_one_library_scope(server_url, mode):  # noqa: F811
     text = await told(server_url, mode, {"X-Skill-Library": "flatsource"})
     assert "[" not in text
     lines = text.splitlines()
-    assert "Skills (skill://flatsource/_index.md): alpha, beta" in lines
-    assert text.endswith(RES_FOOTER)
+    # a pin drops the library segment, so the pointer and footer do too
+    assert "Skills (skill://_index.md): alpha, beta" in lines
+    assert text.endswith(RES_FOOTER.replace("<library>/", ""))
 
 
 @pytest.mark.integration
@@ -457,3 +459,70 @@ async def test_a_missing_message_still_gets_instructions(tmp_path):
 
 async def _none(_context):
     return None
+
+
+# -- instructions follow the addressing ---------------------------------------
+
+
+@pytest.mark.unit
+def test_pinned_prefixed_pointer_and_footer(tmp_path):
+    text = LibraryText("flatsource")
+    cat = _catalogue(tmp_path, {text: ["alpha", "beta"]})
+    out = build_instructions(
+        cat,
+        EVERYTHING,
+        resources=True,
+        skills_extension=False,
+        addressing=Addressing("kb+", "flatsource"),
+    )
+    assert out.splitlines()[0] == "Skills (kb+skill://_index.md): alpha, beta"
+    assert out.splitlines()[-1] == (
+        "Read a listed skill at kb+skill://<path>/SKILL.md; read its "
+        "_manifest in place of SKILL.md for the other files it ships."
+    )
+
+
+@pytest.mark.unit
+def test_unpinned_prefixed_footer(tmp_path):
+    a, b = LibraryText("a", "A."), LibraryText("b", "B.")
+    cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
+    out = build_instructions(
+        cat,
+        EVERYTHING,
+        resources=True,
+        skills_extension=False,
+        addressing=Addressing("kb+"),
+    )
+    lines = out.splitlines()
+    assert "Skills: kb+skill://a/_index.md" in lines
+    assert "Skills: kb+skill://b/_index.md" in lines
+    assert lines[-1] == (
+        "Read a listed skill at kb+skill://<library>/<path>/SKILL.md; read its "
+        "_manifest in place of SKILL.md for the other files it ships."
+    )
+
+
+@pytest.mark.unit
+def test_default_addressing_is_byte_identical(tmp_path):
+    a, b = LibraryText("a", "A.", "N."), LibraryText("b", "B.")
+    cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
+    for scope in (EVERYTHING, Scope(library="a")):
+        for resources in (True, False):
+            for ext in (True, False):
+                kw = {"resources": resources, "skills_extension": ext}
+                assert build_instructions(
+                    cat, scope, addressing=DEFAULT, **kw
+                ) == build_instructions(cat, scope, **kw)
+    assert _build(cat, Scope(library="a")).endswith(RES_FOOTER)
+
+
+@pytest.mark.integration
+@ERAS
+async def test_instructions_follow_headers(server_url, mode):  # noqa: F811
+    headers = {"X-Skill-Library": "flatsource", "X-MCP-Resource-Prefix": "kb+"}
+    text = await told(server_url, mode, headers)
+    assert "Skills (kb+skill://_index.md): alpha, beta" in text.splitlines()
+    assert text.splitlines()[-1] == (
+        "Read a listed skill at kb+skill://<path>/SKILL.md; read its "
+        "_manifest in place of SKILL.md for the other files it ships."
+    )

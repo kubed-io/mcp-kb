@@ -5,20 +5,29 @@ wording is tested without a server and the middleware only decides when to call 
 """
 
 from ..mcp.scope import Scope
+from .addressing import DEFAULT, Addressing
 from .uris import Catalogue, LibraryText, index_uri, tidy
 
-RESOURCES_FOOTER = (
-    "Read a listed skill at skill://<library>/<path>/SKILL.md; read its "
+_FOOTER = (
+    "Read a listed skill at {prefix}skill://{where}<path>/SKILL.md; read its "
     "_manifest in place of SKILL.md for the other files it ships."
 )
+RESOURCES_FOOTER = _FOOTER.format(prefix="", where="<library>/")
 TOOLS_FOOTER = "Read these with read_resource."
 
 
+def _footer(a: Addressing) -> str:
+    where = "" if a.library else "<library>/"
+    return _FOOTER.format(prefix=a.prefix, where=where)
+
+
 def _section(
-    catalogue: Catalogue, scope: Scope, text: LibraryText, names: bool
+    catalogue: Catalogue, scope: Scope, text: LibraryText, names: bool, a: Addressing
 ) -> list[str]:
-    lines = [s for s in (tidy(text.description), tidy(text.notes)) if s]
-    uri = index_uri(text.name)
+    lines = [
+        a.text(s) for s in (tidy(text.description), tidy(text.notes)) if s
+    ]
+    uri = a.text(index_uri(text.name))
     if names:
         paths = ", ".join(catalogue.skill_paths(text.name, scope))
         lines.append(f"Skills ({uri}): {paths}")
@@ -28,7 +37,12 @@ def _section(
 
 
 def build_instructions(
-    catalogue: Catalogue, scope: Scope, *, resources: bool, skills_extension: bool
+    catalogue: Catalogue,
+    scope: Scope,
+    *,
+    resources: bool,
+    skills_extension: bool,
+    addressing: Addressing = DEFAULT,
 ) -> str:
     """One section per selected library, then the footer for the mode.
 
@@ -40,9 +54,9 @@ def build_instructions(
     sections = []
     for text in selected:
         names = single and text.list_skills and not skills_extension
-        lines = _section(catalogue, scope, text, names)
+        lines = _section(catalogue, scope, text, names, addressing)
         if not single:
             lines.insert(0, f"[{text.name}]")
         sections.append("\n".join(lines))
-    sections.append(RESOURCES_FOOTER if resources else TOOLS_FOOTER)
+    sections.append(_footer(addressing) if resources else TOOLS_FOOTER)
     return "\n\n".join(sections)
