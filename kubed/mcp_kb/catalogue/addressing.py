@@ -1,4 +1,4 @@
-"""How one request addresses the catalogue: a gateway prefix and a pinned library.
+"""How one request addresses the catalogue: the gateway prefix.
 
 Pure on purpose: it only rewrites strings, so every MCP surface can share it.
 """
@@ -22,47 +22,21 @@ _ANY = re.compile(_LEFT + re.escape(_SCHEME))
 @dataclass(frozen=True)
 class Addressing:
     prefix: str = ""
-    library: str = ""
 
     @classmethod
-    def parse(cls, prefix: str = "", library: str = "") -> Addressing:
+    def parse(cls, prefix: str = "") -> Addressing:
         prefix = (prefix or "").strip()
-        if not _PREFIX.match(prefix):
-            prefix = ""
-        return cls(prefix, (library or "").strip())
-
-    def structured(self, uri: str) -> str:
-        """A URI in a structured field: shortened by the pin, never prefixed."""
-        head = f"{_SCHEME}{self.library}/"
-        if self.library and uri.startswith(head):
-            return _SCHEME + uri[len(head) :]
-        return uri
+        return cls(prefix if _PREFIX.match(prefix) else "")
 
     def text(self, body: str) -> str:
         """Addresses inside prose, which a gateway does not rewrite for us."""
-        if self.library:
-            lib = re.escape(self.library)
-            # Library names are [a-z0-9-], so that is the boundary of a bare one.
-            body = re.sub(
-                rf"{_LEFT}{re.escape(_SCHEME)}{lib}(?:/|(?![a-z0-9-]))",
-                f"{self.prefix}{_SCHEME}",
-                body,
-            )
-        elif self.prefix:
-            body = _ANY.sub(f"{self.prefix}{_SCHEME}", body)
-        return body
+        return _ANY.sub(f"{self.prefix}{_SCHEME}", body) if self.prefix else body
 
     def incoming(self, uri: str) -> list[str]:
         """Canonical candidates for an address a client sent, best first."""
         if self.prefix and uri.startswith(self.prefix + _SCHEME):
-            uri = uri[len(self.prefix) :]
-        if not self.library or not uri.startswith(_SCHEME):
-            return [uri]
-        rest = uri[len(_SCHEME) :]
-        found = [f"{_SCHEME}{self.library}/{rest}"]
-        if rest.split("/", 1)[0] == self.library:
-            found.append(uri)
-        return found
+            return [uri[len(self.prefix) :]]
+        return [uri]
 
     def first(self, uri: str, look: Callable[[str], T | None]) -> T | None:
         for candidate in self.incoming(uri):

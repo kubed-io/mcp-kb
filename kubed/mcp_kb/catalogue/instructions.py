@@ -9,16 +9,15 @@ from .addressing import DEFAULT, Addressing
 from .uris import Catalogue, LibraryText, index_uri, tidy
 
 _FOOTER = (
-    "Read a listed skill at {prefix}skill://{where}<path>/SKILL.md; read its "
+    "Read a listed skill at {prefix}skill://<library>/<path>/SKILL.md; read its "
     "_manifest in place of SKILL.md for the other files it ships."
 )
-RESOURCES_FOOTER = _FOOTER.format(prefix="", where="<library>/")
+RESOURCES_FOOTER = _FOOTER.format(prefix="")
 TOOLS_FOOTER = "Read these with read_resource."
 
 
 def _footer(a: Addressing) -> str:
-    where = "" if a.library else "<library>/"
-    return _FOOTER.format(prefix=a.prefix, where=where)
+    return _FOOTER.format(prefix=a.prefix)
 
 
 def _section(

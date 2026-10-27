@@ -34,7 +34,7 @@ def addressed(
 ) -> dict | None:
     """A canonical entry as this request addresses it.
 
-    The catalogue stays canonical; the edge shortens the URIs and re-digests the
+    The catalogue stays canonical; the edge re-digests the
     bytes ``a.text`` makes of each body, which is what resources/read serves.
     """
     if entry is None or a == DEFAULT:
@@ -49,7 +49,6 @@ def addressed(
         files.append(
             {
                 **file,
-                "uri": a.structured(file["uri"]),
                 "digest": f"sha256:{hashlib.sha256(content).hexdigest()}",
                 "size": len(content),
             }
@@ -59,7 +58,7 @@ def addressed(
             with contextlib.suppress(Exception):
                 meta = frontmatter.loads(served).metadata
                 entry = {**entry, "frontmatter": meta}
-    return {**entry, "uri": a.structured(entry["uri"]), "resources": files}
+    return {**entry, "resources": files}
 
 
 class AdvertiseLegacySkills(Middleware):

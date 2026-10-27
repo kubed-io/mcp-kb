@@ -120,15 +120,10 @@ def requested_scope() -> Scope:
 
 
 def requested_addressing() -> Addressing:
-    """The prefix and pinned library this request addresses the catalogue with.
-
-    Only the explicit library pin shortens addresses; categories and tags never do.
-    """
+    """The gateway prefix this request wants in front of addresses in text."""
     prefix = _read(PREFIX_HEADER, PREFIX_PARAM)
-    library = _read(LIBRARY_HEADER, LIBRARY_PARAM)
     # A query string decodes "+" to a space, and a valid prefix has no space.
-    first = prefix[0].replace(" ", "+") if prefix else ""
-    return Addressing.parse(first, library[0] if library else "")
+    return Addressing.parse(prefix[0].replace(" ", "+") if prefix else "")
 
 
 def _declared_on(header: str, param: str) -> bool:

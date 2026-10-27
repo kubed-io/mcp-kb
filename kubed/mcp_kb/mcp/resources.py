@@ -65,11 +65,10 @@ class CatalogueProvider(Provider):
 
     async def _list_resources(self) -> Sequence[Resource]:
         entries = self._catalogue().entries(requested_scope(), full=full_listing())
-        a = requested_addressing()
         return [
             TextResource(
-                uri=a.structured(entry.uri),
-                name=a.structured(entry.uri).removeprefix("skill://"),
+                uri=entry.uri,
+                name=entry.name,
                 description=entry.description,
                 mime_type=entry.mime_type,
                 tags=set(entry.tags),
@@ -85,16 +84,11 @@ class CatalogueProvider(Provider):
         self, uri: str, version: VersionSpec | None = None
     ) -> Resource | None:
         catalogue = self._catalogue()
-        scope = requested_scope()
         a = requested_addressing()
-        # Keep the canonical address that resolved, for its mime type.
-        hit = a.first(
-            uri,
-            lambda c: (b, c) if (b := catalogue.read(c, scope)) is not None else None,
-        )
-        if hit is None:
+        canonical = a.incoming(uri)[0]
+        body = catalogue.read(canonical, requested_scope())
+        if body is None:
             return None
-        body, canonical = hit
         return TextResource(
             uri=uri,
             name=uri.removeprefix(a.prefix).removeprefix("skill://"),

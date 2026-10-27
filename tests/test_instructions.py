@@ -214,9 +214,8 @@ async def test_one_library_scope(server_url, mode):  # noqa: F811
     text = await told(server_url, mode, {"X-Skill-Library": "flatsource"})
     assert "[" not in text
     lines = text.splitlines()
-    # a pin drops the library segment, so the pointer and footer do too
-    assert "Skills (skill://_index.md): alpha, beta" in lines
-    assert text.endswith(RES_FOOTER.replace("<library>/", ""))
+    assert "Skills (skill://flatsource/_index.md): alpha, beta" in lines
+    assert text.endswith(RES_FOOTER)
 
 
 @pytest.mark.integration
@@ -465,7 +464,7 @@ async def _none(_context):
 
 
 @pytest.mark.unit
-def test_pinned_prefixed_pointer_and_footer(tmp_path):
+def test_prefixed_pointer_and_footer(tmp_path):
     text = LibraryText("flatsource")
     cat = _catalogue(tmp_path, {text: ["alpha", "beta"]})
     out = build_instructions(
@@ -473,17 +472,33 @@ def test_pinned_prefixed_pointer_and_footer(tmp_path):
         EVERYTHING,
         resources=True,
         skills_extension=False,
-        addressing=Addressing("kb+", "flatsource"),
+        addressing=Addressing("kb+"),
     )
-    assert out.splitlines()[0] == "Skills (kb+skill://_index.md): alpha, beta"
+    assert out.splitlines()[0] == (
+        "Skills (kb+skill://flatsource/_index.md): alpha, beta"
+    )
     assert out.splitlines()[-1] == (
-        "Read a listed skill at kb+skill://<path>/SKILL.md; read its "
+        "Read a listed skill at kb+skill://<library>/<path>/SKILL.md; read its "
         "_manifest in place of SKILL.md for the other files it ships."
     )
 
 
 @pytest.mark.unit
-def test_unpinned_prefixed_footer(tmp_path):
+def test_prefixed_pointer_without_names_and_notes(tmp_path):
+    a = LibraryText("a", "A.", "Start at skill://a/x/SKILL.md.")
+    cat = _catalogue(tmp_path, {a: ["x"]})
+    out = build_instructions(
+        cat,
+        EVERYTHING,
+        resources=True,
+        skills_extension=False,
+        addressing=Addressing("kb+"),
+    )
+    assert "Start at kb+skill://a/x/SKILL.md." in out.splitlines()
+
+
+@pytest.mark.unit
+def test_prefixed_multi_library_pointers(tmp_path):
     a, b = LibraryText("a", "A."), LibraryText("b", "B.")
     cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
     out = build_instructions(
@@ -496,10 +511,6 @@ def test_unpinned_prefixed_footer(tmp_path):
     lines = out.splitlines()
     assert "Skills: kb+skill://a/_index.md" in lines
     assert "Skills: kb+skill://b/_index.md" in lines
-    assert lines[-1] == (
-        "Read a listed skill at kb+skill://<library>/<path>/SKILL.md; read its "
-        "_manifest in place of SKILL.md for the other files it ships."
-    )
 
 
 @pytest.mark.unit
@@ -521,8 +532,10 @@ def test_default_addressing_is_byte_identical(tmp_path):
 async def test_instructions_follow_headers(server_url, mode):  # noqa: F811
     headers = {"X-Skill-Library": "flatsource", "X-MCP-Resource-Prefix": "kb+"}
     text = await told(server_url, mode, headers)
-    assert "Skills (kb+skill://_index.md): alpha, beta" in text.splitlines()
+    assert "Skills (kb+skill://flatsource/_index.md): alpha, beta" in (
+        text.splitlines()
+    )
     assert text.splitlines()[-1] == (
-        "Read a listed skill at kb+skill://<path>/SKILL.md; read its "
+        "Read a listed skill at kb+skill://<library>/<path>/SKILL.md; read its "
         "_manifest in place of SKILL.md for the other files it ships."
     )

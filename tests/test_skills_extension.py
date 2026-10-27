@@ -133,10 +133,7 @@ async def test_http_scope_and_header_precedence(server_url):  # noqa: F811
     async with Client(transport) as client:
         listing = await request(client, "skills/list")
         assert len(listing["skills"]) == 2
-        assert sorted(s["uri"] for s in listing["skills"]) == [
-            "skill://alpha/SKILL.md",
-            "skill://beta/SKILL.md",
-        ]
+        assert all(s["uri"].startswith("skill://flatsource/") for s in listing["skills"])
         errors = []
         for uri in ("skill://deepsource/plugin-a/gamma/SKILL.md", "skill://missing/nope/SKILL.md"):
             with pytest.raises(MCPError) as error:

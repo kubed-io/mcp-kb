@@ -80,11 +80,7 @@ def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> set[str]:
         a = requested_addressing()
         # A tool result is text, so the gateway prefix applies to the rows.
         return [
-            {
-                **entry.as_dict(),
-                "uri": a.text(entry.uri),
-                "name": a.structured(entry.uri).removeprefix("skill://"),
-            }
+            {**entry.as_dict(), "uri": a.text(entry.uri)}
             for entry in entries
         ]
 

@@ -1,4 +1,4 @@
-"""Resource addresses follow the request's pin and gateway prefix, over real HTTP."""
+"""Addresses in text follow the request's gateway prefix, over real HTTP."""
 
 import contextlib
 import hashlib
@@ -17,6 +17,7 @@ from tests.conftest import make_config
 
 PIN = {"X-Skill-Library": "flatsource"}
 PREFIX = {"X-MCP-Resource-Prefix": "kb+"}
+BOTH = {**PIN, **PREFIX}
 
 
 def _free_port() -> int:
@@ -35,6 +36,9 @@ def server_url(skills_dir_module, prompts_dir_module):
         "See skill://flatsource/beta/SKILL.md.\n"
     )
     (alpha / "notes.md").write_text("Also skill://flatsource/alpha/SKILL.md.\n")
+    (skills_dir_module / "flatsource" / "beta" / "already.md").write_text(
+        "kb+skill://flatsource/beta/SKILL.md and myskill://flatsource/beta.\n"
+    )
     # Only this module's server sees it; the shared tree's counts stay put.
     (prompts_dir_module / "flatsource" / "cite.md").write_text(
         "---\ndescription: Cite a shared file.\n---\n"
@@ -80,13 +84,12 @@ async def test_defaults_are_unchanged(server_url):
 
 
 @pytest.mark.integration
-async def test_pinned_listing_and_links_are_short(server_url):
-    assert ("skill://_index.md", "_index.md") in await listing(server_url, PIN)
-    body = await read(server_url, "skill://_index.md", PIN)
-    assert "skill://alpha/SKILL.md" in body
-    short = await read(server_url, "skill://alpha/SKILL.md", PIN)
-    assert short
-    assert await read(server_url, "skill://flatsource/alpha/SKILL.md", PIN) == short
+async def test_a_library_pin_changes_no_address(server_url):
+    rows = await listing(server_url, PIN)
+    assert rows == [("skill://flatsource/_index.md", "flatsource/_index.md")]
+    pinned = await read(server_url, "skill://flatsource/_index.md", PIN)
+    assert pinned == await read(server_url, "skill://flatsource/_index.md")
+    assert "skill://flatsource/alpha/SKILL.md" in pinned
 
 
 @pytest.mark.integration
@@ -103,18 +106,20 @@ async def test_prefix_only_bodies_and_prefixed_reads(server_url):
 @pytest.mark.integration
 async def test_behind_a_simulated_gateway(server_url):
     headers = {**PIN, **PREFIX}
-    body = await read(server_url, "skill://_index.md", headers)
+    body = await read(server_url, "skill://flatsource/_index.md", headers)
     links = re.findall(r"kb\+skill://\S+?(?=[:\s]|$)", body)
     assert links
     for link in links:
         assert await read(server_url, link.removeprefix("kb+"), headers)
-    assert await read(server_url, "skill://alpha/_manifest", headers)
+    assert await read(server_url, "skill://flatsource/alpha/_manifest", headers)
 
 
 @pytest.mark.integration
-async def test_a_tag_scope_keeps_long_addresses(server_url):
-    uris = [u for u, _ in await listing(server_url, {"X-Skill-Tags": "flat"})]
-    assert "skill://flatsource/_index.md" in uris
+async def test_no_double_prefix(server_url):
+    uri = "skill://flatsource/beta/already.md"
+    body = await read(server_url, uri, PREFIX)
+    assert body == await read(server_url, uri)
+    assert "kb+kb+" not in body
 
 
 @pytest.mark.integration
@@ -127,11 +132,9 @@ async def test_invalid_prefix_is_ignored(server_url):
 
 @pytest.mark.integration
 async def test_directory_hint_is_translated(server_url):
-    with pytest.raises(Exception, match=re.escape("kb+skill://alpha/SKILL.md")):
-        await read(server_url, "skill://alpha", {**PIN, **PREFIX})
+    with pytest.raises(Exception, match=re.escape("kb+skill://flatsource/alpha/SKILL.md")):
+        await read(server_url, "skill://flatsource/alpha", BOTH)
 
-
-BOTH = {**PIN, **PREFIX}
 
 
 async def tool(url, name, args=None, headers=None):
@@ -141,16 +144,15 @@ async def tool(url, name, args=None, headers=None):
 
 
 @pytest.mark.integration
-async def test_tools_mode_with_both(server_url):
+async def test_tools_mode_with_the_prefix(server_url):
     headers = {**BOTH, "X-MCP-Resources": "off"}
     rows = json.loads(await tool(server_url, "list_resources", headers=headers))
-    assert "kb+skill://_index.md" in [r["uri"] for r in rows]
+    assert [r["uri"] for r in rows] == ["kb+skill://flatsource/_index.md"]
     bodies = {
         await tool(server_url, "read_resource", {"uri": uri}, headers)
         for uri in (
-            "skill://alpha/SKILL.md",
             "skill://flatsource/alpha/SKILL.md",
-            "kb+skill://alpha/SKILL.md",
+            "kb+skill://flatsource/alpha/SKILL.md",
         )
     }
     assert len(bodies) == 1
@@ -170,15 +172,14 @@ async def skills_request(url, method, headers, **params):
 
 
 @pytest.mark.integration
-async def test_skills_extension_with_a_pin(server_url):
+async def test_skills_extension_with_the_prefix(server_url):
     listed = (await skills_request(server_url, "skills/list", BOTH))["skills"]
     assert listed
     for entry in listed:
-        assert entry["uri"].startswith("skill://")
-        assert not entry["uri"].startswith("skill://flatsource/")
+        assert entry["uri"].startswith("skill://flatsource/")
         assert "kb+" not in json.dumps(entry)
     got = await skills_request(
-        server_url, "skills/get", BOTH, uri="skill://alpha/SKILL.md"
+        server_url, "skills/get", BOTH, uri="skill://flatsource/alpha/SKILL.md"
     )
     entry = got["skill"]
     assert len(entry["resources"]) >= 2
@@ -186,18 +187,19 @@ async def test_skills_extension_with_a_pin(server_url):
         served = (await read(server_url, file["uri"], BOTH)).encode("utf-8")
         assert file["digest"] == f"sha256:{hashlib.sha256(served).hexdigest()}"
         assert file["size"] == len(served)
-        plain = await read(server_url, f"skill://flatsource/{file['uri'][8:]}")
+        assert file["uri"].startswith("skill://flatsource/")
+        plain = await read(server_url, file["uri"])
         assert plain.encode("utf-8") != served
 
 
 @pytest.mark.integration
-async def test_prompt_renders_pinned_prefixed_root(server_url):
+async def test_prompt_renders_the_prefixed_root(server_url):
     async def render(headers):
         async with _client(server_url, headers) as client:
             got = await client.get_prompt("flatsource_cite")
             return got.messages[0].content.text
 
-    assert await render(BOTH) == "Read kb+skill://shared/x.md.\n"
+    assert await render(BOTH) == "Read kb+skill://flatsource/shared/x.md.\n"
     assert await render({}) == "Read skill://flatsource/shared/x.md.\n"
 
 
@@ -260,4 +262,4 @@ async def test_library_notes_are_addressed_in_the_instructions(tmp_path):
         plain = await told({})
         both = await told({"X-Skill-Library": "lib", **PREFIX})
     assert "Start at skill://lib/s/SKILL.md." in plain
-    assert "Start at kb+skill://s/SKILL.md." in both
+    assert "Start at kb+skill://lib/s/SKILL.md." in both
