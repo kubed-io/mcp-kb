@@ -27,6 +27,13 @@ def _free_port() -> int:
 @pytest.fixture(scope="module")
 def server_url(skills_dir_module, prompts_dir_module):
     port = _free_port()
+    # Addresses in prose, so a translated body differs from the canonical one.
+    alpha = skills_dir_module / "flatsource" / "alpha"
+    (alpha / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: First skill.\n---\n\n"
+        "See skill://flatsource/beta/SKILL.md.\n"
+    )
+    (alpha / "notes.md").write_text("Also skill://flatsource/alpha/SKILL.md.\n")
     # Only this module's server sees it; the shared tree's counts stay put.
     (prompts_dir_module / "flatsource" / "cite.md").write_text(
         "---\ndescription: Cite a shared file.\n---\n"
@@ -87,8 +94,8 @@ async def test_prefix_only_bodies_and_prefixed_reads(server_url):
     assert "skill://flatsource/_index.md" in uris
     body = await read(server_url, "skill://flatsource/_index.md", PREFIX)
     assert "kb+skill://flatsource/alpha/SKILL.md" in body
-    plain = await read(server_url, "skill://flatsource/alpha/SKILL.md")
-    got = await read(server_url, "kb+skill://flatsource/alpha/SKILL.md", PREFIX)
+    plain = await read(server_url, "skill://flatsource/beta/SKILL.md")
+    got = await read(server_url, "kb+skill://flatsource/beta/SKILL.md", PREFIX)
     assert got == plain
 
 
@@ -173,10 +180,13 @@ async def test_skills_extension_with_a_pin(server_url):
         server_url, "skills/get", BOTH, uri="skill://alpha/SKILL.md"
     )
     entry = got["skill"]
-    main = next(r for r in entry["resources"] if r["uri"] == entry["uri"])
-    served = (await read(server_url, main["uri"], BOTH)).encode("utf-8")
-    assert main["digest"] == f"sha256:{hashlib.sha256(served).hexdigest()}"
-    assert main["size"] == len(served)
+    assert len(entry["resources"]) >= 2
+    for file in entry["resources"]:
+        served = (await read(server_url, file["uri"], BOTH)).encode("utf-8")
+        assert file["digest"] == f"sha256:{hashlib.sha256(served).hexdigest()}"
+        assert file["size"] == len(served)
+        plain = await read(server_url, f"skill://flatsource/{file['uri'][8:]}")
+        assert plain.encode("utf-8") != served
 
 
 @pytest.mark.integration

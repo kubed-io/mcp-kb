@@ -8,14 +8,17 @@ authority for scope and content; a getter follows every snapshot replacement.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Sequence
 
+import frontmatter
 from fastmcp.server.extensions import MethodBinding, ServerExtension
 from fastmcp.server.middleware import Middleware
 from mcp.shared.exceptions import MCPError
 from mcp_types import INVALID_PARAMS, PaginatedRequestParams, RequestParams
 from pydantic import Field
 
+from ..catalogue.addressing import DEFAULT, Addressing
 from ..catalogue.uris import Catalogue
 from .request import EXTENSION_ID, requested_addressing, requested_scope
 from .scope import Scope
@@ -23,6 +26,36 @@ from .scope import Scope
 
 class GetSkillParams(RequestParams):
     uri: str = Field(min_length=1)
+
+
+def addressed(
+    catalogue: Catalogue, scope: Scope, a: Addressing, entry: dict | None
+) -> dict | None:
+    """A canonical entry as this request addresses it.
+
+    The catalogue stays canonical; the edge shortens the URIs and re-digests the
+    bytes ``a.text`` makes of each body, which is what resources/read serves.
+    """
+    if entry is None or a == DEFAULT:
+        return entry
+    files = []
+    for file in entry["resources"]:
+        body = catalogue.read(file["uri"], scope)
+        if body is None:
+            continue
+        served = a.text(body)
+        content = served.encode("utf-8")
+        files.append(
+            {
+                **file,
+                "uri": a.structured(file["uri"]),
+                "digest": f"sha256:{hashlib.sha256(content).hexdigest()}",
+                "size": len(content),
+            }
+        )
+        if file["uri"] == entry["uri"] and served != body:
+            entry = {**entry, "frontmatter": frontmatter.loads(served).metadata}
+    return {**entry, "uri": a.structured(entry["uri"]), "resources": files}
 
 
 class AdvertiseLegacySkills(Middleware):
@@ -90,7 +123,7 @@ class SkillsExtension(ServerExtension):
         catalogue, a = self._catalogue(), requested_addressing()
         entries = []
         for uri in catalogue.skill_uris(scope):
-            entry = catalogue.skill_entry(uri, scope, a)
+            entry = addressed(catalogue, scope, a, catalogue.skill_entry(uri, scope))
             if entry is not None:
                 entries.append(entry)
         return self._result(skills=entries)
@@ -98,7 +131,8 @@ class SkillsExtension(ServerExtension):
     async def get_skill(self, ctx, params: GetSkillParams) -> dict:
         scope = self._scope()
         catalogue, a = self._catalogue(), requested_addressing()
-        entry = a.first(params.uri, lambda c: catalogue.skill_entry(c, scope, a))
+        entry = a.first(params.uri, lambda c: catalogue.skill_entry(c, scope))
+        entry = addressed(catalogue, scope, a, entry)
         if entry is None:
             # Out-of-scope and absent skills have exactly the same error.
             raise MCPError(code=INVALID_PARAMS, message="Skill not found")
