@@ -185,8 +185,9 @@ refusing to run one would be a different and worse contract.
 
 Three ways to hard-scope, the first two ceilings the model cannot widen past:
 
-- **A `Scope`, per client** — `?library=`, `?categories=`, `?tags=` or the
-  `X-Skill-Library` / `X-Skill-Categories` / `X-Skill-Tags` headers. One
+- **A `Scope`, per client** — `?library=`, `?category=`, `?tag=` or the
+  `Kb-Library` / `Kb-Category` / `Kb-Tag` headers (the `X-Skill-*` names are aliases).
+  A category selects a library listing it in `categories`, or a plugin whose own matches. One
   deployment serves many narrow agents; in n8n it is a Header Auth credential on
   the MCP Client Tool node. Prefer this — a second copy of the server is a whole
   extra pod for something a header solves. A scope names a library and nothing

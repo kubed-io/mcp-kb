@@ -31,8 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Discover and load verified skills in MCP Skills clients through `skills/list` and `skills/get`.
 - Skill links work behind a multiplexing gateway: set `X-MCP-Resource-Prefix` (or `?prefix=`), e.g. `kb+`, and kb writes it in front of every address in text.
 
+- A library can list `categories`, and `Kb-Category` (`?category=`) selects every library listing one.
+
 ### Changed
 
+- Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Listing` and `Kb-Resource-Prefix`; the old `X-` names are still accepted.
 - **BREAKING:** Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
 
 ### Fixed

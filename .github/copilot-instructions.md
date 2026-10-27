@@ -90,8 +90,8 @@ to ignore you.
 
 ## Review priorities (highest first)
 
-1. **Scope enforcement** — a `Scope` (`?library=`, `?tags=`, or the
-   `X-Skill-Library` / `X-Skill-Tags` headers) narrows a client,
+1. **Scope enforcement** — a `Scope` (`?library=`, `?category=`, `?tag=`, or the
+   `Kb-Library` / `Kb-Category` / `Kb-Tag` headers) narrows a client,
    and it is a ceiling the model cannot widen past. Every `Catalogue`, `SkillIndex`
    and `PromptProvider` read takes a `Scope` for that reason: there is no method
    that can be called without deciding about the scope. A new path that reads

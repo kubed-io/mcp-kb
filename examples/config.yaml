@@ -49,6 +49,9 @@ libraries:
 - name: penpot
   description: Design skills for Penpot.
   notes: Start at penpot-router.
+  # Labels for `?category=` / `Kb-Category` alone: a client scoped to `design`
+  # gets every library listing it, and every plugin whose own category is `design`.
+  categories: [design]
   source: github://penpot/penpot-ai-kit?ref=efbefc935ee43804502976aa5ec9659a8bb7e207
   plugins: [penpot-shared]
 - name: superpowers
