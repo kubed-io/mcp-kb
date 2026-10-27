@@ -50,7 +50,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `__init__.py` | `Fetch`, `Globs`, `Plugin`, and the resolution of a declared plugin. Imports no FastMCP |
 | ⤷ `marketplace.py` | somebody else's `marketplace.json`, read as plugins of ours — which entry sources are honoured, and why the rest are skipped |
 | ⤷ `manifest.py` | a plugin's own `plugin.json`: the components it says it ships |
-| ⤷ `select.py` | `pluginSelector` and `?tags=` — the comma rule, in one place |
+| ⤷ `select.py` | `pluginSelector` and `?tag=` — the comma rule, in one place |
 | `kubed/mcp_kb/catalogue/` | what is served, and how it is found, addressed and persisted |
 | ⤷ `harvest.py` | a plugin's globs, and what counts as a skill, a prompt or a library file |
 | ⤷ `skills.py` | the domain — `Skill`, `SkillIndex`, and the scoping rules. Imports no FastMCP |
@@ -185,12 +185,14 @@ refusing to run one would be a different and worse contract.
 
 Three ways to hard-scope, the first two ceilings the model cannot widen past:
 
-- **A `Scope`, per client** — `?library=`, `?categories=`, `?tags=` or the
-  `X-Skill-Library` / `X-Skill-Categories` / `X-Skill-Tags` headers. One
-  deployment serves many narrow agents; in n8n it is a Header Auth credential on
-  the MCP Client Tool node. Prefer this — a second copy of the server is a whole
-  extra pod for something a header solves. A scope names a library and nothing
-  below it: folders exist in URIs, not as selectors.
+- **A `Scope`, per client** — `?library=`, `?category=`, `?tag=` or the
+  `Kb-Library` / `Kb-Category` / `Kb-Tag` headers (the `X-Skill-*` names are
+  aliases). A category selects a library listing it in `categories`, or a plugin
+  whose own matches. One deployment serves many narrow agents; in n8n it is a
+  Header Auth credential on the MCP Client Tool node. Prefer this — a second
+  copy of the server is a whole extra pod for something a header solves. A
+  scope names a library and nothing below it: folders exist in URIs, not as
+  selectors.
 - **A config that lists less**, per deployment. Narrower blast radius, but a
   whole pod.
 - **A library of your own**, assembled with a `pluginSelector` — a saved query a

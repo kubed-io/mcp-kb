@@ -16,9 +16,9 @@ from fastmcp.client.transports import StreamableHttpTransport
 from kubed.mcp_kb import KnowledgeBase
 from tests.conftest import make_config
 
-PIN = {"X-Skill-Library": "flatsource"}
-PREFIX = {"X-MCP-Resource-Prefix": "kb+"}
-FULL = {"X-Skill-Listing": "full"}
+PIN = {"Kb-Library": "flatsource"}
+PREFIX = {"Kb-Resource-Prefix": "kb+"}
+FULL = {"Kb-Listing": "full"}
 ALPHA_DESCRIPTION = "First skill, see kb+skill://flatsource/beta/SKILL.md now"
 BOTH = {**PIN, **PREFIX}
 
@@ -129,7 +129,7 @@ async def test_no_double_prefix(server_url):
 @pytest.mark.integration
 async def test_invalid_prefix_is_ignored(server_url):
     bad = await read(
-        server_url, "skill://flatsource/_index.md", {"X-MCP-Resource-Prefix": "kb"}
+        server_url, "skill://flatsource/_index.md", {"Kb-Resource-Prefix": "kb"}
     )
     assert bad == await read(server_url, "skill://flatsource/_index.md")
 
@@ -316,6 +316,6 @@ async def test_library_notes_are_addressed_in_the_instructions(tmp_path):
                 return client.instructions
 
         plain = await told({})
-        both = await told({"X-Skill-Library": "lib", **PREFIX})
+        both = await told({"Kb-Library": "lib", **PREFIX})
     assert "Start at skill://lib/s/SKILL.md." in plain
     assert "Start at kb+skill://lib/s/SKILL.md." in both

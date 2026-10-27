@@ -110,7 +110,7 @@ def url(tmp_path_factory):
 
 
 def _client(url, tags=None):
-    headers = {"X-Skill-Tags": tags} if tags else {}
+    headers = {"Kb-Tag": tags} if tags else {}
     return Client(StreamableHttpTransport(url, headers=headers))
 
 

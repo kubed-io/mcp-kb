@@ -1,12 +1,12 @@
 """Refusing a scope that names nothing, rather than serving it an empty catalogue.
 
 A client's scope is set once, by whoever configures it: ``?library=grafana`` on
-its MCP URL, or an ``X-Skill-Library`` header. A typo there used to be served
+its MCP URL, or a ``Kb-Library`` header. A typo there used to be served
 exactly as asked -- a catalogue with nothing in it, no error, nothing in any
 log -- which from the client looks like a server that has no skills. So a scope
-that names a library the config does not declare, a category no plugin has, or
-a tag nothing carries, fails every request with an error that says what is
-there instead, and a client that cannot connect says why.
+that names a library the config does not declare, a category no library lists
+and no plugin has, or a tag nothing carries, fails every request with an error
+that says what is there instead, and a client that cannot connect says why.
 
 The error names libraries, categories and tags. That is not a leak: a scope is
 the operator's choice of what a client is given, not a boundary the model is
@@ -39,13 +39,13 @@ if TYPE_CHECKING:
     from ..config import Config
 
 FOLDER_IN_LIBRARY = (
-    "A scope names a library, not a folder: use ?categories= or ?tags= to narrow"
-    " inside it."
+    "A scope names a library, not a folder: use ?category= or ?tag= (or the"
+    " Kb-Category and Kb-Tag headers) to narrow inside it."
 )
 
 COMMA_IN_CATEGORY = (
-    "A plugin has one category, so 'a,b' matches nothing; repeat ?categories= to"
-    " mean any of them."
+    "A plugin has one category, so 'a,b' matches nothing; repeat ?category= (or"
+    " the Kb-Category header) to mean any of them."
 )
 
 
@@ -70,6 +70,13 @@ def what_is_wrong(scope: Scope, config: Config, snapshot: Snapshot) -> str | Non
     # refusing it for what happens to be served. See the module note.
     if scope.library and not _up(snapshot, scope.library):
         return None
+    # A library's categories are config-declared like its name: one listed by
+    # a library that is down is refused for nothing it names.
+    if not scope.library and any(
+        scope.categories & set(lib.get("categories", ())) and not _up(snapshot, name)
+        for name, lib in snapshot.status.get("libraries", {}).items()
+    ):
+        return None
 
     # What the plugins declare, in the library if one is named and anywhere
     # otherwise -- from the snapshot, since a marketplace's plugins are not in
@@ -80,12 +87,15 @@ def what_is_wrong(scope: Scope, config: Config, snapshot: Snapshot) -> str | Non
         if not scope.library or scope.library in entry.get("libraries", [])
     ]
     categories = {e["category"] for e in plugins if e.get("category")}
+    for name, lib in snapshot.status.get("libraries", {}).items():
+        if not scope.library or scope.library == name:
+            categories.update(lib.get("categories", ()))
     unknown = sorted(scope.categories - categories)
     if unknown:
         return (
             f"The scope names categor{'ies' if len(unknown) > 1 else 'y'}"
-            f" {', '.join(map(repr, unknown))}, which no plugin declares. The"
-            f" categories are: {_listed(categories)}."
+            f" {', '.join(map(repr, unknown))}, which no library lists and no"
+            f" plugin declares. The categories are: {_listed(categories)}."
         )
     tags = {t for e in plugins for t in (*e.get("tags", ()), *e.get("keywords", ()))}
     unknown = sorted({tag for group in scope.tags for tag in group} - tags)

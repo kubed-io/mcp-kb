@@ -29,10 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A client now connects knowing what each library in its scope is for; set a library's `description`, `notes` and `listSkills` to shape it.
 - Discover and load verified skills in MCP Skills clients through `skills/list` and `skills/get`.
-- Skill links work behind a multiplexing gateway: set `X-MCP-Resource-Prefix` (or `?prefix=`), e.g. `kb+`, and kb writes it in front of every address in text.
+- Skill links work behind a multiplexing gateway: set `Kb-Resource-Prefix` (or `?prefix=`), e.g. `kb+`, and kb writes it in front of every address in text.
+- A library can list `categories`, and `Kb-Category` (`?category=`) selects every library listing one.
 
 ### Changed
 
+- Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Listing` and `Kb-Resource-Prefix`; the old `X-` names are still accepted.
+- **BREAKING:** A pin set under an old `X-` name (a gateway route header, a credential) no longer holds against a client-sent `Kb-` header, which now beats it; move such pins to the `Kb-` names.
 - **BREAKING:** Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
 
 ### Fixed

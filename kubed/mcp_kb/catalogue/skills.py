@@ -10,10 +10,11 @@ that is where the globs, the dotfile rules and the skill-root conventions live.
 This module only turns what harvest already found into ``Skill`` records and a
 place to read library-level files from; it never walks a tree on its own.
 
-What a scope matches on is the *plugin's*: its category and its labels (tags
-and keywords). A skill carries them so that a scope can be decided per skill
-without reaching back to the plugin, and a library's files carry the plugin
-itself, because a file has no row of its own to copy them onto.
+What a scope matches on is the plugin's category or its library's categories,
+and the plugin's labels (tags and keywords). A skill carries them so that a
+scope can be decided per skill without reaching back to the plugin, and a
+library's files carry the plugin itself, because a file has no row of its own
+to copy them onto.
 """
 
 from __future__ import annotations
@@ -73,6 +74,7 @@ class Skill:
     root: Path
     category: str | None = None
     tags: frozenset[str] = frozenset()
+    library_categories: frozenset[str] = frozenset()
 
     @property
     def address(self) -> str:
@@ -130,9 +132,14 @@ class _Root:
     # The plugin's skill directories, resolved: what the root-wide fallback
     # must not reach, since those paths are the skills' own addresses.
     skills: tuple[Path, ...] = ()
+    library_categories: frozenset[str] = frozenset()
 
     def admits(self, scope: Scope) -> bool:
-        return scope.admits_labels(self.plugin.category, self.plugin.labels)
+        return scope.admits_labels(
+            self.plugin.category,
+            self.plugin.labels,
+            library_categories=self.library_categories,
+        )
 
     def holds(self, rel: str, excluded: Iterable[Path] = ()) -> Path | None:
         """``rel`` as a file inside this root that a fallback may serve, or None.
@@ -212,6 +219,7 @@ class LibraryFiles:
         skill_dirs: Sequence[Path],
         *,
         plugin: Plugin,
+        library_categories: frozenset[str] = frozenset(),
     ) -> None:
         """Register one plugin's contribution to ``library``.
 
@@ -225,7 +233,13 @@ class LibraryFiles:
         for rel in files:
             if _inside((base / rel).resolve(), dirs):
                 raise ValueError(f"{rel!r} lies inside a skill directory")
-        entry = _Root(base=base, files=tuple(files), plugin=plugin, skills=tuple(dirs))
+        entry = _Root(
+            base=base,
+            files=tuple(files),
+            plugin=plugin,
+            skills=tuple(dirs),
+            library_categories=library_categories,
+        )
         self._roots.setdefault(library, []).append(entry)
 
     @property
@@ -397,4 +411,9 @@ class SkillIndex:
 
 
 def _admits(scope: Scope, skill: Skill) -> bool:
-    return scope.admits(skill.library, skill.category, skill.tags)
+    return scope.admits(
+        skill.library,
+        skill.category,
+        skill.tags,
+        library_categories=skill.library_categories,
+    )

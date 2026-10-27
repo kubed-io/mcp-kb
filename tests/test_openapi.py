@@ -139,7 +139,7 @@ def test_each_status_documents_every_field_report_can_produce():
         "libraries", "skills", "prompts", "files", "built", "error", "skipped",
     }
     assert set(schemas["LibraryStatus"]["properties"]) == {
-        "description", "plugins", "skills", "prompts", "files", "error",
+        "description", "categories", "plugins", "skills", "prompts", "files", "error",
         "skipped", "conflicts",
     }
 

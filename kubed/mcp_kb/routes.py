@@ -73,7 +73,7 @@ def register(mcp: FastMCP, knowledge_base: KnowledgeBase) -> None:
     async def health(_request: Request) -> JSONResponse:
         """Readiness probe, and the fastest way to tell which fetches loaded.
 
-        Reports the catalogue as *loaded*, ignoring any ``X-Skill-Library``
+        Reports the catalogue as *loaded*, ignoring any ``Kb-Library``
         header, because an operator asking what this pod serves wants the real
         answer.
         ``status`` is ``"ok"`` even when a fetch failed to materialise --

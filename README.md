@@ -40,7 +40,7 @@ skill://<library>/<path>                     one of those files
 
 A library, a folder or a skill's own directory is not a file — reading one is not found, and the error names the file to read instead. Progressive disclosure lives in the addresses rather than in a tool list, so a listing is a dozen index rows whether the catalogue holds nine skills or ninety.
 
-Skills-aware clients can also use `skills/list` and `skills/get`. The server advertises `io.modelcontextprotocol/skills` and returns each skill's frontmatter and complete file manifest, with SHA-256 digests of the bytes served by `resources/read`. The same library, category and tag scopes apply; ordinary resource listings stay small. Connect to `/mcp` and enable Skills in your client — no `?skills=full` is needed for this extension.
+Skills-aware clients can also use `skills/list` and `skills/get`. The server advertises `io.modelcontextprotocol/skills` and returns each skill's frontmatter and complete file manifest, with SHA-256 digests of the bytes served by `resources/read`. The same library, category and tag scopes apply; ordinary resource listings stay small. Connect to `/mcp` and enable Skills in your client — no `?listing=full` is needed for this extension.
 
 📖 [Skills](https://github.com/kubed-io/mcp-kb/wiki/Skills)
 
@@ -71,10 +71,12 @@ A client can be given part of the catalogue and no more, and the narrowing is a 
 
 | On the MCP URL | Header | Sees |
 |---|---|---|
-| `?library=grafana` | `X-Skill-Library` | that whole library |
-| `?categories=observability` | `X-Skill-Categories` | every plugin declaring that category, across libraries |
-| `?tags=oncall,runbooks` | `X-Skill-Tags` | what carries **both** tags; repeat the parameter for any-of |
-| `?library=grafana&tags=oncall` | all three | the tagged part of that one library |
+| `?library=grafana` | `Kb-Library` | that whole library |
+| `?category=observability` | `Kb-Category` | every library listing that category, and every plugin declaring it |
+| `?tag=oncall,runbooks` | `Kb-Tag` | what carries **both** tags; repeat the parameter for any-of |
+| `?library=grafana&tag=oncall` | all three | the tagged part of that one library |
+
+The old `X-Skill-*` header names still work, but a pin set under one no longer holds against a client-sent `Kb-` header: move pins to the `Kb-` names.
 
 A header beats the URL, which is what makes a scope pinned inside a credential something the caller cannot edit away. It is a plumbed constant, never a tool argument — there is no way for a model to ask for material it was not given.
 
@@ -175,11 +177,13 @@ Per request, on the MCP URL — each with a header form that beats it:
 |---|---|---|
 | `?resources=off` | `X-MCP-Resources` | Reveals the resource mirror tools |
 | `?prompts=off` | `X-MCP-Prompts` | Reveals the prompt mirror tools |
-| `?library=<name>` | `X-Skill-Library` | Restricts this client to one library, by name |
-| `?categories=<name>` | `X-Skill-Categories` | Restricts it to the plugins declaring that category |
-| `?tags=a,b` | `X-Skill-Tags` | Restricts it to what carries all of those tags; repeat for any-of |
-| `?skills=full` | `X-Skill-Listing` | Lists every skill, for clients that sync them to disk |
-| `?prefix=kb+` | `X-MCP-Resource-Prefix` | Writes a gateway's prefix before addresses in text |
+| `?library=<name>` | `Kb-Library` | Restricts this client to one library, by name |
+| `?category=<name>` | `Kb-Category` | Restricts it to the libraries listing that category and the plugins declaring it |
+| `?tag=a,b` | `Kb-Tag` | Restricts it to what carries all of those tags; repeat for any-of |
+| `?listing=full` | `Kb-Listing` | Lists every skill, for clients that sync them to disk |
+| `?prefix=kb+` | `Kb-Resource-Prefix` | Writes a gateway's prefix before addresses in text |
+
+The old `X-Skill-*` and `X-MCP-Resource-Prefix` names (and `?categories=`, `?tags=`, `?skills=`) still work, though a pin under an old header yields to a client-sent `Kb-` one.
 
 `mcp-kb schema` prints the config JSON Schema, which is also committed as `config.schema.json` for an editor to validate against live.
 

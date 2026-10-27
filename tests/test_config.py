@@ -140,6 +140,18 @@ def test_a_library_selector_reads_categories_as_any_and_commas_as_all(tmp_path):
     )
 
 
+def test_a_library_normalises_its_categories():
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "p", "source": "file:///p"}],
+            "libraries": [
+                {"name": "x", "plugins": ["p"], "categories": ["dev", " sp ", ""]}
+            ],
+        }
+    )
+    assert config.library("x").categories == ["dev", "sp"]
+
+
 def test_an_undeclared_library_is_none_not_an_implicit_one(tmp_path):
     """A library is declared or it does not exist: `plugins` name real plugins."""
     config = load_config(write(tmp_path, SKETCH))
@@ -544,3 +556,15 @@ def test_library_notes_and_list_skills(tmp_path):
 
     with pytest.raises(ConfigError, match="list_skills"):
         load_config(write(tmp_path, lib + "  list_skills: false\n"))
+
+
+def test_a_library_lists_a_category_once_in_the_order_given():
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "p", "source": "file:///p"}],
+            "libraries": [
+                {"name": "x", "plugins": ["p"], "categories": ["b", "a", "b", " a "]}
+            ],
+        }
+    )
+    assert config.library("x").categories == ["b", "a"]

@@ -185,7 +185,14 @@ LIBRARY_STATUS = {
         "One configured library, keyed under `libraries` by its name. The "
         "counts are what it serves right now, summed over its plugins."
     ),
-    "required": ["description", "plugins", "skills", "prompts", "files"],
+    "required": [
+        "description",
+        "categories",
+        "plugins",
+        "skills",
+        "prompts",
+        "files",
+    ],
     "properties": {
         "description": _field("string", "The library's description, from the config."),
         "plugins": {
@@ -194,6 +201,14 @@ LIBRARY_STATUS = {
             "description": (
                 "The plugin ids this library resolved to: its marketplace's "
                 "entries, then its `plugins:`, then its selector's matches."
+            ),
+        },
+        "categories": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "The categories this library lists in its config: a category "
+                "scope selects the library by any of them."
             ),
         },
         "skills": _field("integer", "Skills served in this library."),
@@ -347,7 +362,7 @@ def build_spec() -> dict:
                         "Readiness, and the fastest way to see which fetches loaded."
                     ),
                     "description": (
-                        "Ignores X-Skill-Library: an operator asking what "
+                        "Ignores Kb-Library: an operator asking what "
                         "this pod serves wants the real catalogue, not one "
                         "client's scoped view of it."
                     ),

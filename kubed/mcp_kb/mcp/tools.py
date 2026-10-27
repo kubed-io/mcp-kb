@@ -70,8 +70,9 @@ def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> set[str]:
         `skill://<library>/_files.md` for a library that ships files outside
         its skills. Read an index for the URIs inside it, then read a skill's
         `SKILL.md` URI for its instructions. What is listed is what this
-        connection's scope admits: `?library=`, `?categories=` and `?tags=` on
-        the MCP URL narrow it, and that ceiling is not yours to widen.
+        connection's scope admits: `?library=`, `?category=` and `?tag=` on the
+        MCP URL (or the `Kb-Library`, `Kb-Category` and `Kb-Tag` headers)
+        narrow it, and that ceiling is not yours to widen.
 
         This returns exactly what an MCP `resources/list` would, so a `uri` from
         here can be read with `read_resource` or with your own resource reader.

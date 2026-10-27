@@ -211,7 +211,7 @@ def _library_config(root, **library):
 @pytest.mark.integration
 @ERAS
 async def test_one_library_scope(server_url, mode):  # noqa: F811
-    text = await told(server_url, mode, {"X-Skill-Library": "flatsource"})
+    text = await told(server_url, mode, {"Kb-Library": "flatsource"})
     assert "[" not in text
     lines = text.splitlines()
     assert "Skills (skill://flatsource/_index.md): alpha, beta" in lines
@@ -220,7 +220,7 @@ async def test_one_library_scope(server_url, mode):  # noqa: F811
 
 @pytest.mark.integration
 async def test_both_eras_are_told_the_same(server_url):  # noqa: F811
-    headers = {"X-Skill-Library": "flatsource"}
+    headers = {"Kb-Library": "flatsource"}
     legacy = await told(server_url, "legacy", headers)
     current = await told(server_url, "default", headers)
     assert legacy == current
@@ -331,7 +331,7 @@ async def test_resources_off_gets_the_tool_footer(server_url, mode):  # noqa: F8
 async def test_unknown_library_scope_is_still_refused(server_url, mode):  # noqa: F811
     """Pins refuse a scope that names nothing, initialize included."""
     with pytest.raises(Exception, match="nope"):
-        await told(server_url, mode, {"X-Skill-Library": "nope"})
+        await told(server_url, mode, {"Kb-Library": "nope"})
 
 
 @pytest.mark.integration
@@ -362,7 +362,7 @@ async def test_refresh_reaches_a_new_connection(tmp_path, mode):
 async def test_a_tag_scope_over_two_libraries_gets_sections_and_no_names(
     server_url, mode  # noqa: F811
 ):
-    text = await told(f"{server_url}?tags=flat&tags=deep", mode)
+    text = await told(f"{server_url}?tag=flat&tag=deep", mode)
     lines = text.splitlines()
     assert [x for x in lines if x.startswith("[")] == ["[deepsource]", "[flatsource]"]
     assert "Skills: skill://deepsource/_index.md" in lines
@@ -376,7 +376,7 @@ async def test_a_tag_scope_over_two_libraries_gets_sections_and_no_names(
 async def test_a_tag_that_matches_one_library_selects_it_alone(
     server_url, mode  # noqa: F811
 ):
-    text = await told(server_url, mode, {"X-Skill-Tags": "flat"})
+    text = await told(server_url, mode, {"Kb-Tag": "flat"})
     assert "[" not in text
     assert "Skills (skill://flatsource/_index.md): alpha, beta" in text.splitlines()
     assert "deepsource" not in text
@@ -530,7 +530,7 @@ def test_default_addressing_is_byte_identical(tmp_path):
 @pytest.mark.integration
 @ERAS
 async def test_instructions_follow_headers(server_url, mode):  # noqa: F811
-    headers = {"X-Skill-Library": "flatsource", "X-MCP-Resource-Prefix": "kb+"}
+    headers = {"Kb-Library": "flatsource", "Kb-Resource-Prefix": "kb+"}
     text = await told(server_url, mode, headers)
     assert "Skills (kb+skill://flatsource/_index.md): alpha, beta" in (
         text.splitlines()

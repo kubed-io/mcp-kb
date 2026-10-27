@@ -43,7 +43,7 @@
     },
     "LibraryConfig": {
       "additionalProperties": false,
-      "description": "A library: a marketplace, plugins by name, or a query -- and their union.\n\nA library carries no tags and no category of its own. Tagging is what a\nplugin does, so ``?tags=`` reaches a library only through what its plugins\nsay, and the selector gets an unambiguous name of its own after\nKubernetes' ``selector``.",
+      "description": "A library: a marketplace, plugins by name, or a query -- and their union.\n\nA library carries no tags. Tagging is what a plugin does, so ``?tag=``\nreaches a library only through what its plugins say, and the selector gets\nan unambiguous name of its own after Kubernetes' ``selector``. Its\n``categories`` label it for a category scope alone: they are not any\nplugin's category, so a ``pluginSelector`` never reads them.",
       "properties": {
         "name": {
           "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
@@ -94,6 +94,14 @@
             }
           ],
           "default": null
+        },
+        "categories": {
+          "description": "The library's categories: a category scope selects every library that lists one.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Categories",
+          "type": "array"
         }
       },
       "required": [
@@ -224,7 +232,7 @@
     },
     "Selector": {
       "additionalProperties": false,
-      "description": "A query over plugins: categories narrow first, then tag groups.\n\nAcross the two fields it is AND, as in every faceted search. Within\n``categories`` it can only be OR -- a plugin has exactly one category --\nand within ``tags`` a comma means *all of* while separate items mean *any\nof*, which is the same comma rule a request's ``?tags=`` carries.",
+      "description": "A query over plugins: categories narrow first, then tag groups.\n\nAcross the two fields it is AND, as in every faceted search. Within\n``categories`` it can only be OR -- a plugin has exactly one category --\nand within ``tags`` a comma means *all of* while separate items mean *any\nof*, which is the same comma rule a request's ``?tag=`` carries.",
       "properties": {
         "categories": {
           "items": {

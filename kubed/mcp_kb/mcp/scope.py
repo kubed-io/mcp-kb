@@ -8,7 +8,7 @@ a subject rather than a path.
 
 One comma rule throughout, in the config and in the query string alike: a comma
 inside one value means *all of*, and separate values mean *any of*. So
-``?tags=runbooks,oncall&tags=lgtm`` is (runbooks and oncall) or lgtm. Categories
+``?tag=runbooks,oncall&tag=lgtm`` is (runbooks and oncall) or lgtm. Categories
 are the exception that proves it -- a plugin has exactly one, so a list can only
 mean any of them, and a comma in one is kept verbatim here so ``pins.py`` can
 refuse it with a message rather than silently matching nothing.
@@ -36,17 +36,37 @@ class Scope:
         return bool(self.library or self.categories or self.tags)
 
     def admits(
-        self, library: str, category: str | None, labels: Iterable[str]
+        self,
+        library: str,
+        category: str | None,
+        labels: Iterable[str],
+        *,
+        library_categories: frozenset[str] = frozenset(),
     ) -> bool:
         """Whether something in ``library`` with that category and those labels
         is in scope."""
         if self.library and self.library != library:
             return False
-        return self.admits_labels(category, labels)
+        return self.admits_labels(
+            category, labels, library_categories=library_categories
+        )
 
-    def admits_labels(self, category: str | None, labels: Iterable[str]) -> bool:
-        """The category and tag halves alone, for what carries no library of its own."""
-        if self.categories and category not in self.categories:
+    def admits_labels(
+        self,
+        category: str | None,
+        labels: Iterable[str],
+        *,
+        library_categories: frozenset[str] = frozenset(),
+    ) -> bool:
+        """The category and tag halves alone, for what is already inside a library.
+
+        A category matches the plugin's own or any the library lists.
+        """
+        if (
+            self.categories
+            and category not in self.categories
+            and not self.categories & library_categories
+        ):
             return False
         if not self.tags:
             return True

@@ -215,6 +215,7 @@ async def test_a_library_whose_marketplace_is_missing_says_so(market, tmp_path):
 
     assert health["libraries"]["obs"] == {
         "description": "",
+        "categories": [],
         "plugins": [],
         "skills": 0,
         "prompts": 0,
@@ -419,7 +420,7 @@ def manifested(tmp_path):
 
 async def test_a_manifests_keywords_join_the_plugins_labels(manifested, tmp_path):
     """Tagged nowhere but in its plugin.json, the plugin is still selectable:
-    a `pluginSelector` on the keyword picks it, `?tags=` on a real request
+    a `pluginSelector` on the keyword picks it, `?tag=` on a real request
     admits it, and /health shows the merged labels. The entry's version beats
     the manifest's; the description it left empty is the manifest's."""
     import threading
@@ -457,11 +458,11 @@ async def test_a_manifests_keywords_join_the_plugins_labels(manifested, tmp_path
         threading.Event().wait(0.05)
     try:
         async with Client(
-            StreamableHttpTransport(f"http://127.0.0.1:{port}/mcp?tags=tdd")
+            StreamableHttpTransport(f"http://127.0.0.1:{port}/mcp?tag=tdd")
         ) as client:
             names = sorted(r.name for r in await client.list_resources())
         async with Client(
-            StreamableHttpTransport(f"http://127.0.0.1:{port}/mcp?tags=testing,tdd")
+            StreamableHttpTransport(f"http://127.0.0.1:{port}/mcp?tag=testing,tdd")
         ) as client:
             both = sorted(r.name for r in await client.list_resources())
     finally:
@@ -602,6 +603,7 @@ async def test_a_marketplace_subdir_symlinked_out_of_the_tree_is_the_librarys_er
 
     assert health["libraries"]["far"] == {
         "description": "",
+        "categories": [],
         "plugins": [],
         "skills": 0,
         "prompts": 0,
@@ -699,6 +701,28 @@ async def test_a_library_whose_marketplace_failed_is_not_refused_a_category_or_t
         Scope.parse(library="obs", tags=["whatever"]), config, kb.snapshot
     )
     assert problem.startswith("The scope names tag 'whatever'")
+
+
+async def test_a_category_listed_only_by_a_library_that_is_down_is_not_refused(
+    market, tmp_path
+):
+    """A library's categories are config-declared like its name, so a category
+    scope is refused for what it names -- not because the libraries listing it
+    happen to be failing while another serves."""
+    config = _config(
+        tmp_path,
+        libraries=[
+            {"name": "obs", "source": "lab://market"},
+            {"name": "devlib", "plugins": ["nope@obs"], "categories": ["dev"]},
+        ],
+    )
+    kb = KnowledgeBase(config, tmp_path / "cache")
+    assert kb.status["libraries"]["devlib"]["plugins"] == []
+
+    scope = Scope.parse(categories=["dev"])
+    assert what_is_wrong(scope, config, kb.snapshot) is None
+    problem = what_is_wrong(Scope.parse(categories=["nada"]), config, kb.snapshot)
+    assert problem.startswith("The scope names category 'nada'")
 
 
 # -- a marketplace or a manifest edited in place -------------------------------
@@ -880,3 +904,19 @@ def test_a_blank_description_falls_through_to_the_next_tier(
     [lib] = assemble_libraries(config, [plugin], descriptions=descriptions)
     assert lib.description == "P words."
 
+
+
+async def test_selector_ignores_library_categories(market, tmp_path):
+    """A library's `categories` label the library for a scope, not its plugins:
+    a selector on that category picks up nothing of a library that merely lists it."""
+    config = _config(
+        tmp_path,
+        libraries=[
+            {"name": "obs", "source": "lab://market", "categories": ["dev"]},
+            {"name": "devs", "pluginSelector": {"categories": ["dev"]}},
+        ],
+    )
+    health = await _health(KnowledgeBase(config, tmp_path / "cache"))
+
+    assert health["libraries"]["obs"]["categories"] == ["dev"]
+    assert health["libraries"]["devs"]["plugins"] == []

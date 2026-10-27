@@ -9,8 +9,8 @@ from starlette.requests import Request
 
 from kubed.mcp_kb.mcp import request as request_module
 from kubed.mcp_kb.mcp.request import (
-    CATEGORIES_HEADER,
-    CATEGORIES_PARAM,
+    CATEGORY_HEADER,
+    CATEGORY_PARAM,
     client_reads_resources,
     client_uses_prompts,
     full_listing,
@@ -145,8 +145,8 @@ def test_a_scope_is_truthy_as_soon_as_it_narrows():
 
 def test_a_repeated_parameter_is_any_of_and_a_comma_is_all_of(on_http):
     on_http(
-        query="categories=design&categories=engineering"
-        "&tags=runbooks,oncall&tags=loki"
+        query="category=design&category=engineering"
+        "&tag=runbooks,oncall&tag=loki"
     )
     scope = requested_scope()
 
@@ -157,7 +157,7 @@ def test_a_repeated_parameter_is_any_of_and_a_comma_is_all_of(on_http):
 
 
 def test_a_repeated_header_is_any_of_too(on_http):
-    on_http(headers=((CATEGORIES_HEADER, "design"), (CATEGORIES_HEADER, "homelab")))
+    on_http(headers=((CATEGORY_HEADER, "design"), (CATEGORY_HEADER, "homelab")))
 
     assert requested_scope().categories == frozenset({"design", "homelab"})
 
@@ -166,8 +166,8 @@ def test_a_header_wins_over_the_parameter(on_http):
     """The header is set in a credential by an admin; the parameter rides on a
     URL somebody may paste."""
     on_http(
-        query=f"{CATEGORIES_PARAM}=design",
-        headers=((CATEGORIES_HEADER, "homelab"),),
+        query=f"{CATEGORY_PARAM}=design",
+        headers=((CATEGORY_HEADER, "homelab"),),
     )
 
     assert requested_scope().categories == frozenset({"homelab"})
@@ -188,11 +188,11 @@ def test_the_capability_readers_take_the_first_value_too(on_http):
 
 
 def test_every_value_is_a_list_even_when_there_is_one(on_http):
-    on_http(query="library=grafana", headers=(("x-skill-tags", "loki"),))
+    on_http(query="library=grafana", headers=(("kb-tag", "loki"),))
     params, headers = http_request()
 
     assert params == {"library": ["grafana"]}
-    assert headers["x-skill-tags"] == ["loki"]
+    assert headers["kb-tag"] == ["loki"]
 
 
 def test_headers_reachable_without_the_request_are_still_read(monkeypatch):
@@ -205,12 +205,12 @@ def test_headers_reachable_without_the_request_are_still_read(monkeypatch):
     monkeypatch.setattr("fastmcp.server.dependencies.get_http_request", no_request)
     monkeypatch.setattr(
         "fastmcp.server.dependencies.get_http_headers",
-        lambda: {"X-Skill-Library": "grafana", "X-Skill-Tags": "loki,tempo"},
+        lambda: {"Kb-Library": "grafana", "Kb-Tag": "loki,tempo"},
     )
 
     assert http_request() == (
         {},
-        {"x-skill-library": ["grafana"], "x-skill-tags": ["loki,tempo"]},
+        {"kb-library": ["grafana"], "kb-tag": ["loki,tempo"]},
     )
     assert requested_scope() == Scope.parse(library="grafana", tags=["loki,tempo"])
 
@@ -233,3 +233,14 @@ def test_the_readers_have_one_way_in(monkeypatch):
     )
 
     assert requested_scope().categories == frozenset({"design"})
+
+
+def test_library_or_plugin_category_selects():
+    lib = "n8n"
+    listed = frozenset({"dev"})
+    scope = Scope.parse(categories=["dev"])
+    assert scope.admits(lib, "automation", [], library_categories=listed)
+    scope = Scope.parse(categories=["automation"])
+    assert scope.admits(lib, "automation", [], library_categories=listed)
+    scope = Scope.parse(categories=["x"])
+    assert not scope.admits(lib, "automation", [], library_categories=listed)

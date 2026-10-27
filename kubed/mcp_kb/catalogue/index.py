@@ -74,6 +74,7 @@ class SkillRow:
         root: Path,
         category: str | None,
         tags: frozenset[str],
+        library_categories: frozenset[str] = frozenset(),
     ) -> Skill:
         return Skill(
             name=self.name,
@@ -85,6 +86,7 @@ class SkillRow:
             root=root,
             category=category,
             tags=tags,
+            library_categories=library_categories,
         )
 
 

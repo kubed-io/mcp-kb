@@ -228,7 +228,7 @@ class Selector(Strict):
     Across the two fields it is AND, as in every faceted search. Within
     ``categories`` it can only be OR -- a plugin has exactly one category --
     and within ``tags`` a comma means *all of* while separate items mean *any
-    of*, which is the same comma rule a request's ``?tags=`` carries.
+    of*, which is the same comma rule a request's ``?tag=`` carries.
     """
 
     categories: list[str] = Field(default_factory=list)
@@ -305,10 +305,11 @@ class PluginConfig(Strict):
 class LibraryConfig(Strict):
     """A library: a marketplace, plugins by name, or a query -- and their union.
 
-    A library carries no tags and no category of its own. Tagging is what a
-    plugin does, so ``?tags=`` reaches a library only through what its plugins
-    say, and the selector gets an unambiguous name of its own after
-    Kubernetes' ``selector``.
+    A library carries no tags. Tagging is what a plugin does, so ``?tag=``
+    reaches a library only through what its plugins say, and the selector gets
+    an unambiguous name of its own after Kubernetes' ``selector``. Its
+    ``categories`` label it for a category scope alone: they are not any
+    plugin's category, so a ``pluginSelector`` never reads them.
     """
 
     name: str = Field(pattern=NAME)
@@ -318,8 +319,24 @@ class LibraryConfig(Strict):
     source: str | None = None
     plugins: list[str] = Field(default_factory=list)
     plugin_selector: Selector | None = Field(default=None, alias="pluginSelector")
+    categories: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The library's categories: a category scope selects every library that"
+            " lists one."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @field_validator("categories")
+    @classmethod
+    def _no_comma_in_category(cls, categories: list[str]) -> list[str]:
+        categories = [c.strip() for c in categories if c.strip()]
+        for category in categories:
+            if "," in category:
+                raise ValueError("a category has no comma; list several instead")
+        return list(dict.fromkeys(categories))
 
     @field_validator("source")
     @classmethod
