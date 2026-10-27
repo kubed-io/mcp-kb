@@ -179,6 +179,7 @@ Per request, on the MCP URL — each with a header form that beats it:
 | `?categories=<name>` | `X-Skill-Categories` | Restricts it to the plugins declaring that category |
 | `?tags=a,b` | `X-Skill-Tags` | Restricts it to what carries all of those tags; repeat for any-of |
 | `?skills=full` | `X-Skill-Listing` | Lists every skill, for clients that sync them to disk |
+| `?prefix=kb+` | `X-MCP-Resource-Prefix` | Writes a gateway's prefix before addresses in text |
 
 `mcp-kb schema` prints the config JSON Schema, which is also committed as `config.schema.json` for an editor to validate against live.
 

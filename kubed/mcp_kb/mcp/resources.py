@@ -65,11 +65,12 @@ class CatalogueProvider(Provider):
 
     async def _list_resources(self) -> Sequence[Resource]:
         entries = self._catalogue().entries(requested_scope(), full=full_listing())
+        a = requested_addressing()
         return [
             TextResource(
                 uri=entry.uri,
                 name=entry.name,
-                description=entry.description,
+                description=a.text(entry.description),
                 mime_type=entry.mime_type,
                 tags=set(entry.tags),
                 # Listing rows are addresses, not content. The body is fetched
@@ -85,7 +86,7 @@ class CatalogueProvider(Provider):
     ) -> Resource | None:
         catalogue = self._catalogue()
         a = requested_addressing()
-        canonical = a.incoming(uri)[0]
+        canonical = a.canonical(uri)
         body = catalogue.read(canonical, requested_scope())
         if body is None:
             return None
@@ -124,7 +125,7 @@ class NameTheFileToRead(Middleware):
                 requested_scope(),
                 requested_addressing(),
             )
-            hint = a.first(uri, lambda c: catalogue.hint(c, scope))
+            hint = catalogue.hint(a.canonical(uri), scope)
             if hint is None:
                 raise
             hint = a.text(hint)

@@ -7,6 +7,7 @@ import re
 import socket
 import threading
 
+import frontmatter
 import pytest
 import uvicorn
 from fastmcp import Client
@@ -17,6 +18,8 @@ from tests.conftest import make_config
 
 PIN = {"X-Skill-Library": "flatsource"}
 PREFIX = {"X-MCP-Resource-Prefix": "kb+"}
+FULL = {"X-Skill-Listing": "full"}
+ALPHA_DESCRIPTION = "First skill, see kb+skill://flatsource/beta/SKILL.md now"
 BOTH = {**PIN, **PREFIX}
 
 
@@ -32,7 +35,8 @@ def server_url(skills_dir_module, prompts_dir_module):
     # Addresses in prose, so a translated body differs from the canonical one.
     alpha = skills_dir_module / "flatsource" / "alpha"
     (alpha / "SKILL.md").write_text(
-        "---\nname: alpha\ndescription: First skill.\n---\n\n"
+        "---\nname: alpha\n"
+        "description: First skill, see skill://flatsource/beta/SKILL.md now\n---\n\n"
         "See skill://flatsource/beta/SKILL.md.\n"
     )
     (alpha / "notes.md").write_text("Also skill://flatsource/alpha/SKILL.md.\n")
@@ -136,6 +140,46 @@ async def test_directory_hint_is_translated(server_url):
         await read(server_url, "skill://flatsource/alpha", BOTH)
 
 
+@pytest.mark.integration
+async def test_prefixed_directory_hint_names_the_prefixed_file(server_url):
+    want = "kb+skill://flatsource/alpha/SKILL.md"
+    with pytest.raises(Exception, match=re.escape(want)):
+        await read(server_url, "kb+skill://flatsource/alpha", BOTH)
+    with pytest.raises(Exception, match=re.escape(want)):
+        await tool(
+            server_url,
+            "read_resource",
+            {"uri": "kb+skill://flatsource/alpha"},
+            {**BOTH, "X-MCP-Resources": "off"},
+        )
+
+
+@pytest.mark.integration
+async def test_read_returns_the_uri_the_client_sent(server_url):
+    async with _client(server_url, BOTH) as client:
+        for sent in (
+            "skill://flatsource/alpha/SKILL.md",
+            "kb+skill://flatsource/alpha/SKILL.md",
+        ):
+            assert str((await client.read_resource(sent))[0].uri) == sent
+
+
+@pytest.mark.integration
+async def test_listing_descriptions_are_addressed(server_url):
+    headers = {**BOTH, **FULL}
+    async with _client(server_url, headers) as client:
+        rows = {str(r.uri): r.description for r in await client.list_resources()}
+    assert rows["skill://flatsource/alpha/SKILL.md"] == ALPHA_DESCRIPTION
+    plain = {**FULL, **PIN}
+    async with _client(server_url, plain) as client:
+        rows = {str(r.uri): r.description for r in await client.list_resources()}
+    assert "kb+" not in rows["skill://flatsource/alpha/SKILL.md"]
+    tools = json.loads(
+        await tool(server_url, "list_resources", headers={**headers, "X-MCP-Resources": "off"})
+    )
+    by_uri = {r["uri"]: r["description"] for r in tools}
+    assert by_uri["kb+skill://flatsource/alpha/SKILL.md"] == ALPHA_DESCRIPTION
+
 
 async def tool(url, name, args=None, headers=None):
     async with _client(url, headers) as client:
@@ -177,11 +221,23 @@ async def test_skills_extension_with_the_prefix(server_url):
     assert listed
     for entry in listed:
         assert entry["uri"].startswith("skill://flatsource/")
-        assert "kb+" not in json.dumps(entry)
+        # Frontmatter is text and may cite addresses; structured fields never do.
+        assert "kb+" not in json.dumps({**entry, "frontmatter": None})
+        for file in entry["resources"]:
+            served = (await read(server_url, file["uri"], BOTH)).encode("utf-8")
+            assert file["digest"] == f"sha256:{hashlib.sha256(served).hexdigest()}"
+            assert file["size"] == len(served)
     got = await skills_request(
         server_url, "skills/get", BOTH, uri="skill://flatsource/alpha/SKILL.md"
     )
     entry = got["skill"]
+    sent = await skills_request(
+        server_url, "skills/get", BOTH, uri="kb+skill://flatsource/alpha/SKILL.md"
+    )
+    assert sent["skill"] == entry
+    served_main = await read(server_url, "skill://flatsource/alpha/SKILL.md", BOTH)
+    assert entry["frontmatter"] == frontmatter.loads(served_main).metadata
+    assert entry["frontmatter"]["description"] == ALPHA_DESCRIPTION
     assert len(entry["resources"]) >= 2
     for file in entry["resources"]:
         served = (await read(server_url, file["uri"], BOTH)).encode("utf-8")

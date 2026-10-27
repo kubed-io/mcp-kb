@@ -6,11 +6,7 @@ Pure on purpose: it only rewrites strings, so every MCP surface can share it.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TypeVar
-
-T = TypeVar("T")
 
 _PREFIX = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*\+$")
 _SCHEME = "skill://"
@@ -32,18 +28,11 @@ class Addressing:
         """Addresses inside prose, which a gateway does not rewrite for us."""
         return _ANY.sub(f"{self.prefix}{_SCHEME}", body) if self.prefix else body
 
-    def incoming(self, uri: str) -> list[str]:
-        """Canonical candidates for an address a client sent, best first."""
+    def canonical(self, uri: str) -> str:
+        """The catalogue's address for one a client sent."""
         if self.prefix and uri.startswith(self.prefix + _SCHEME):
-            return [uri[len(self.prefix) :]]
-        return [uri]
-
-    def first(self, uri: str, look: Callable[[str], T | None]) -> T | None:
-        for candidate in self.incoming(uri):
-            hit = look(candidate)
-            if hit is not None:
-                return hit
-        return None
+            return uri[len(self.prefix) :]
+        return uri
 
 
 DEFAULT = Addressing()

@@ -12,7 +12,6 @@ _FOOTER = (
     "Read a listed skill at {prefix}skill://<library>/<path>/SKILL.md; read its "
     "_manifest in place of SKILL.md for the other files it ships."
 )
-RESOURCES_FOOTER = _FOOTER.format(prefix="")
 TOOLS_FOOTER = "Read these with read_resource."
 
 

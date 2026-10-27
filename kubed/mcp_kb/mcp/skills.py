@@ -13,6 +13,7 @@ import hashlib
 from collections.abc import Callable, Sequence
 
 import frontmatter
+import yaml
 from fastmcp.server.extensions import MethodBinding, ServerExtension
 from fastmcp.server.middleware import Middleware
 from mcp.shared.exceptions import MCPError
@@ -55,7 +56,7 @@ def addressed(
         )
         if file["uri"] == entry["uri"] and served != body:
             # An unparsable served body keeps the canonical frontmatter.
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(yaml.YAMLError, ValueError):
                 meta = frontmatter.loads(served).metadata
                 entry = {**entry, "frontmatter": meta}
     return {**entry, "resources": files}
@@ -134,7 +135,7 @@ class SkillsExtension(ServerExtension):
     async def get_skill(self, ctx, params: GetSkillParams) -> dict:
         scope = self._scope()
         catalogue, a = self._catalogue(), requested_addressing()
-        entry = a.first(params.uri, lambda c: catalogue.skill_entry(c, scope))
+        entry = catalogue.skill_entry(a.canonical(params.uri), scope)
         entry = addressed(catalogue, scope, a, entry)
         if entry is None:
             # Out-of-scope and absent skills have exactly the same error.

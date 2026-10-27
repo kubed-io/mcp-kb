@@ -80,7 +80,11 @@ def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> set[str]:
         a = requested_addressing()
         # A tool result is text, so the gateway prefix applies to the rows.
         return [
-            {**entry.as_dict(), "uri": a.text(entry.uri)}
+            {
+                **entry.as_dict(),
+                "uri": a.text(entry.uri),
+                "description": a.text(entry.description),
+            }
             for entry in entries
         ]
 
@@ -112,10 +116,10 @@ def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> set[str]:
         """
         current, scope = catalogue(), requested_scope()
         a = requested_addressing()
-        body = a.first(uri, lambda c: current.read(c, scope))
+        body = current.read(a.canonical(uri), scope)
         if body is not None:
             return a.text(body)
-        hint = a.first(uri, lambda c: current.hint(c, scope)) or (
+        hint = current.hint(a.canonical(uri), scope) or (
             "Call list_resources() for the indexes, then read one to see the URIs"
             " inside it."
         )
