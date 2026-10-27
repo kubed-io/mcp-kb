@@ -351,8 +351,11 @@ async def test_a_header_scope_is_refused_the_same_way(url):
 
 
 async def test_a_header_beats_the_url_parameter(url):
-    _, resources, _ = await _seen(url, "?library=design", {"X-Skill-Library": "observe"})
+    _, resources, prompts = await _seen(
+        url, "?library=design", {"X-Skill-Library": "observe"}
+    )
     assert resources == ["observe/_index.md"]
+    assert prompts == ["observe_debug"]  # design has no prompts
 
 
 async def test_the_prompt_tools_are_held_to_the_scope(url):

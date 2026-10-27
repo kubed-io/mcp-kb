@@ -34,7 +34,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from ..catalogue.uris import Catalogue
-from .request import full_listing, requested_scope
+from .request import full_listing, requested_addressing, requested_scope
 
 LIST_TOOL = "list_resources"
 READ_TOOL = "read_resource"
@@ -77,7 +77,16 @@ def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> set[str]:
         here can be read with `read_resource` or with your own resource reader.
         """
         entries = catalogue().entries(requested_scope(), full=full_listing())
-        return [entry.as_dict() for entry in entries]
+        a = requested_addressing()
+        # A tool result is text, so the gateway prefix applies to the rows.
+        return [
+            {
+                **entry.as_dict(),
+                "uri": a.text(entry.uri),
+                "description": a.text(entry.description),
+            }
+            for entry in entries
+        ]
 
     @mcp.tool(annotations={"title": "Read a skill resource", **READ_ONLY})
     def read_resource(uri: str) -> str:
@@ -106,13 +115,15 @@ def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> set[str]:
         you are going to use it.
         """
         current, scope = catalogue(), requested_scope()
-        body = current.read(uri, scope)
+        a = requested_addressing()
+        body = current.read(a.canonical(uri), scope)
         if body is not None:
-            return body
-        hint = current.hint(uri, scope) or (
+            return a.text(body)
+        hint = current.hint(a.canonical(uri), scope) or (
             "Call list_resources() for the indexes, then read one to see the URIs"
             " inside it."
         )
+        hint = a.text(hint)
         # An error result, so a caller that branches on isError can tell a miss
         # from a file; the hint rides in its message. The caller's mistake, not
         # the server's, so it logs at DEBUG and never as a traceback.

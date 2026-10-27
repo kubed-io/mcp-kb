@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from fastmcp.server.low_level import client_supports_extension
 
+from ..catalogue.addressing import Addressing
 from .scope import Scope
 
 # The client capability a host declares when it builds its own skill list.
@@ -28,6 +29,10 @@ CATEGORIES_PARAM = "categories"
 CATEGORIES_HEADER = "x-skill-categories"
 TAGS_PARAM = "tags"
 TAGS_HEADER = "x-skill-tags"
+
+# What a gateway puts in front of kb's resource addresses, e.g. ``kb+``.
+PREFIX_PARAM = "prefix"
+PREFIX_HEADER = "x-mcp-resource-prefix"
 
 # How a client declares it cannot use MCP prompts, and so wants them as tools.
 PROMPTS_PARAM = "prompts"
@@ -112,6 +117,13 @@ def requested_scope() -> Scope:
         _read(CATEGORIES_HEADER, CATEGORIES_PARAM),
         _read(TAGS_HEADER, TAGS_PARAM),
     )
+
+
+def requested_addressing() -> Addressing:
+    """The gateway prefix this request wants in front of addresses in text."""
+    prefix = _read(PREFIX_HEADER, PREFIX_PARAM)
+    # A query string decodes "+" to a space, and a valid prefix has no space.
+    return Addressing.parse(prefix[0].replace(" ", "+") if prefix else "")
 
 
 def _declared_on(header: str, param: str) -> bool:

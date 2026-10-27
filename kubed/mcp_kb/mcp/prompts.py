@@ -37,7 +37,7 @@ from pydantic import ConfigDict
 
 from ..catalogue.prompts import FilePrompt, MissingArguments
 from ..catalogue.uris import SCHEME
-from .request import requested_scope
+from .request import requested_addressing, requested_scope
 from .scope import EVERYTHING, Scope
 from .tools import READ_ONLY
 
@@ -101,7 +101,8 @@ class MCPFilePrompt(Prompt):
                 raise _refused(again) from again
 
     def _filled(self, arguments: dict[str, object] | None) -> str:
-        return self.file.render(arguments, plugin_root=f"{SCHEME}{self.file.library}")
+        text = self.file.render(arguments, plugin_root=f"{SCHEME}{self.file.library}")
+        return requested_addressing().text(text)
 
     def _ask(self, exc: MissingArguments) -> InputRequiredPromptResult | None:
         """The missing arguments as one form, or None when nobody can fill it.
