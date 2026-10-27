@@ -1,5 +1,6 @@
 """Resource addresses follow the request's pin and gateway prefix, over real HTTP."""
 
+import contextlib
 import hashlib
 import json
 import re
@@ -198,3 +199,65 @@ async def test_prompt_renders_pinned_prefixed_root(server_url):
 
     assert await render(BOTH) == "Read kb+skill://shared/x.md.\n"
     assert await render({}) == "Read skill://flatsource/shared/x.md.\n"
+
+
+@pytest.mark.integration
+async def test_a_plus_in_the_url_parameter_is_a_plus(server_url):
+    # In a query string a bare "+" decodes to a space.
+    async with _client(f"{server_url}?prefix=kb+") as client:
+        body = (await client.read_resource("skill://flatsource/_index.md"))[0].text
+    assert "kb+skill://flatsource/alpha/SKILL.md" in body
+
+
+@contextlib.contextmanager
+def _served(knowledge_base):
+    port = _free_port()
+    server = uvicorn.Server(
+        uvicorn.Config(
+            knowledge_base.mcp.http_app(), host="127.0.0.1", port=port, log_level="error"
+        )
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.started:
+            break
+        threading.Event().wait(0.05)
+    try:
+        yield f"http://127.0.0.1:{port}/mcp"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+@pytest.mark.integration
+async def test_library_notes_are_addressed_in_the_instructions(tmp_path):
+    from kubed.mcp_kb.config import Config
+
+    skill = tmp_path / "m" / "p" / "skills" / "s"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: s\ndescription: d\n---\n\nBody.\n")
+    (tmp_path / "m" / ".claude-plugin").mkdir()
+    (tmp_path / "m" / ".claude-plugin" / "marketplace.json").write_text(
+        json.dumps({"name": "m", "plugins": [{"name": "p", "source": "./p"}]})
+    )
+    config = Config.model_validate(
+        {
+            "libraries": [
+                {
+                    "name": "lib",
+                    "source": f"file://{tmp_path / 'm'}",
+                    "notes": "Start at skill://lib/s/SKILL.md.",
+                }
+            ]
+        }
+    )
+    with _served(KnowledgeBase(config, tmp_path / "cache")) as url:
+        async def told(headers):
+            async with _client(url, headers) as client:
+                return client.instructions
+
+        plain = await told({})
+        both = await told({"X-Skill-Library": "lib", **PREFIX})
+    assert "Start at skill://lib/s/SKILL.md." in plain
+    assert "Start at kb+skill://s/SKILL.md." in both

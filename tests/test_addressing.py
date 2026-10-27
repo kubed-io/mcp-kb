@@ -71,3 +71,11 @@ def test_first_returns_the_first_hit():
     store = {"skill://penpot/router/SKILL.md": "body"}
     assert a.first("skill://penpot/router/SKILL.md", store.get) == "body"
     assert a.first("skill://nope", store.get) is None
+
+
+def test_text_leaves_already_prefixed_and_foreign_schemes_alone():
+    for a in (Addressing.parse("kb+", "penpot"), Addressing.parse("kb+")):
+        assert a.text("kb+skill://penpot/x") == "kb+skill://penpot/x"
+        assert a.text("myskill://penpot/x") == "myskill://penpot/x"
+    pinned = Addressing.parse(library="penpot")
+    assert pinned.text("myskill://penpot/x") == "myskill://penpot/x"

@@ -8,6 +8,7 @@ authority for scope and content; a getter follows every snapshot replacement.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from collections.abc import Callable, Sequence
 
@@ -54,7 +55,10 @@ def addressed(
             }
         )
         if file["uri"] == entry["uri"] and served != body:
-            entry = {**entry, "frontmatter": frontmatter.loads(served).metadata}
+            # An unparsable served body keeps the canonical frontmatter.
+            with contextlib.suppress(Exception):
+                meta = frontmatter.loads(served).metadata
+                entry = {**entry, "frontmatter": meta}
     return {**entry, "uri": a.structured(entry["uri"]), "resources": files}
 
 

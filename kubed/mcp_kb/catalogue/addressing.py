@@ -14,6 +14,9 @@ T = TypeVar("T")
 
 _PREFIX = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*\+$")
 _SCHEME = "skill://"
+# Not the tail of a longer scheme, or of an address already prefixed.
+_LEFT = r"(?<![A-Za-z0-9+.-])"
+_ANY = re.compile(_LEFT + re.escape(_SCHEME))
 
 
 @dataclass(frozen=True)
@@ -41,12 +44,12 @@ class Addressing:
             lib = re.escape(self.library)
             # Library names are [a-z0-9-], so that is the boundary of a bare one.
             body = re.sub(
-                rf"{re.escape(_SCHEME)}{lib}(?:/|(?![a-z0-9-]))",
+                rf"{_LEFT}{re.escape(_SCHEME)}{lib}(?:/|(?![a-z0-9-]))",
                 f"{self.prefix}{_SCHEME}",
                 body,
             )
         elif self.prefix:
-            body = body.replace(_SCHEME, f"{self.prefix}{_SCHEME}")
+            body = _ANY.sub(f"{self.prefix}{_SCHEME}", body)
         return body
 
     def incoming(self, uri: str) -> list[str]:

@@ -97,7 +97,7 @@ class CatalogueProvider(Provider):
         body, canonical = hit
         return TextResource(
             uri=uri,
-            name=uri.removeprefix("skill://"),
+            name=uri.removeprefix(a.prefix).removeprefix("skill://"),
             mime_type=catalogue.mime(canonical),
             text=a.text(body),
         )

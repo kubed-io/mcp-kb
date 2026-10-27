@@ -126,7 +126,9 @@ def requested_addressing() -> Addressing:
     """
     prefix = _read(PREFIX_HEADER, PREFIX_PARAM)
     library = _read(LIBRARY_HEADER, LIBRARY_PARAM)
-    return Addressing.parse(prefix[0] if prefix else "", library[0] if library else "")
+    # A query string decodes "+" to a space, and a valid prefix has no space.
+    first = prefix[0].replace(" ", "+") if prefix else ""
+    return Addressing.parse(first, library[0] if library else "")
 
 
 def _declared_on(header: str, param: str) -> bool:
