@@ -188,6 +188,7 @@ jobs:
     concurrency:
       group: agent-pr-${{ needs.route.outputs.number }}
       cancel-in-progress: ${{ needs.route.outputs.takeover == 'true' }}
+    # the App token below lasts an hour; a turn past it cannot land (selenium-flow#104)
     timeout-minutes: 120
     permissions:
       issues: read
