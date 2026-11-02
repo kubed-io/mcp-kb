@@ -40,6 +40,15 @@ rules:
   self-repository:
     ignore:
     - publish.yml
+    - pr.yml
+
+  # pr.yml calls this repository's own check workflows, and each gets the secrets it would
+  # have had on its own `pull_request` trigger: `inherit` passes the same set, so a check
+  # that starts using a secret needs no second edit in the caller. A fork's pull_request
+  # run gets no secrets either way.
+  secrets-inherit:
+    ignore:
+    - pr.yml
 
   # The checkout in publish.yml MUST keep its credentials: duplocloud/version-bump
   # commits the rolled changelog and pushes the tag through the remote checkout

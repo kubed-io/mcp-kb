@@ -23,11 +23,14 @@ and the shape the config settled into — sources, plugins and libraries, with a
 library as a marketplace or a query (§C1.30 — §C1.33), the prompt dialects
 (§C1.34) and what a placeholder may become (§C1.35 — §C1.37).
 
-Three other places, and none of them overlaps this file:
+Four other places, and none of them overlaps this file:
 
 - **[The wiki](https://github.com/kubed-io/mcp-kb/wiki)** is the manual — how to
   connect a client, declare a source, deploy it, read `/health`. It is a
   submodule at `wiki/`, and three of its pages are generated from the live code.
+- **[`docs/superpowers/`](docs/superpowers/)** holds a spec per piece of work in
+  `specs/` and its plan in `plans/`, in the repository, not the wiki. The issue
+  agents write them there on the issue's branch (`issue-<N>`).
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** is the loop: setup, what CI runs, how
   the changelog is written, what is generated and what is not.
 - **[README.md](README.md)** advertises. It links into the wiki and explains
