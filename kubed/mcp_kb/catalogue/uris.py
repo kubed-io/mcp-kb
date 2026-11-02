@@ -176,11 +176,12 @@ def _manifest_json(skill: Skill) -> str:
 
     Size and hash describe the bytes on disk, ``SKILL.md`` included -- and a
     read of ``SKILL.md`` resolves ``${CLAUDE_PLUGIN_ROOT}`` and
-    ``${CLAUDE_SKILL_DIR}`` into addresses, so a client that hashes what it read
-    finds that one file differs. That is by design: the manifest describes the
-    skill as it was published, and the substitution is this server answering
-    the two placeholders it is the authority on (§C1.37). Every other file is
-    served verbatim and hashes equal.
+    ``${CLAUDE_SKILL_DIR}`` into addresses -- a citation through the plugin
+    root into one of its plugin's skills becoming that skill's address -- so a
+    client that hashes what it read finds that one file differs. That is by
+    design: the manifest describes the skill as it was published, and the
+    substitution is this server answering the two placeholders it is the
+    authority on (§C1.37). Every other file is served verbatim and hashes equal.
     """
     files = []
     for path in sorted(_manifest_files(skill)):
@@ -474,6 +475,33 @@ class Catalogue:
         found = self._in_library(library, scope)
         return sorted(s.address.removeprefix(prefix) for s in found)
 
+    def plugin_skill_dirs(
+        self, library: str, plugin: str, scope: Scope = EVERYTHING
+    ) -> dict[str, str]:
+        """One plugin's skills in one library: directory below the root, to address.
+
+        What ``${CLAUDE_PLUGIN_ROOT}/<dir>`` renders as in that plugin's text.
+        Own plugin and own library only, as in Claude Code. Every skill of one
+        plugin in one library shares its category, labels and library
+        categories, so ``scope`` admits all of them or none and the map reveals
+        nothing the caller could not list. A skipped skill is not in the index,
+        so it is not here, and a citation of it dangles.
+
+        The key is the directory as the plugin names it, ``""`` for a plugin
+        root that is itself a skill. A harvest resolves the root it walks, so
+        either spelling may be the prefix; a skill under neither is left out.
+        """
+        dirs: dict[str, str] = {}
+        for skill in self._index.visible(scope):
+            if skill.library != library or skill.plugin != plugin:
+                continue
+            for base in (skill.root, skill.root.resolve()):
+                if skill.path.is_relative_to(base):
+                    rel = skill.path.relative_to(base).as_posix()
+                    dirs["" if rel == "." else rel] = f"{SCHEME}{skill.address}"
+                    break
+        return dirs
+
     def _library_files(self, library: str, scope: Scope) -> list[str]:
         """The library-level files this caller may see, empty when none are.
 
@@ -552,7 +580,7 @@ class Catalogue:
             return None
         found = self._skill_at(library, path, scope)
         if found is not None and found[1]:
-            body = self._skill_file(*found)
+            body = self._skill_file(*found, scope)
             if body is None:
                 body = self._root_file(*found)
             if body is not None:
@@ -681,7 +709,7 @@ class Catalogue:
             + "\n"
         )
 
-    def _skill_file(self, skill: Skill, file: str) -> str | None:
+    def _skill_file(self, skill: Skill, file: str, scope: Scope) -> str | None:
         if file == MANIFEST:
             # Every file first: a size and a hash are claims about the bytes,
             # and on a live source the ones on disk may be an edit behind the
@@ -706,10 +734,14 @@ class Catalogue:
             # Instructions are substituted; everything else is bytes on disk,
             # which is what `_manifest`'s size and hash describe.
             return text
+        # A citation through the plugin root into one of its own skills renders
+        # as that skill's address: the literal path is one the ceiling refuses,
+        # because a skill's files have one address and it is the skill's.
         return placeholders.substitute(
             text,
             plugin_root=f"{SCHEME}{skill.library}",
             skill_dir=f"{SCHEME}{skill.address}",
+            skills=self.plugin_skill_dirs(skill.library, skill.plugin, scope),
         )
 
     def _root_file(self, skill: Skill, file: str) -> str | None:
