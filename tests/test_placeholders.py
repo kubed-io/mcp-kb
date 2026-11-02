@@ -55,6 +55,23 @@ def test_rendering_resolves_the_plugin_root_in_every_dialect(tmp_path, dialect):
     assert prompt.render() == "Read ${CLAUDE_PLUGIN_ROOT}/shared/x.md."
 
 
+@pytest.mark.parametrize("dialect", DIALECTS)
+def test_rendering_resolves_a_skill_path_in_every_dialect(tmp_path, dialect):
+    path = write(
+        tmp_path / f"{dialect}.md",
+        "description: d\n",
+        "Read ${CLAUDE_PLUGIN_ROOT}/skills/w/a.md.",
+    )
+    prompt = load_prompt(path, "lib", dialect=dialect)
+    skills = {"skills/w": "skill://lib/w"}
+    assert (
+        prompt.render(plugin_root="skill://lib", skills=skills)
+        == "Read skill://lib/w/a.md."
+    )
+    # Without the map the path is the plugin root's, as before.
+    assert prompt.render(plugin_root="skill://lib") == "Read skill://lib/skills/w/a.md."
+
+
 SKILLS = {"skills/writing": "skill://kit/writing"}
 
 

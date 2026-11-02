@@ -33,7 +33,7 @@ from fastmcp.tools.base import Tool
 from fastmcp.utilities.versions import VersionSpec
 from mcp_types import ToolAnnotations
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from ..catalogue.prompts import FilePrompt, MissingArguments
 from ..catalogue.uris import SCHEME
@@ -64,6 +64,11 @@ class MCPFilePrompt(Prompt):
     only to satisfy FastMCP's ``Prompt`` contract and hand the result back. The
     one thing added here is the library's own address base, so a body citing
     ``${CLAUDE_PLUGIN_ROOT}/shared/x.md`` renders a URI the reader can read.
+    ``skill_dirs`` is the plugin's skills under that root, set per request by
+    ``PromptProvider``, so ``${CLAUDE_PLUGIN_ROOT}/skills/x/y.md`` renders as
+    skill ``x``'s own address. Rendered literally, as
+    ``skill://<library>/skills/x/y.md``, it would read as nothing: a skill's
+    files are served only at the skill's own address.
 
     A missing argument is the one failure translated here. FastMCP treats any
     other exception out of a render as its own fault: -32603 on the wire and a
@@ -78,6 +83,7 @@ class MCPFilePrompt(Prompt):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     file: FilePrompt
+    skill_dirs: dict[str, str] = Field(default_factory=dict)
 
     async def render(
         self, arguments: dict[str, object] | None = None
@@ -101,7 +107,11 @@ class MCPFilePrompt(Prompt):
                 raise _refused(again) from again
 
     def _filled(self, arguments: dict[str, object] | None) -> str:
-        text = self.file.render(arguments, plugin_root=f"{SCHEME}{self.file.library}")
+        text = self.file.render(
+            arguments,
+            plugin_root=f"{SCHEME}{self.file.library}",
+            skills=self.skill_dirs,
+        )
         return requested_addressing().text(text)
 
     def _ask(self, exc: MissingArguments) -> InputRequiredPromptResult | None:
@@ -195,9 +205,10 @@ def _adapt(file: FilePrompt) -> MCPFilePrompt:
 class PromptProvider(Provider):
     """The prompts, scoped to whoever is asking.
 
-    Only the listing is overridden. FastMCP's default ``_get_prompt`` looks a
-    name up in that same listing, so a prompt outside this client's scope is
-    unknown to ``prompts/get`` too, not merely unlisted.
+    Scope is applied in the listing alone. ``_get_prompt`` finds a name
+    through FastMCP's default lookup, which searches that same listing, so a
+    prompt outside this client's scope is unknown to ``prompts/get`` too, not
+    merely unlisted.
 
     Takes one getter for the whole ``Snapshot`` rather than for its prompts. A
     refresh swaps the server's snapshot with a single assignment; a reader
@@ -232,11 +243,22 @@ class PromptProvider(Provider):
         ``render`` is where the body is read, and it is not this provider's to
         call -- FastMCP renders what it is handed. So the file is brought level
         with its server here, on the way out.
+
+        The map of the plugin's skills is set here too. It is built from the
+        snapshot reference the revalidation used, so both work off one
+        generation. The prompt was found by the lookup above, which takes its
+        own reference. The map is built only on a get, so the listing never
+        pays for it.
         """
         prompt = await super()._get_prompt(name, version)
-        if isinstance(prompt, MCPFilePrompt):
-            self._snapshot().revalidate(prompt.file.path)
-        return prompt
+        if not isinstance(prompt, MCPFilePrompt):
+            return prompt
+        snapshot = self._snapshot()
+        snapshot.revalidate(prompt.file.path)
+        dirs = snapshot.catalogue.plugin_skill_dirs(
+            prompt.file.library, prompt.file.plugin, requested_scope()
+        )
+        return prompt.model_copy(update={"skill_dirs": dirs})
 
 
 class ReadOnlyPromptsAsTools(PromptsAsTools):

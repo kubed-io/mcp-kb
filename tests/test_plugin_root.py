@@ -15,6 +15,7 @@ Scope only exists inside an HTTP request, so this runs against a real server on
 a loopback port, like ``test_address_space.py``.
 """
 
+import json
 import threading
 
 import pytest
@@ -76,6 +77,8 @@ def _build(base):
         "skills/cite/SKILL.md",
         "---\nname: cite\ndescription: Cite.\n---\n\n" + CITATIONS,
     )
+    # The same citations in a prompt, served as `kit_cite`.
+    _write(kit, "commands/cite.md", "---\ndescription: Cite.\n---\n" + CITATIONS)
     _write(
         kit,
         "skills/reading/SKILL.md",
@@ -256,6 +259,26 @@ async def test_a_skills_rendered_citation_with_a_prefix(url):
     body = await _read(url, "skill://kit/cite/SKILL.md", prefix="kb+")
     assert "A kb+skill://kit/writing/notes.md\n" in body
     assert "kb+kb+" not in body
+
+
+async def test_a_prompt_citing_its_plugins_skills_renders_their_addresses(url):
+    """A prompt body is the plugin's text too, so the same citations render the
+    same addresses -- through ``prompts/get`` and through its tool mirror."""
+    async with _client(url) as client:
+        got = await client.get_prompt("kit_cite")
+        mirrored = await client.call_tool("get_prompt", {"name": "kit_cite"})
+    assert RENDERED in got.messages[0].content.text
+    # The mirror returns the messages as JSON, so the text is one field of it.
+    message = json.loads(mirrored.content[0].text)["messages"][0]
+    assert RENDERED in message["content"]
+
+
+async def test_a_prompts_rendered_citation_with_a_prefix(url):
+    """The map carries no prefix, so the gateway's is written exactly once."""
+    async with _client(url, prefix="kb+") as client:
+        text = (await client.get_prompt("kit_cite")).messages[0].content.text
+    assert "A kb+skill://kit/writing/notes.md\n" in text
+    assert "kb+kb+" not in text
 
 
 async def test_the_plugin_roots_are_tried_in_the_librarys_order(url):
