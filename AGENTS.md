@@ -25,15 +25,13 @@ reword or mark the requirements it touches, keep IDs stable and never reuse one.
 A design brainstormed with superpowers goes to
 `docs/superpowers/plans/YYYY-MM-DD-<topic>-design.md` beside its plan, not under
 `specs/`, and what it proposes enters the spec as *(proposed)* requirements.
+The issue agents follow the same rules on the issue's branch (`issue-<N>`).
 
-Four other places, and none of them overlaps this file:
+Three other places, and none of them overlaps this file:
 
 - **[The wiki](https://github.com/kubed-io/mcp-kb/wiki)** is the manual — how to
   connect a client, declare a source, deploy it, read `/health`. It is a
   submodule at `wiki/`, and three of its pages are generated from the live code.
-- **[`docs/superpowers/`](docs/superpowers/)** holds a spec per piece of work in
-  `specs/` and its plan in `plans/`, in the repository, not the wiki. The issue
-  agents write them there on the issue's branch (`issue-<N>`).
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** is the loop: setup, what CI runs, how
   the changelog is written, what is generated and what is not.
 - **[README.md](README.md)** advertises. It links into the wiki and explains

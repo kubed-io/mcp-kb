@@ -242,8 +242,9 @@ heading.
   before any runner exists, so only GitHub's event data can vouch for the sender.
 - **`kubed-io/actions/*@main`** is first-party and has no tags; see
   `.github/zizmor.yml`.
-- **Specs and plans are in `docs/superpowers/`**, committed by the workflow. On an
-  agent PR, review the code against the spec and plan there.
+- **The spec is `docs/superpowers/specs/`**, one file per area; the dated design
+  and plan are in `docs/superpowers/plans/`. On an agent PR, review the code
+  against them, and flag a behaviour change whose spec file did not change with it.
 - **`.issue/` is the agents' scratch** and is gitignored. Any `.issue/` file in a
   diff is a finding.
 
