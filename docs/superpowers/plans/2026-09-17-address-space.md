@@ -1,5 +1,13 @@
 # Address-space Plan — skill URIs on the MCP Skills extension
 
+> **History.** Shipped in #19 (31f3067). What it asked for now lives in the
+> living spec: [skills](../specs/skills.md) (SKL-8–24, SKL-34–36), [http-and-tools](../specs/http-and-tools.md) (HTTP-17),
+> [config-and-sources](../specs/config-and-sources.md) (SRC-42).
+> **Overtaken:**
+> - *Spec* line: saga §C1.23–§C1.24 as binding — the saga is frozen at `docs/saga/`; the address space lives in `skills.md`.
+> - *Global Constraints*: "history belongs in the saga" — history now lives in `docs/superpowers/plans/`.
+> - *Exact values*: `<path>` relative to the source's skill root, library files from the source root — both are measured from the plugin root (SKL-10, SKL-27).
+
 > **For agentic workers:** executed with superpowers:subagent-driven-development
 > on the branch `address-space`. One PR at the end.
 

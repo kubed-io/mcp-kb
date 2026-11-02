@@ -1,6 +1,12 @@
 # Library categories and the Kb- headers — design
 
-**Date:** 2026-10-27 · **Branch:** `categories` · **Status:** draft, for review
+> **History.** Shipped in #27 (45d76c7). What it asked for now lives in the
+> living spec: [scoping-and-instructions](../specs/scoping-and-instructions.md) (SCP-2–8, SCP-15–16, SCP-31–32),
+> [plugins-and-libraries](../specs/plugins-and-libraries.md) (LIB-1, LIB-9, LIB-27).
+> **Overtaken:**
+> - D4: "an empty `Kb-Category` value means no category filter" — an empty value counts as not sent, and the next alias is read (SCP-5, SCP-6).
+
+**Date:** 2026-10-27 · **Branch:** `categories` · **Status:** historical
 
 ## Goal
 

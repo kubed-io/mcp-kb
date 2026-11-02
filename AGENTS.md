@@ -10,18 +10,21 @@ cache volume.
 
 ## Read first
 
-**The design record lives in [`saga/`](saga/).** This file is the operating
-manual — the rules and invariants you must not break. The saga is *why* they are
-what they are, plus what has been weighed and set aside. Decisions there are
-cited as `§C1.n` and are the reference for anything here that says "see the
-saga".
+**What the system does is [the spec](docs/superpowers/specs/).** One file per
+area, numbered requirements (`PRM-12`, `SCP-3`), each one true of the code or
+marked *(proposed)*. This file is the operating manual — the rules and
+invariants you must not break while changing it.
 
-[Chapter 1 — The Card Catalogue](saga/Chapter_1_The_Card_Catalogue.md) is the
-whole design: a config file (§C1.3, §C1.4), one module per backend (§C1.5 —
-§C1.7), the index and the `snapshot`/`live` dial (§C1.18), the name (§C1.22),
-and the shape the config settled into — sources, plugins and libraries, with a
-library as a marketplace or a query (§C1.30 — §C1.33), the prompt dialects
-(§C1.34) and what a placeholder may become (§C1.35 — §C1.37).
+**How it got that way is [the history](docs/superpowers/plans/):** dated designs
+and plans, each headed with what shipped and what has since been overtaken.
+Read them for *why*, never for what is true now. Older still is the frozen
+[saga](docs/saga/); code comments citing `§C1.n` point into its Chapter 1.
+
+**When behaviour changes**, the spec changes in the same pull request. Add,
+reword or mark the requirements it touches, keep IDs stable and never reuse one.
+A design brainstormed with superpowers goes to
+`docs/superpowers/plans/YYYY-MM-DD-<topic>-design.md` beside its plan, not under
+`specs/`, and what it proposes enters the spec as *(proposed)* requirements.
 
 Four other places, and none of them overlaps this file:
 
@@ -237,8 +240,9 @@ picked up an edit yet.
   lets `kubed.mcp_kb` and the sibling `kubed.selenium_flow` install side by
   side. Adding one breaks the pair silently, in whichever environment resolves
   second; `tests/test_packaging.py` fails if one appears.
-- **The prompt mirror is FastMCP's `PromptsAsTools`**, subclassed only to add
-  read-only annotations. Keep it FastMCP's: a prompt is role-tagged messages,
+- **The prompt mirror is FastMCP's `PromptsAsTools`**, subclassed to add
+  read-only annotations, turn an unknown name or a missing argument into a tool
+  error, and never ask for input (elicitation) through the mirror. Keep it FastMCP's: a prompt is role-tagged messages,
   which a resource or a hand-written tool would flatten to text.
 - **Do not reach for `ResourcesAsTools`, or back for `SkillsDirectoryProvider`.**
   Both enumerate every skill on every listing call — `resources/list` is 1.9 KB
