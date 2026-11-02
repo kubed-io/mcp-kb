@@ -129,7 +129,8 @@ Package in one run, so the `Checks` job after them sees every result; a draft ru
 | `Test / Test (3.11)` / `Test / Test (3.14)` | `ruff check .` and the full pytest suite, at both ends of the supported range |
 | `Package / Package` | builds the sdist + wheel, `twine check --strict`, then installs the wheel clean and imports it |
 | `Checks` | never fails: collects what failed into a `checks-report` artifact, and on an `agent` PR hands the PR to the review agent |
-| `CodeQL` / `Dependency Audit` / `Workflow Audit` / `Dockerfile Lint` / `OpenAPI Spec` | `quality.yml` — code scanning, `pip-audit`, `zizmor`, `hadolint`, and a Redocly lint of the generated spec |
+| `Lint / Dependency Audit` / `Lint / Dockerfile Lint` / `Lint / OpenAPI Spec` | `lint.yml` — `pip-audit`, `hadolint`, and a Redocly lint of the generated spec |
+| `CodeQL` / `Workflow Audit` | `quality.yml`, on its own trigger — code scanning and `zizmor` |
 | Copilot review | reviews against `.github/copilot-instructions.md` |
 
 The image is **not** built on a pull request: a two-architecture build is most of

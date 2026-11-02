@@ -26,6 +26,16 @@ Prefer these over assumptions. When a convention is undocumented, the sibling
 repo `kubed-io/selenium-flow` sets the house style for CI, release flow and the
 resources/tools split.
 
+## The maintainer is **Dr K**. Never write a real name.
+
+This repository is public. The maintainer is **Dr K** in prose, commit messages,
+PR descriptions and comments.
+
+**No first name, no surname, no personal email, no personal domain, no personal
+GitHub handle** outside `CODEOWNERS`. Not in a code comment, a test fixture or a
+transcript quoting a live instance. A real hostname pasted in as evidence is the
+same leak. **Flag any real name or homelab hostname in a diff as a blocker.**
+
 ## The layout
 
 | Path | Holds |
@@ -180,10 +190,16 @@ Python by [python.instructions.md](./instructions/python.instructions.md). The
 shape of the pipeline itself:
 
 - **The image is not built on pull requests** — deliberately. Don't ask for it
-  back; `quality.yml`, `package.yml` and `test.yml` cover the part that is ours.
+  back; `lint.yml`, `package.yml` and `test.yml` cover the part that is ours.
+- **`pr.yml` is the one PR run.** It calls `test.yml`, `lint.yml` and
+  `package.yml`, and its `Checks` job collects what failed for the code agent.
+  Those three have no `pull_request` trigger of their own on purpose: a second
+  one would run every check twice. `quality.yml` (CodeQL, zizmor) stays on its
+  own trigger because code scanning keys an analysis by its workflow file. A
+  draft runs none of it.
 - **`test.yml` runs both ends of the range (3.11 and 3.14) on a PR and the full
-  3.11–3.14 matrix on main and on release.** `Test (3.14)` is a required status
-  check. The old end is on the PR because that is where every version break
+  3.11–3.14 matrix on main and on release.** `Test / Test (3.14)` is a required
+  status check. The old end is on the PR because that is where every version break
   here has been: a trailing `**` glob, and a `pygit2` floor without the API.
 - **Required checks must never be path-filtered.** A path-filtered required check
   never reports on a PR that misses the filter, and the PR can then never merge.
@@ -212,6 +228,30 @@ a comment when it is wrong — and the failure is almost always the same one:
 
 Do *not* ask for an entry that `pr.yml` did not — and do not ask for a version
 heading.
+
+## The agent workflows
+
+`agent-issue.yml`, `agent-pr.yml` and `agent-review.yml` run Dr K's issue → spec
+→ plan → code → review flow on the self-hosted `claude` runner. A PR from a
+`issue-<N>` branch with the `agent` label is the agents' work.
+
+- **They start only on `repository_dispatch`**, which n8n sends. The commented-out
+  `issues` / `issue_comment` / `pull_request_target` triggers are kept as a record;
+  don't ask for them back.
+- **Every job gate names numeric ids**, not variables: a job's `if` is decided
+  before any runner exists, so only GitHub's event data can vouch for the sender.
+- **`kubed-io/actions/*@main`** is first-party and has no tags; see
+  `.github/zizmor.yml`.
+- **Specs and plans are in `docs/superpowers/`**, committed by the workflow. On an
+  agent PR, review the code against the spec and plan there.
+- **`.issue/` is the agents' scratch** and is gitignored. Any `.issue/` file in a
+  diff is a finding.
+
+## Review style
+
+- Be specific and actionable: cite the file and line, and name the fix.
+- Explain the "why" in one line.
+- Stay within the diff and its blast radius.
 
 ## What not to flag (settled — these are the recurring false positives)
 
