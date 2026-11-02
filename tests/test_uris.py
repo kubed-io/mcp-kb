@@ -362,6 +362,83 @@ def _skill(library, folder, name, tags=()):
 
 
 @pytest.mark.unit
+def test_plugin_skill_dirs_maps_one_plugin_in_one_library():
+    """What ``${CLAUDE_PLUGIN_ROOT}/<dir>`` renders as: the plugin's own skills,
+    in this library, keyed by their directory below the plugin root."""
+    from kubed.mcp_kb.catalogue.skills import Skill
+
+    def skill(library, plugin, rel, name, folder="", root=Path("/r")):
+        return Skill(
+            name=name,
+            library=library,
+            folder=folder,
+            description=f"{name}.",
+            path=root / rel,
+            plugin=plugin,
+            root=root,
+            tags=frozenset({"t"}),
+        )
+
+    skills = [
+        skill("a", "p", "skills/writing", "writing"),
+        skill("a", "p", "skills/writing/drafts", "drafts", folder="writing"),
+        skill("a", "q", "skills/ops", "ops"),
+        skill("b", "p", "skills/writing", "writing"),
+        skill("c", "solo", "", "solo", root=Path("/s")),
+    ]
+    cat = Catalogue(SkillIndex(skills), LibraryFiles())
+    assert cat.plugin_skill_dirs("a", "p") == {
+        "skills/writing": "skill://a/writing",
+        "skills/writing/drafts": "skill://a/writing/drafts",
+    }
+    assert cat.plugin_skill_dirs("b", "p") == {"skills/writing": "skill://b/writing"}
+    assert cat.plugin_skill_dirs("c", "solo") == {"": "skill://c/solo"}
+    assert cat.plugin_skill_dirs("a", "nobody") == {}
+    assert cat.plugin_skill_dirs("a", "p", _tags({"other"})) == {}
+
+
+@pytest.mark.unit
+def test_plugin_skill_dirs_accepts_a_symlinked_root_and_drops_a_stray_skill(
+    tmp_path,
+):
+    """A harvest resolves the root it walks, so a skill's path may sit under the
+    resolved spelling of a root that is a symlink; one under neither is left out."""
+    from kubed.mcp_kb.catalogue.skills import Skill
+
+    real = tmp_path / "real"
+    (real / "skills" / "writing").mkdir(parents=True)
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+
+    def skill(name, path):
+        return Skill(
+            name=name,
+            library="a",
+            folder="",
+            description=f"{name}.",
+            path=path,
+            plugin="p",
+            root=link,
+            tags=frozenset({"t"}),
+        )
+
+    cat = Catalogue(
+        SkillIndex(
+            [
+                skill("writing", real.resolve() / "skills" / "writing"),
+                skill("whole", real.resolve()),
+                skill("stray", tmp_path / "elsewhere" / "stray"),
+            ]
+        ),
+        LibraryFiles(),
+    )
+    assert cat.plugin_skill_dirs("a", "p") == {
+        "skills/writing": "skill://a/writing",
+        "": "skill://a/whole",
+    }
+
+
+@pytest.mark.unit
 def test_selected_follows_scope_and_constructor_order():
     skills = [_skill("a", "", "one", {"x"}), _skill("b", "", "two", {"y"})]
     cat = Catalogue(

@@ -34,7 +34,7 @@ something FastMCP can serve.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -126,6 +126,7 @@ class FilePrompt:
         arguments: dict[str, object] | None = None,
         *,
         plugin_root: str | None = None,
+        skills: Mapping[str, str] | None = None,
     ) -> str:
         """Fill in the placeholders, raising ``MissingArguments`` on a missing one.
 
@@ -136,7 +137,12 @@ class FilePrompt:
 
         Given ``plugin_root``, the placeholders naming this server's own
         material are resolved after the dialect's own (§C1.37); every other
-        `${…}` is the client's and stays as written.
+        `${…}` is the client's and stays as written. ``skills`` maps this
+        plugin's skill directories to their addresses, so a path through the
+        root into one renders as that skill's address. Rendered literally, as
+        ``skill://<library>/skills/x/…``, it would read as nothing: a skill's
+        files are served only at the skill's own address. Without
+        ``plugin_root`` the map does nothing.
 
         Plain and synchronous: the FastMCP-facing wrapper is what turns this
         into the async ``render`` a ``Prompt`` subclass must provide, and what
@@ -161,7 +167,9 @@ class FilePrompt:
         }
         text = DIALECTS[self.dialect].substitute(self.body(), values)
         if plugin_root is not None:
-            text = placeholders.substitute(text, plugin_root=plugin_root)
+            text = placeholders.substitute(
+                text, plugin_root=plugin_root, skills=skills
+            )
         return text
 
 

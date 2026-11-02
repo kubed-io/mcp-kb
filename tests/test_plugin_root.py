@@ -15,6 +15,7 @@ Scope only exists inside an HTTP request, so this runs against a real server on
 a loopback port, like ``test_address_space.py``.
 """
 
+import json
 import threading
 
 import pytest
@@ -27,6 +28,27 @@ from kubed.mcp_kb.config import Config
 from tests.test_header_scope import _free_port
 
 pytestmark = pytest.mark.integration
+
+# Every way skill `cite` can name a path through the plugin root, and what each
+# renders as: a served skill's directory becomes its address (A, B), and the
+# rest -- a file named like a skill, a skipped skill, shared material, another
+# plugin's skill -- stays at the library base, as before.
+CITATIONS = (
+    "A ${CLAUDE_PLUGIN_ROOT}/skills/writing/notes.md\n"
+    "B ${CLAUDE_PLUGIN_ROOT}/skills/writing/drafts/d.md\n"
+    "C ${CLAUDE_PLUGIN_ROOT}/skills/writing.md\n"
+    "D ${CLAUDE_PLUGIN_ROOT}/skills/Upper/leak.md\n"
+    "E ${CLAUDE_PLUGIN_ROOT}/shared/x.md\n"
+    "F ${CLAUDE_PLUGIN_ROOT}/skills/ops/SKILL.md\n"
+)
+RENDERED = (
+    "A skill://kit/writing/notes.md\n"
+    "B skill://kit/writing/drafts/d.md\n"
+    "C skill://kit/skills/writing.md\n"
+    "D skill://kit/skills/Upper/leak.md\n"
+    "E skill://kit/shared/x.md\n"
+    "F skill://kit/skills/ops/SKILL.md\n"
+)
 
 
 def _write(root, rel, text):
@@ -43,6 +65,20 @@ def _build(base):
         "---\nname: writing\ndescription: Write things.\n---\n\nSee shared/x.md.\n",
     )
     _write(kit, "skills/writing/notes.md", "skill notes\n")
+    # A skill nested in another's directory: the deeper citation is its own.
+    _write(
+        kit,
+        "skills/writing/drafts/SKILL.md",
+        "---\nname: drafts\ndescription: Drafts.\n---\n\nDrafts.\n",
+    )
+    _write(kit, "skills/writing/drafts/d.md", "drafts d\n")
+    _write(
+        kit,
+        "skills/cite/SKILL.md",
+        "---\nname: cite\ndescription: Cite.\n---\n\n" + CITATIONS,
+    )
+    # The same citations in a prompt, served as `kit_cite`.
+    _write(kit, "commands/cite.md", "---\ndescription: Cite.\n---\n" + CITATIONS)
     _write(
         kit,
         "skills/reading/SKILL.md",
@@ -109,13 +145,15 @@ def url(tmp_path_factory):
     thread.join(timeout=5)
 
 
-def _client(url, tags=None):
+def _client(url, tags=None, prefix=None):
     headers = {"Kb-Tag": tags} if tags else {}
+    if prefix:
+        headers["Kb-Resource-Prefix"] = prefix
     return Client(StreamableHttpTransport(url, headers=headers))
 
 
-async def _read(url, uri, tags=None):
-    async with _client(url, tags) as client:
+async def _read(url, uri, tags=None, prefix=None):
+    async with _client(url, tags, prefix) as client:
         return (await client.read_resource(uri))[0].text
 
 
@@ -200,6 +238,47 @@ async def test_a_skipped_skills_files_are_not_readable_through_a_served_one(url)
         for uri in (f"skill://kit/{rel}", f"skill://kit/writing/{rel}"):
             assert await _missing(url, uri)
             assert "UNSERVED" not in await _tool(url, uri)
+
+
+async def test_a_skill_citing_its_plugins_skills_through_the_root_reads_them(url):
+    """``${CLAUDE_PLUGIN_ROOT}/skills/writing/notes.md`` is Claude Code's way to
+    cite a sibling skill's file, and its literal address is one the guard tests
+    above refuse. So it renders as the sibling's own address, which reads."""
+    uri = "skill://kit/cite/SKILL.md"
+    assert RENDERED in await _read(url, uri)
+    assert RENDERED in await _read(url, uri, tags="core")
+    assert RENDERED in await _tool(url, uri)
+    assert await _read(url, "skill://kit/writing/notes.md") == "skill notes\n"
+    assert await _read(url, "skill://kit/writing/drafts/d.md") == "drafts d\n"
+    # A skipped skill has no address to render, so its citation dangles.
+    assert await _missing(url, "skill://kit/skills/Upper/leak.md")
+
+
+async def test_a_skills_rendered_citation_with_a_prefix(url):
+    """The map carries no prefix, so the gateway's is written exactly once."""
+    body = await _read(url, "skill://kit/cite/SKILL.md", prefix="kb+")
+    assert "A kb+skill://kit/writing/notes.md\n" in body
+    assert "kb+kb+" not in body
+
+
+async def test_a_prompt_citing_its_plugins_skills_renders_their_addresses(url):
+    """A prompt body is the plugin's text too, so the same citations render the
+    same addresses -- through ``prompts/get`` and through its tool mirror."""
+    async with _client(url) as client:
+        got = await client.get_prompt("kit_cite")
+        mirrored = await client.call_tool("get_prompt", {"name": "kit_cite"})
+    assert RENDERED in got.messages[0].content.text
+    # The mirror returns the messages as JSON, so the text is one field of it.
+    message = json.loads(mirrored.content[0].text)["messages"][0]
+    assert RENDERED in message["content"]
+
+
+async def test_a_prompts_rendered_citation_with_a_prefix(url):
+    """The map carries no prefix, so the gateway's is written exactly once."""
+    async with _client(url, prefix="kb+") as client:
+        text = (await client.get_prompt("kit_cite")).messages[0].content.text
+    assert "A kb+skill://kit/writing/notes.md\n" in text
+    assert "kb+kb+" not in text
 
 
 async def test_the_plugin_roots_are_tried_in_the_librarys_order(url):

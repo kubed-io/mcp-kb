@@ -214,8 +214,13 @@ server resolves (PRM-48), then the gateway prefix on every `skill://` address in
 ## Placeholders resolved and left alone
 
 **PRM-48.** In every dialect, `${CLAUDE_PLUGIN_ROOT}` renders as `skill://<library>`, the library
-serving the prompt. `${CLAUDE_PLUGIN_ROOT}/shared/tokens.md` renders as
+serving the prompt, except as PRM-61 says. `${CLAUDE_PLUGIN_ROOT}/shared/tokens.md` renders as
 `skill://<library>/shared/tokens.md`.
+
+**PRM-61.** In every dialect, `${CLAUDE_PLUGIN_ROOT}/<path>` inside a served skill of the prompt's
+own plugin, in the library serving the prompt, renders as that skill's address, by the rule in
+SKL-52 of [skills.md](skills.md): `${CLAUDE_PLUGIN_ROOT}/skills/drawio/SKILL.md` renders as
+`skill://drawio/drawio/SKILL.md`. The gateway prefix then applies as PRM-47 says.
 
 **PRM-49.** `${CLAUDE_SKILL_DIR}` renders as written in a prompt: a prompt has no skill directory.
 
