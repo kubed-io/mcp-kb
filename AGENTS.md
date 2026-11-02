@@ -25,6 +25,7 @@ reword or mark the requirements it touches, keep IDs stable and never reuse one.
 A design brainstormed with superpowers goes to
 `docs/superpowers/plans/YYYY-MM-DD-<topic>-design.md` beside its plan, not under
 `specs/`, and what it proposes enters the spec as *(proposed)* requirements.
+The issue agents follow the same rules on the issue's branch (`issue-<N>`).
 
 Three other places, and none of them overlaps this file:
 

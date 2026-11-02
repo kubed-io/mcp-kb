@@ -80,3 +80,73 @@ LLMs (and humans) routinely pin stale majors. Before adding or bumping any
   ```
 - **Secrets**: never `echo` a secret; if a value is derived from one, `::add-mask::`
   it. Don't put secrets in step names or outputs.
+
+## Bash by default — reach for `actions/github-script` when bash is the wrong tool
+Bash is the default and most steps should stay bash: it's readable, portable, and
+runs the same locally. But there are jobs where bash actively gets in the way, and
+forcing them into `curl | sed` is where pipelines get finicky and flaky. In those
+cases use [`actions/github-script`](https://github.com/actions/github-script) —
+it runs JS in the runner with an authenticated Octokit (`github`), `context`,
+`core`, and `exec` already wired up.
+
+**Use it when:**
+- **The call is more than a fetch.** Anything needing real JSON handling, paging,
+  retries with backoff, or reading one response to build the next. `json_field() {
+  sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }` works right up until a value
+  contains a quote, is nested, or is a number — and then it silently returns empty.
+- **Concurrency helps.** Polling several endpoints, fanning out N requests, or
+  racing a timeout against a readiness check. `Promise.all` / `Promise.race` beat
+  backgrounded subshells and `wait`.
+- **You're talking to the GitHub API.** `github.rest.*` is authenticated, typed,
+  and paginated (`github.paginate`) — no `curl -H "Authorization: …"`, no
+  hand-rolled `Link` header parsing.
+- **The logic has real branching.** Once a step grows conditionals over parsed
+  data, JS is easier to read and to reason about than nested `if`/`case` on
+  string comparisons.
+
+**Keep bash when:** running a build/test tool, a few sequential commands, simple
+file wrangling, or anything a developer would want to paste into their own shell.
+Don't rewrite working bash for its own sake.
+
+**Rules when you do use it:**
+- The `${{ }}` rule above still applies — **never interpolate into `script:`**.
+  Pass values through `env:` and read `process.env.VAR`. The injection risk is
+  worse here, not better: `${{ }}` lands inside a JS program.
+- Return values with `core.setOutput()`; fail with `core.setFailed()` so the step
+  actually goes red. A thrown promise rejection that isn't awaited will not.
+- Log with `core.info()` / `core.warning()`, and `core.setSecret()` anything
+  derived from a secret — the `::add-mask::` equivalent.
+- Keep it to one function per step, same as bash. If it needs its own file, it
+  wants to be a real script (or a composite action), not a giant inline `script:`.
+
+```yaml
+# Bad — bash doing JSON surgery with sed, and interpolating into the script
+- name: Wait for service
+  run: |
+    for i in $(seq 1 60); do
+      t=$(curl -s ${{ env.URL }}/api/status | sed -n 's/.*"ready":\([^,]*\).*/\1/p')
+      if [ "$t" = "true" ]; then exit 0; fi
+      sleep 1
+    done
+    exit 1
+
+# Good — real JSON, a real timeout, values via env:
+- name: Wait for service
+  uses: actions/github-script@v9
+  env:
+    URL: ${{ env.URL }}
+  with:
+    script: |
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        try {
+          const res = await fetch(`${process.env.URL}/api/status`);
+          if (res.ok && (await res.json()).ready) {
+            core.info('service is ready');
+            return;
+          }
+        } catch { /* not up yet — keep polling */ }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      core.setFailed('service did not become ready in 60s');
+```

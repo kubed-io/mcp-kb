@@ -28,6 +28,8 @@ on:
     paths:
     - .github/workflows/copilot-code-review.yml
   pull_request:
+    # a draft runs nothing; marking it ready starts the checks
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
     paths:
     - .github/workflows/copilot-code-review.yml
@@ -38,6 +40,7 @@ permissions:
 jobs:
 
   copilot-setup-steps:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     # The job ID is fixed by GitHub; the display name is not. Both Copilot
     # workflows must use the same job ID, so without a display name they would
     # both report a check called `copilot-setup-steps`.

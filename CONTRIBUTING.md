@@ -120,14 +120,17 @@ on resolving.
 
 ## What CI will say about it
 
-A pull request runs these, and they are required to merge:
+A pull request runs these, and they are required to merge. `pr.yml` runs PR Tasks, Test and
+Package in one run, so the `Checks` job after them sees every result; a draft runs none of them:
 
 | Check | What it is |
 |---|---|
 | `PR Tasks` | assigns you, and fails if `CHANGELOG.md` has no new `[Unreleased]` entry — that section becomes the release notes. The `no changelog` label is the escape hatch |
-| `Test (3.11)` / `Test (3.14)` | `ruff check .` and the full pytest suite, at both ends of the supported range |
-| `Package` | builds the sdist + wheel, `twine check --strict`, then installs the wheel clean and imports it |
-| `CodeQL` / `Dependency Audit` / `Workflow Audit` / `Dockerfile Lint` / `OpenAPI Spec` | `quality.yml` — code scanning, `pip-audit`, `zizmor`, `hadolint`, and a Redocly lint of the generated spec |
+| `Test / Test (3.11)` / `Test / Test (3.14)` | `ruff check .` and the full pytest suite, at both ends of the supported range |
+| `Package / Package` | builds the sdist + wheel, `twine check --strict`, then installs the wheel clean and imports it |
+| `Checks` | never fails: collects what failed into a `checks-report` artifact, and on an `agent` PR hands the PR to the review agent |
+| `Lint / Dependency Audit` / `Lint / Dockerfile Lint` / `Lint / OpenAPI Spec` | `lint.yml` — `pip-audit`, `hadolint`, and a Redocly lint of the generated spec |
+| `CodeQL` / `Workflow Audit` | `quality.yml`, on its own trigger — code scanning and `zizmor` |
 | Copilot review | reviews against `.github/copilot-instructions.md` |
 
 The image is **not** built on a pull request: a two-architecture build is most of
