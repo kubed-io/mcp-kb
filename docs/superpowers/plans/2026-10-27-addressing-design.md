@@ -1,6 +1,14 @@
 # Addresses that fit where kb is served — design
 
-**Date:** 2026-10-27 · **Branch:** `addressing` · **Status:** revised, for review
+> **History.** Shipped in #26 (aa35875). What it asked for now lives in the
+> living spec: [skills](../specs/skills.md) (SKL-36, SKL-40–43, SKL-47), [scoping-and-instructions](../specs/scoping-and-instructions.md)
+> (SCP-2, INS-16), [http-and-tools](../specs/http-and-tools.md) (TOOL-11), [prompts](../specs/prompts.md) (PRM-47).
+> **Overtaken:**
+> - D1, *Example*, *Where it goes*, *Acceptance* 9, *Docs and release*: `X-MCP-Resource-Prefix` as the header — now an alias; the primary is `Kb-Resource-Prefix` (SCP-2, SKL-40).
+> - D1, *Example*, *Docs and release*: `X-Skill-Library` as the scope header — now an alias of `Kb-Library` (SCP-2).
+> - D3: rendered prompt text resolves `${CLAUDE_SKILL_DIR}` — a prompt has no skill directory, so it renders as written (PRM-48, PRM-49).
+
+**Date:** 2026-10-27 · **Branch:** `addressing` · **Status:** historical
 
 ## Goal
 

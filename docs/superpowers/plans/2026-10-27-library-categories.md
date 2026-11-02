@@ -1,5 +1,10 @@
 # Library Categories Implementation Plan
 
+> **History.** Shipped in #27 (45d76c7). What it asked for now lives in the
+> living spec: [scoping-and-instructions](../specs/scoping-and-instructions.md) (SCP-2–8, SCP-15–16, SCP-31–32),
+> [plugins-and-libraries](../specs/plugins-and-libraries.md) (LIB-1, LIB-9, LIB-27).
+> **Overtaken:** nothing found.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:**
@@ -15,7 +20,7 @@
 
 **Tech Stack:** Python ≥3.11, FastMCP 4.1.4, pydantic, pytest + pytest-asyncio, uvicorn.
 
-**Spec:** `docs/superpowers/specs/2026-10-27-library-categories-design.md` (binding; D1–D5,
+**Spec:** `docs/superpowers/plans/2026-10-27-library-categories-design.md` (binding; D1–D5,
 Acceptance 1–9).
 
 ## Global Constraints

@@ -1,5 +1,12 @@
 # Addressing Implementation Plan
 
+> **History.** Shipped in #26 (aa35875). What it asked for now lives in the
+> living spec: [skills](../specs/skills.md) (SKL-36, SKL-40–43, SKL-47), [scoping-and-instructions](../specs/scoping-and-instructions.md)
+> (SCP-2, INS-16), [http-and-tools](../specs/http-and-tools.md) (TOOL-11), [prompts](../specs/prompts.md) (PRM-47).
+> **Overtaken:**
+> - *Goal*, *Review Focus* 1–3, Tasks 1–5: an `X-Skill-Library` pin that drops the library segment — dropped before merge; addresses always keep it and `Addressing` carries only a prefix (SKL-43, SCP-26).
+> - *Global Constraints* (setting names), Task 1's `PREFIX_HEADER`, Task 5: `X-MCP-Resource-Prefix` and `X-Skill-Library` — now aliases of `Kb-Resource-Prefix` and `Kb-Library` (SCP-2).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** kb's addresses follow two request settings: an `X-MCP-Resource-Prefix` hint used inside text,
@@ -15,7 +22,7 @@ multiplexing gateway in resources mode.
 
 **Tech Stack:** Python ≥3.11, FastMCP 4.1.4, pytest + pytest-asyncio, uvicorn for HTTP tests.
 
-**Spec:** `docs/superpowers/specs/2026-10-27-addressing-design.md` (binding). This plan cites its
+**Spec:** `docs/superpowers/plans/2026-10-27-addressing-design.md` (binding). This plan cites its
 decisions as D1–D6 and acceptance cases as AC1–AC10.
 
 > **Revised 2026-10-27 (Dr K):** pin-shortening was dropped after implementation. Addresses always keep
