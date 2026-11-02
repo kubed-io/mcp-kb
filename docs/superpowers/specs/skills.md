@@ -147,6 +147,19 @@ describe the bytes on disk, before any substitution.
 `${CLAUDE_SKILL_DIR}` as `skill://<address>`. Every other `${…}` is served as written, and every
 other file is served without substitution. Prompt bodies follow [prompts.md](prompts.md).
 
+**SKL-52.** *(proposed; narrows SKL-25)* In a skill's `SKILL.md`, `${CLAUDE_PLUGIN_ROOT}/<path>`
+whose `<path>` is the directory of a served skill of the same plugin in the same library, or lies
+below one, reads as that skill's address with the rest of the path kept:
+`${CLAUDE_PLUGIN_ROOT}/skills/drawio/references/xml.md` reads as
+`skill://drawio/drawio/references/xml.md`. The deepest such skill wins. A directory name ends at
+`/` or at a character that cannot continue it; a letter, a digit, `_`, `-`, `~`, `%`, `+` and `@`
+continue it, and so does a `.` followed by one of those or by another `.`. So `skills/drawio.md`
+and `skills/drawio-x/` are not in `skills/drawio`, and a sentence ending `skills/drawio.` is. When
+the plugin root is itself a skill's directory, `${CLAUDE_PLUGIN_ROOT}/<path>` outside every nested
+skill reads as `skill://<address>/<path>`. A bare `${CLAUDE_PLUGIN_ROOT}`, a path in a skipped
+skill and a path in another plugin's skill read as SKL-25 says. `./`, `//` and `..` after the
+placeholder are not normalised. Nothing is served at an address that was not served before.
+
 **SKL-26.** A read returns only the file addressed. Nothing a file cites is fetched with it.
 
 ## Library files
