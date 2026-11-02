@@ -1,6 +1,15 @@
 # Library instructions — design
 
-**Date:** 2026-10-26 · **Branch:** `library-instructions` · **Status:** draft, for review
+> **History.** Shipped in #25 (0fa2569). What it asked for now lives in the
+> living spec: [scoping-and-instructions](../specs/scoping-and-instructions.md) (INS-1–18), [plugins-and-libraries](../specs/plugins-and-libraries.md)
+> (LIB-1, LIB-23–26), [skills](../specs/skills.md) (SKL-18).
+> **Overtaken:**
+> - *Background* (agentgateway) and *Docs and release*: kb behind the gateway "has to run in tools mode" — the resource prefix (#26) keeps it in resources mode (SKL-40–42).
+> - D3: skill names listed "in index order" — they are sorted by path (INS-12).
+> - D1, *Examples*, *Docs and release*: `X-Skill-Library`, `X-Skill-Categories`, `X-Skill-Tags` — now aliases of `Kb-Library`, `Kb-Category`, `Kb-Tag` (SCP-2).
+> - D9 and *Not in scope*: E5's `agent://` resources — *(proposed)* agents are served by the agents extension and never as resources (AGT-3).
+
+**Date:** 2026-10-26 · **Branch:** `library-instructions` · **Status:** historical
 
 ## Goal
 

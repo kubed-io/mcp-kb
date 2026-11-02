@@ -205,8 +205,8 @@ The old `X-Skill-*` and `X-MCP-Resource-Prefix` names (and `?categories=`, `?tag
 
 Setup, the layout, what is generated and what is not, and what CI will say about
 it: [CONTRIBUTING.md](CONTRIBUTING.md). The rules worth reading before changing
-behaviour are [AGENTS.md](AGENTS.md), and why they are what they are is
-[`saga/`](saga/).
+behaviour are [AGENTS.md](AGENTS.md). What the server does, requirement by
+requirement, is [the spec](docs/superpowers/specs/).
 
 ---
 

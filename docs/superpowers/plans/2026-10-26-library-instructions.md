@@ -1,5 +1,13 @@
 # Library Instructions Implementation Plan
 
+> **History.** Shipped in #25 (0fa2569). What it asked for now lives in the
+> living spec: [scoping-and-instructions](../specs/scoping-and-instructions.md) (INS-1–18), [plugins-and-libraries](../specs/plugins-and-libraries.md)
+> (LIB-1, LIB-23–26), [skills](../specs/skills.md) (SKL-18).
+> **Overtaken:**
+> - *Review Focus* 4 and Task 4 (`test_unknown_library_scope_still_initializes`): an unknown library gets the footer alone — its `initialize` is refused (SCP-29, SCP-31, INS-5).
+> - Task 4 and Task 5: `X-Skill-Library` as the scope header — now an alias of `Kb-Library` (SCP-2).
+> - Task 5: the `Agentgateway.md` recipe in tools mode (`X-MCP-Resources: off`) — the resource prefix (#26) keeps it in resources mode (SKL-40–42).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The MCP `instructions` kb returns on `initialize` and `server/discover` are built from
@@ -17,7 +25,7 @@ notes and its skill names, and kb's own wording is a footer that follows the cli
 **Tech Stack:** Python ≥3.11, FastMCP 4.1.4 (`Middleware.on_initialize` / `on_discover`), pydantic,
 pytest + pytest-asyncio, uvicorn for the HTTP tests.
 
-**Spec:** `docs/superpowers/specs/2026-10-26-library-instructions-design.md`. Read it first; this
+**Spec:** `docs/superpowers/plans/2026-10-26-library-instructions-design.md`. Read it first; this
 plan cites its decisions as D1–D9 and its acceptance cases as AC1–AC12.
 
 ## Global Constraints

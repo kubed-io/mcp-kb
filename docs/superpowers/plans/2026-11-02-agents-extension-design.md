@@ -1,6 +1,11 @@
 # Agents over MCP, and plugin.json parity — design
 
-**Date:** 2026-11-02 · **Branch:** `agents-extension` · **Status:** draft, for review
+> **History.** Not built yet. What it asked for now lives in the
+> living spec: [agents](../specs/agents.md) (AGT-1–14), [plugins-and-libraries](../specs/plugins-and-libraries.md) (PLG-20–24, LIB-30–33).
+> **Overtaken:**
+> - *Background* (parity gaps, marketplace row): "the entry is never merged with the manifest" — the manifest already completes an entry: description, version, keywords, and whichever of `skills`/`commands` the entry leaves out (PLG-17, LIB-14).
+
+**Date:** 2026-11-02 · **Branch:** `agents-extension` · **Status:** proposed, not built
 
 ## Intent
 

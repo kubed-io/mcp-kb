@@ -1,5 +1,14 @@
 # mcp-kb Milestone Plan — rename, restructure, document, first release
 
+> **History.** Shipped in #18 (20a82e4). What it asked for now lives in the
+> living spec: [config-and-sources](../specs/config-and-sources.md) (CFG-1, CFG-3), [http-and-tools](../specs/http-and-tools.md)
+> (HTTP-1, HTTP-18–22, HTTP-33–37); the rest is repository shape, not a requirement.
+> **Overtaken:**
+> - *Spec* line: the saga as the design record — it is frozen at `docs/saga/`; requirements live in `docs/superpowers/specs/`.
+> - *Global Constraints*: "history and superseded decisions belong in the saga" — history now lives in `docs/superpowers/plans/`.
+> - *Names, exactly* and Task 5: `X-Skill-*` headers "unchanged", `?tags=` — now aliases of the `Kb-*` headers and `?tag=` (SCP-2).
+> - Task 5: `Configuration.md` models `Library`, `Include`, each `*Source`, and `Sources.md` include globs — the config is `sources`, `plugins`, `libraries`, globs belong to a plugin (CFG-4, SRC-1, PLG-1, PLG-9).
+
 > **For agentic workers:** executed with superpowers:subagent-driven-development,
 > task by task, on the branch `mcp-kb`. One PR at the end.
 
