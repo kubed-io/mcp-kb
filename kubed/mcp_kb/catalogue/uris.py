@@ -176,9 +176,9 @@ def _manifest_json(skill: Skill) -> str:
 
     Size and hash describe the bytes on disk, ``SKILL.md`` included -- and a
     read of ``SKILL.md`` resolves ``${CLAUDE_PLUGIN_ROOT}`` and
-    ``${CLAUDE_SKILL_DIR}`` into addresses -- a citation through the plugin
-    root into one of its plugin's skills becoming that skill's address -- so a
-    client that hashes what it read finds that one file differs. That is by
+    ``${CLAUDE_SKILL_DIR}`` into addresses, so a client that hashes what it
+    read finds that one file differs. A citation through the plugin root into
+    one of its plugin's skills becomes that skill's address too. That is by
     design: the manifest describes the skill as it was published, and the
     substitution is this server answering the two placeholders it is the
     authority on (§C1.37). Every other file is served verbatim and hashes equal.
@@ -495,11 +495,13 @@ class Catalogue:
         for skill in self._index.visible(scope):
             if skill.library != library or skill.plugin != plugin:
                 continue
-            for base in (skill.root, skill.root.resolve()):
-                if skill.path.is_relative_to(base):
-                    rel = skill.path.relative_to(base).as_posix()
-                    dirs["" if rel == "." else rel] = f"{SCHEME}{skill.address}"
-                    break
+            base = skill.root
+            if not skill.path.is_relative_to(base):
+                base = skill.root.resolve()
+                if not skill.path.is_relative_to(base):
+                    continue
+            rel = skill.path.relative_to(base).as_posix()
+            dirs["" if rel == "." else rel] = f"{SCHEME}{skill.address}"
         return dirs
 
     def _library_files(self, library: str, scope: Scope) -> list[str]:
@@ -735,8 +737,9 @@ class Catalogue:
             # which is what `_manifest`'s size and hash describe.
             return text
         # A citation through the plugin root into one of its own skills renders
-        # as that skill's address: the literal path is one the ceiling refuses,
-        # because a skill's files have one address and it is the skill's.
+        # as that skill's address: the literal path would be refused, because
+        # the library-level read keeps out of a skill's own directory and a
+        # skill's files have one address, which is the skill's.
         return placeholders.substitute(
             text,
             plugin_root=f"{SCHEME}{skill.library}",

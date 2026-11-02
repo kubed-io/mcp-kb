@@ -116,6 +116,27 @@ def test_a_path_inside_a_skill_renders_its_address(cited, rendered):
     )
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("cited", "rendered"),
+    [
+        ("${CLAUDE_PLUGIN_ROOT}/skills/writing~x", "skill://kit/skills/writing~x"),
+        ("${CLAUDE_PLUGIN_ROOT}/skills/writing%20", "skill://kit/skills/writing%20"),
+        ("${CLAUDE_PLUGIN_ROOT}/skills/writing+x", "skill://kit/skills/writing+x"),
+        ("${CLAUDE_PLUGIN_ROOT}/skills/writing@x", "skill://kit/skills/writing@x"),
+        ("${CLAUDE_PLUGIN_ROOT}/skills/writing..", "skill://kit/skills/writing.."),
+        ("${CLAUDE_PLUGIN_ROOT}/skills/writing./x", "skill://kit/writing./x"),
+    ],
+)
+def test_a_name_character_after_a_skills_directory_continues_its_name(
+    cited, rendered
+):
+    assert (
+        placeholders.substitute(cited, plugin_root="skill://kit", skills=SKILLS)
+        == rendered
+    )
+
+
 def test_the_deepest_skill_wins():
     nested = {
         "skills/writing": "skill://kit/writing",

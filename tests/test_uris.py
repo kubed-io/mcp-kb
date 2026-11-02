@@ -398,6 +398,47 @@ def test_plugin_skill_dirs_maps_one_plugin_in_one_library():
 
 
 @pytest.mark.unit
+def test_plugin_skill_dirs_accepts_a_symlinked_root_and_drops_a_stray_skill(
+    tmp_path,
+):
+    """A harvest resolves the root it walks, so a skill's path may sit under the
+    resolved spelling of a root that is a symlink; one under neither is left out."""
+    from kubed.mcp_kb.catalogue.skills import Skill
+
+    real = tmp_path / "real"
+    (real / "skills" / "writing").mkdir(parents=True)
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+
+    def skill(name, path):
+        return Skill(
+            name=name,
+            library="a",
+            folder="",
+            description=f"{name}.",
+            path=path,
+            plugin="p",
+            root=link,
+            tags=frozenset({"t"}),
+        )
+
+    cat = Catalogue(
+        SkillIndex(
+            [
+                skill("writing", real.resolve() / "skills" / "writing"),
+                skill("whole", real.resolve()),
+                skill("stray", tmp_path / "elsewhere" / "stray"),
+            ]
+        ),
+        LibraryFiles(),
+    )
+    assert cat.plugin_skill_dirs("a", "p") == {
+        "skills/writing": "skill://a/writing",
+        "": "skill://a/whole",
+    }
+
+
+@pytest.mark.unit
 def test_selected_follows_scope_and_constructor_order():
     skills = [_skill("a", "", "one", {"x"}), _skill("b", "", "two", {"y"})]
     cat = Catalogue(
