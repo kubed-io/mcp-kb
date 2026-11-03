@@ -42,6 +42,12 @@ DEFAULTS: dict[str, tuple[str, ...]] = {
     "files": (),
 }
 
+# The directories whose markdown files are Claude Code commands by convention.
+# A file there is read in Claude's dialect unless the plugin says otherwise, and
+# named by the folders below the directory as well as its stem (PLG-25);
+# detect.py cannot see paths, so the caller says it (§C1.34).
+COMMAND_DIRS: tuple[str, ...] = ("commands", ".claude/commands")
+
 # The directories that hold skills by convention. A skill's folder is its path
 # below the deepest of these that contains it, so a skill directly in one has none.
 SKILL_ROOTS: tuple[str, ...] = (

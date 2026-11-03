@@ -32,19 +32,25 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 
 from ..config import Config, scrub
 from ..plugins import Fetch, Globs, Plugin
-from ..plugins.manifest import CommandEntry, Components, read_manifest
+from ..plugins.manifest import (
+    MANIFEST_FILES,
+    CommandEntry,
+    Components,
+    manifest_file,
+    read_manifest,
+)
 from ..plugins.select import select
 from ..sources import AccessRefused, SourceError, fingerprint, materialise
 from ..sources.live import Revalidator, is_live
 from . import harvest
 from .index import FetchRecord, PluginRecord, PromptRow, SkillRow, now
-from .prompts import FilePrompt, load_prompts, stem
+from .prompts import FilePrompt, PromptSource, load_prompts, prompt_name
 from .prompts.detect import COPILOT_SUFFIX
 from .skills import LibraryFiles, Skill, SkillIndex, load_skills, naming_problem
 from .uris import RESERVED_NAMES, SCHEME, Catalogue, LibraryText, _count, uri_for
@@ -54,12 +60,6 @@ log = logging.getLogger(__name__)
 # The record states that still name a tree worth serving. A "stale" record is
 # one of them: its tree is the last good one, which is the whole point.
 SERVABLE = ("ok", "stale")
-
-
-# The directories whose markdown files are Claude Code commands by convention.
-# A file there is read in Claude's dialect unless the plugin says otherwise;
-# detect.py cannot see paths, so the caller says it (§C1.34).
-COMMAND_DIRS = ("commands", ".claude/commands")
 
 
 @dataclass(frozen=True)
@@ -323,12 +323,16 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
         skills = load_skills(dirs, library="", plugin=plugin, root=root)
         files = harvest.library_files(root, globs, dirs)
         unloadable: list[tuple[Path, str]] = []
-        found = harvest.prompt_files(root, globs)
         declared = harvest.matching(root, globs.commands)
-        groups: dict[str, list[Path]] = {}
-        for path in found:
-            groups.setdefault(_dialect(plugin, path, root, declared), []).append(path)
-        prompts = _load_prompts(plugin, groups, skipped=unloadable)
+        sources = [
+            (
+                _dialect(plugin, path, root, declared),
+                PromptSource(path, prompt_name(path, root, globs.command_dirs)),
+            )
+            for path in harvest.prompt_files(root, globs)
+        ]
+        sources += _mapped(root, globs.command_map, skipped=unloadable)
+        prompts = _load_prompts(plugin, sources, skipped=unloadable)
     except OSError as exc:
         return failed_plugin(plugin, unrooted(str(exc), root))
 
@@ -340,7 +344,7 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
         error=None,
         built=now(),
         skills=tuple(SkillRow.from_skill(s) for s in skills),
-        prompts=tuple(PromptRow(path=str(p.path), dialect=p.dialect) for p in prompts),
+        prompts=tuple(PromptRow.from_source(src, p.dialect) for src, p in prompts),
         files=tuple(files),
         skill_dirs=tuple(str(d) for d in dirs),
         skipped=tuple(
@@ -350,26 +354,64 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
     )
 
 
+def _mapped(
+    root: Path, entries: Sequence[CommandEntry], *, skipped: list[tuple[Path, str]]
+) -> list[tuple[str, PromptSource]]:
+    """An object map's commands, every one of them Claude's (PLG-21).
+
+    A ``source`` is read through the guard every read shares, so a link out of
+    the root is skipped, not served. A ``content`` is the body itself, and is
+    named by the manifest that carries it: the one ``read_manifest`` read, or
+    for an entry with none, the name a manifest would have (LIB-31: without a
+    ``plugin.json`` the entry is the manifest).
+    """
+    manifest = root / (manifest_file(root) or MANIFEST_FILES[0])
+    sources: list[tuple[str, PromptSource]] = []
+    for entry in entries:
+        path = manifest
+        if entry.source is not None:
+            found = harvest.readable(root, entry.source)
+            if found is None:
+                skipped.append((root / entry.source, "not a file in the plugin"))
+                continue
+            path = found
+        sources.append(
+            (
+                "claude",
+                PromptSource(
+                    path,
+                    entry.name,
+                    content=entry.content,
+                    description=entry.description,
+                    argument_hint=entry.argument_hint,
+                ),
+            )
+        )
+    return sources
+
+
 def _load_prompts(
     plugin: Plugin,
-    groups: dict[str, list[Path]],
+    sources: Sequence[tuple[str, PromptSource]],
     *,
     skipped: list[tuple[Path, str]],
     library: str = "",
     library_categories: frozenset[str] = frozenset(),
     live: bool = False,
-) -> list[FilePrompt]:
-    """``load_prompts`` once per dialect group.
+) -> list[tuple[PromptSource, FilePrompt]]:
+    """``load_prompts`` for each ``(dialect, source)``, in order, beside its source.
 
-    At harvest the groups come from ``_dialect``; at snapshot time from the
-    rows, whose recorded dialect is the authority -- the same file is read
+    At harvest the dialects come from ``_dialect`` and the order is the files
+    by path, then the object map's commands; at snapshot time both come from
+    the rows, whose recorded dialect is the authority -- the same file is read
     the same way on every rebuild and every restart, whatever the path rule
-    would say today.
+    would say today. The order is kept because it is the order ``_admit``
+    settles a name clash in.
     """
-    prompts: list[FilePrompt] = []
-    for dialect, paths in groups.items():
-        prompts += load_prompts(
-            paths,
+    loaded: list[tuple[PromptSource, FilePrompt]] = []
+    for dialect, source in sources:
+        for prompt in load_prompts(
+            [source],
             library=library,
             plugin=plugin.id,
             tags=sorted(plugin.labels),
@@ -378,8 +420,9 @@ def _load_prompts(
             live=live,
             dialect=dialect,
             skipped=skipped,
-        )
-    return sorted(prompts, key=lambda p: p.path)
+        ):
+            loaded.append((source, prompt))
+    return loaded
 
 
 def _dialect(plugin: Plugin, path: Path, root: Path, declared: set[Path]) -> str:
@@ -403,7 +446,7 @@ def _dialect(plugin: Plugin, path: Path, root: Path, declared: set[Path]) -> str
     if path.name.endswith(COPILOT_SUFFIX):
         return "auto"
     rel = _relative(path, root)
-    if any(rel.startswith(f"{d}/") for d in COMMAND_DIRS):
+    if any(rel.startswith(f"{d}/") for d in harvest.COMMAND_DIRS):
         return "claude"
     if path in declared:
         return "claude"
@@ -502,12 +545,13 @@ def build_snapshot(
     """Live objects from rows: the cheap half, run on every rebuild.
 
     Skills are rebuilt from their rows without touching disk. Prompts are
-    re-parsed from the paths their rows name, in the dialect their rows
-    record -- a handful of small files, and parsing them is far less code than
-    serialising a rendered template and its arguments into the index. A
-    prompt file that vanished since the record was written is logged and
-    skipped by ``load_prompts``, so it simply stops being served rather than
-    taking the plugin down.
+    re-parsed from the paths their rows name, in the dialect and under the name
+    their rows record -- a handful of small files, and parsing them is far less
+    code than serialising a rendered template and its arguments into the
+    index. An inline object-map command has no file, so its row carries the
+    body and it is parsed from that. A prompt file that vanished since the
+    record was written is logged and skipped by ``load_prompts``, so it simply
+    stops being served rather than taking the plugin down.
 
     Within a plugin, what the address space has no room for is left out and
     listed under the plugin's ``skipped`` in ``/health`` (see ``_admit``);
@@ -636,18 +680,18 @@ def _serve_library(
             )
             for row in admitted[pid].skills
         ]
-        groups: dict[str, list[Path]] = {}
-        for row in admitted[pid].prompts:
-            groups.setdefault(row.dialect, []).append(Path(row.path))
         gone: list[tuple[Path, str]] = []
-        loaded = _load_prompts(
-            plugin,
-            groups,
-            skipped=gone,
-            library=lib.name,
-            library_categories=lib_categories,
-            live=is_live(plugin.fetch),
-        )
+        loaded = [
+            prompt
+            for _, prompt in _load_prompts(
+                plugin,
+                [(row.dialect, row.to_source()) for row in admitted[pid].prompts],
+                skipped=gone,
+                library=lib.name,
+                library_categories=lib_categories,
+                live=is_live(plugin.fetch),
+            )
+        ]
         vanished.setdefault(
             pid,
             [
@@ -847,8 +891,10 @@ def _admit(record: PluginRecord) -> _Admitted:
     never read, or read only under a scope that hides the skill -- and when it
     is named like an index the server generates.
 
-    A prompt is left out when a prompt before it has its name, as
-    ``prompts/debug.md`` and ``prompts/sub/debug.md`` both would.
+    A prompt is left out when a prompt before it has its name (PLG-25), as
+    ``prompts/debug.md`` and ``prompts/sub/debug.md`` both would, or a file and
+    an object-map command of one name. ``commands/a/x.md`` and
+    ``commands/b/x.md`` are ``a_x`` and ``b_x``, and both serve.
     """
     skipped: list[dict[str, str]] = []
 
@@ -892,13 +938,12 @@ def _admit(record: PluginRecord) -> _Admitted:
 
     names: dict[str, PromptRow] = {}
     for row in record.prompts:
-        name = stem(Path(row.path))
-        if name in names:
-            first = _relative(Path(names[name].path), root)
+        if row.name in names:
+            first = _relative(Path(names[row.name].path), root)
             where = _relative(Path(row.path), root)
-            skip(where, f"prompt {name} is already served by {first}")
+            skip(where, f"prompt {row.name} is already served by {first}")
             continue
-        names[name] = row
+        names[row.name] = row
     return _Admitted(list(served.values()), files, list(names.values()), skipped)
 
 

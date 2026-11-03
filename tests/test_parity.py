@@ -136,14 +136,27 @@ def _marketplace(tmp_path: Path, root: Path, name: str = "lib") -> KnowledgeBase
     return KnowledgeBase(config, tmp_path / "cache")
 
 
-def _declared(tmp_path: Path, root: Path, **fields) -> KnowledgeBase:
-    config = Config.model_validate(
+def _config(root: Path, library: str, **fields) -> Config:
+    return Config.model_validate(
         {
             "plugins": [{"name": "kit", "source": f"file://{root}", **fields}],
-            "libraries": [{"name": "kit", "plugins": ["kit"]}],
+            "libraries": [{"name": library, "plugins": ["kit"]}],
         }
     )
-    return KnowledgeBase(config, tmp_path / "cache")
+
+
+def _declared(
+    tmp_path: Path, root: Path, *, library: str = "kit", **fields
+) -> KnowledgeBase:
+    return KnowledgeBase(_config(root, library, **fields), tmp_path / "cache")
+
+
+def _names(knowledge_base: KnowledgeBase) -> list[str]:
+    return [prompt.name for prompt in knowledge_base.prompts]
+
+
+def _prompt(knowledge_base: KnowledgeBase, name: str):
+    return next(p for p in knowledge_base.prompts if p.name == name)
 
 
 def _served(knowledge_base: KnowledgeBase) -> set[str]:
@@ -218,13 +231,53 @@ def test_no_note_when_the_replaced_folder_is_not_there(tmp_path):
     assert "notes" not in knowledge_base.status["plugins"]["kit"]
 
 
-def test_a_subfolder_command_is_served_by_the_convention(tmp_path):
+def test_commands_in_subfolders_carry_their_folders(tmp_path):
     root = tmp_path / "kit"
     _command(root, "commands/db/migrate.md")
+    _command(root, "commands/top.md")
 
-    knowledge_base = _declared(tmp_path, root)
+    knowledge_base = _declared(tmp_path, root, library="lib")
 
-    assert [p.name for p in knowledge_base.prompts] == ["kit_migrate"]
+    assert sorted(_names(knowledge_base)) == ["lib_db_migrate", "lib_top"]
+    assert {p.dialect for p in knowledge_base.prompts} == {"claude"}
+
+
+def test_a_declared_commands_directory_reads_its_subfolders(tmp_path):
+    root = tmp_path / "kit"
+    _command(root, "cmds/a/b.md")
+    _manifest(root, name="kit", commands="./cmds")
+
+    knowledge_base = _declared(tmp_path, root, library="lib")
+
+    assert _names(knowledge_base) == ["lib_a_b"]
+
+
+def test_the_prompts_convention_still_names_by_stem(tmp_path):
+    root = tmp_path / "kit"
+    _command(root, "prompts/sub/debug.md")
+    _command(root, "prompts/debug.md")
+
+    knowledge_base = _declared(tmp_path, root, library="lib")
+
+    assert _names(knowledge_base) == ["lib_debug"]
+    assert _prompt(knowledge_base, "lib_debug").path.name == "debug.md"
+    assert knowledge_base.status["plugins"]["kit"]["skipped"] == [
+        {
+            "path": "prompts/sub/debug.md",
+            "reason": "prompt debug is already served by prompts/debug.md",
+        }
+    ]
+
+
+def test_a_name_clash_is_on_the_name_not_the_stem(tmp_path):
+    root = tmp_path / "kit"
+    _command(root, "commands/a/x.md")
+    _command(root, "commands/b/x.md")
+
+    knowledge_base = _declared(tmp_path, root, library="lib")
+
+    assert sorted(_names(knowledge_base)) == ["lib_a_x", "lib_b_x"]
+    assert "skipped" not in knowledge_base.status["plugins"]["kit"]
 
 
 def test_penpot_still_serves_its_eight_commands(tmp_path):
@@ -411,14 +464,13 @@ def test_a_manifest_too_deep_to_parse_fails_the_plugin_and_quotes_nothing(tmp_pa
 
 
 def test_a_map_only_commands_replaces_the_conventions(tmp_path):
-    """The map is carried for Task 4 to serve; until then it serves nothing,
-    and the conventions it replaces serve nothing either."""
+    """The map is all it serves: the conventions it replaces serve nothing."""
     root = object_map_root(tmp_path)
 
     knowledge_base = _declared(tmp_path, root)
     globs = effective_globs(knowledge_base._plugins[0], root)
 
-    assert knowledge_base.prompts == ()
+    assert _names(knowledge_base) == ["kit_brief", "kit_about"]
     assert globs.prompts == ()
     assert [entry.name for entry in globs.command_map] == ["brief", "about"]
     brief = globs.command_map[0]
@@ -429,6 +481,84 @@ def test_a_map_only_commands_replaces_the_conventions(tmp_path):
         "commands entry 'bad' needs exactly one of source and content",
         COMMANDS_NOTE,
     ]
+
+
+def test_an_object_map_plugin_loads(tmp_path):
+    knowledge_base = _declared(tmp_path, object_map_root(tmp_path), library="lib")
+
+    brief = _prompt(knowledge_base, "lib_brief")
+    assert brief.description == "Write a brief."
+    assert [(a.name, a.description) for a in brief.arguments] == [
+        ("arguments", "<topic>")
+    ]
+    about = _prompt(knowledge_base, "lib_about")
+    assert about.render() == "Say what this plugin does."
+    assert {brief.dialect, about.dialect} == {"claude"}
+    assert not about.live
+    notes = knowledge_base.status["plugins"]["kit"]["notes"]
+    assert any("'bad'" in note for note in notes)
+
+
+def test_an_inline_prompt_clashing_with_a_file_is_skipped_at_its_manifest(tmp_path):
+    root = tmp_path / "kit"
+    _command(root, "cmds/about.md")
+    _manifest(
+        root,
+        name="kit",
+        commands={
+            "about": {"content": "Inline."},
+            "again": {"source": "./cmds/about.md"},
+            "first": {"source": "./cmds/about.md"},
+        },
+    )
+    _catalog(root, {"name": "kit", "source": "./", "commands": "./cmds"})
+
+    knowledge_base = _marketplace(tmp_path, root)
+    status = knowledge_base.status["plugins"]["kit@lib"]
+
+    assert _names(knowledge_base) == ["lib_about", "lib_again", "lib_first"]
+    assert _prompt(knowledge_base, "lib_about").path.name == "about.md"
+    assert status["skipped"] == [
+        {
+            "path": ".claude-plugin/plugin.json",
+            "reason": "prompt about is already served by cmds/about.md",
+        }
+    ]
+
+
+def test_a_map_source_outside_the_plugin_is_skipped(tmp_path):
+    root = tmp_path / "kit"
+    _command(tmp_path / "away", "x.md")
+    (root / "cmds").mkdir(parents=True)
+    (root / "cmds" / "x.md").symlink_to(tmp_path / "away" / "x.md")
+    _manifest(root, name="kit", commands={"x": {"source": "./cmds/x.md"}})
+
+    knowledge_base = _declared(tmp_path, root)
+
+    assert knowledge_base.prompts == ()
+    assert knowledge_base.status["plugins"]["kit"]["skipped"] == [
+        {"path": "cmds/x.md", "reason": "not a file in the plugin"}
+    ]
+
+
+def test_an_inline_prompt_survives_a_cold_start(tmp_path, monkeypatch):
+    from kubed.mcp_kb import server
+
+    root = object_map_root(tmp_path)
+    config = _config(root, "lib")
+    first = KnowledgeBase(config, tmp_path / "cache")
+    body = _prompt(first, "lib_about").render()
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("a cold start over a good index harvests nothing")
+
+    monkeypatch.setattr(server, "build_plugin", must_not_run)
+    del first
+    second = KnowledgeBase(config, tmp_path / "cache")
+
+    about = _prompt(second, "lib_about")
+    assert about.render() == body == "Say what this plugin does."
+    assert _prompt(second, "lib_brief").arguments[0].description == "<topic>"
 
 
 def test_a_bare_declared_plugin_has_no_agents(tmp_path):

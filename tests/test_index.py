@@ -61,7 +61,11 @@ def _plugin_record(**overrides):
         "error": None,
         "built": now(),
         "skills": (SkillRow.from_skill(_skill()),),
-        "prompts": (PromptRow(path="/skills/flatsource/debug.md", dialect="claude"),),
+        "prompts": (
+            PromptRow(
+                path="/skills/flatsource/debug.md", dialect="claude", name="debug"
+            ),
+        ),
         "files": ("shared/logo.png",),
         "skill_dirs": ("/skills/flatsource/alpha",),
     }
@@ -100,16 +104,16 @@ def test_a_missing_or_corrupt_index_reads_as_none(tmp_path):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("version", [INDEX_VERSION + 1, 4, 3, 2, 1])
+@pytest.mark.parametrize("version", [INDEX_VERSION + 1, 5, 4, 3, 2, 1])
 def test_a_different_version_reads_as_none(tmp_path, version):
     """Older as well as newer, by literal and not only by offset.
 
     An index written by an earlier release is the one a real upgrade meets, and
     the literals are the shapes before this one (1 on main, 2 part-way through
     the address-space work, 3 before a record carried `skipped`, 4 the
-    per-source shape before plugins): lowering `INDEX_VERSION` back to any of
-    them must fail here, which an offset from the current value alone never
-    would.
+    per-source shape before plugins, 5 before a prompt row carried its name):
+    lowering `INDEX_VERSION` back to any of them must fail here, which an
+    offset from the current value alone never would.
     """
     path = tmp_path / "index.json"
     _index(version=version).write(path)
@@ -150,6 +154,37 @@ def test_a_v4_index_on_disk_is_discarded_whole(tmp_path):
         ),
         encoding="utf-8",
     )
+    assert Index.read(path) is None
+
+
+@pytest.mark.unit
+def test_an_inline_prompt_row_round_trips(tmp_path):
+    """A map command's body lives in the row: there is no file to re-read."""
+    row = PromptRow(
+        path="/skills/flatsource/.claude-plugin/plugin.json",
+        dialect="claude",
+        name="about",
+        content="Say what this plugin does.",
+        description="About.",
+        argument_hint="<topic>",
+    )
+    path = tmp_path / "index.json"
+    written = _index(plugins={"flatsource": _plugin_record(prompts=(row,))})
+    written.write(path)
+    assert Index.read(path) == written
+
+
+@pytest.mark.unit
+def test_a_v5_index_on_disk_is_discarded_whole(tmp_path):
+    """Its prompt rows name no prompt: the name was the file stem, re-derived."""
+    path = tmp_path / "index.json"
+    _index().write(path)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["version"] = 5
+    for row in raw["plugins"]["flatsource"]["prompts"]:
+        for key in ("name", "content", "description", "argument_hint"):
+            del row[key]
+    path.write_text(json.dumps(raw), encoding="utf-8")
     assert Index.read(path) is None
 
 

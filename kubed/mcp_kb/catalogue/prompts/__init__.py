@@ -20,9 +20,16 @@ prompt comes out: ``detect.py`` decides which dialect a file is written in and
 same ``Parsed`` and render it back. None of them invents a schema -- the
 target is the MCP prompt itself (§C1.34).
 
-The exposed name is ``<library>_<file stem>``. Prompt names are one flat
-namespace per server, and two libraries shipping a ``debug.md`` must not
-collide the way two skills named ``testing`` otherwise would.
+The exposed name is ``<library>_<name>``, and the name below the library is
+decided where the prompt was found (PLG-25, ``prompt_name``): the folders below
+a commands directory and the file stem, an object map's key, or the stem
+alone. Prompt names are one flat namespace per server, and two libraries
+shipping a ``debug.md`` must not collide the way two skills named ``testing``
+otherwise would.
+
+A ``PromptSource`` is what is loaded: a file and the name it was found under,
+or -- for a manifest's object-map command -- a body written inline in the
+manifest, which is fetched text like any file and never run.
 
 ``FilePrompt`` here is a plain dataclass -- the catalogue's own parsed form,
 with no pydantic and no FastMCP base class -- so ``catalogue/snapshot.py`` and
@@ -36,12 +43,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import frontmatter
 import yaml
 
 from .. import placeholders
+from ..harvest import COMMAND_DIRS
 from . import claude, copilot, detect, mcpkb
 from .mcpkb import PLACEHOLDER
 from .shape import Argument, Parsed
@@ -57,10 +65,29 @@ __all__ = [
     "FilePrompt",
     "MissingArguments",
     "Parsed",
+    "PromptSource",
     "load_prompt",
     "load_prompts",
+    "prompt_name",
     "stem",
 ]
+
+
+@dataclass(frozen=True)
+class PromptSource:
+    """One prompt to load: where it is, and what it is called below its library.
+
+    ``path`` is the file; for an inline body (``content``, PLG-21) it is the
+    manifest the body came from, which is what ``/health`` names it by and is
+    never read for it. ``description`` and ``argument_hint`` are a manifest's
+    word on the prompt, and replace the body's own frontmatter keys.
+    """
+
+    path: Path
+    name: str
+    content: str | None = None
+    description: str | None = None
+    argument_hint: str | None = None
 
 
 @dataclass
@@ -222,8 +249,60 @@ def stem(path: Path) -> str:
     return path.stem
 
 
+def prompt_name(path: Path, root: Path, command_dirs: Sequence[str]) -> str:
+    """The name below its library of a prompt file found at ``path`` (PLG-25).
+
+    Under a commands directory -- a convention's or one a ``commands``
+    declaration named, the deepest that contains the file -- the folders
+    between it and the file come first, then the stem, joined with ``_``:
+    ``commands/db/migrate.md`` is ``db_migrate``. Anywhere else it is the stem,
+    so ``prompts/sub/debug.md`` is ``debug`` as it has always been. A harvest
+    resolves the root it walks, so either spelling of ``root`` may be the
+    prefix.
+    """
+    rel = next(
+        (
+            PurePosixPath(path.relative_to(base).as_posix())
+            for base in (root, root.resolve())
+            if path.is_relative_to(base)
+        ),
+        None,
+    )
+    if rel is None:
+        return stem(path)
+    parts = rel.parts
+    depth = max(
+        (
+            len(prefix)
+            for prefix in (
+                PurePosixPath(d).parts for d in (*COMMAND_DIRS, *command_dirs)
+            )
+            if len(prefix) < len(parts) and parts[: len(prefix)] == prefix
+        ),
+        default=None,
+    )
+    if depth is None:
+        return stem(path)
+    return "_".join((*parts[depth:-1], stem(path)))
+
+
+def _source(source: Path | PromptSource) -> PromptSource:
+    """A bare path is a file named by its stem, as every caller before PLG-25."""
+    if isinstance(source, PromptSource):
+        return source
+    return PromptSource(path=source, name=stem(source))
+
+
+def _inline(content: str) -> tuple[dict, str]:
+    """An inline body's frontmatter and body: unlike a file's, the block is optional."""
+    try:
+        return _split(content)
+    except ValueError:
+        return {}, content
+
+
 def load_prompt(
-    path: Path,
+    source: Path | PromptSource,
     library: str,
     *,
     plugin: str = "",
@@ -233,14 +312,31 @@ def load_prompt(
     live: bool = False,
     dialect: str = detect.AUTO,
 ) -> FilePrompt:
-    """Parse one prompt file, raising ValueError on anything malformed.
+    """Parse one prompt, raising ValueError on anything malformed.
 
+    ``source`` is a ``PromptSource``, or a bare file path named by its stem.
     ``library`` is the library this prompt joins; ``plugin``, ``tags`` and
     ``category`` are the plugin's, carried as given -- nothing is added to
     them. ``dialect`` is what the config says the file is written in, and
     ``"auto"`` -- the usual answer -- leaves it to ``detect``.
+
+    An inline body is never live, whatever ``live`` says: there is no file of
+    its own to revalidate, and re-reading the manifest would serve JSON.
     """
-    meta, body = _split(path.read_text(encoding="utf-8"))
+    source = _source(source)
+    path = source.path
+    if source.content is None:
+        meta, body = _split(path.read_text(encoding="utf-8"))
+    else:
+        meta, body = _inline(source.content)
+        live = False
+    # The manifest's later word on the prompt, put where the dialect reads it,
+    # so its hint becomes the free-text argument's description the same way
+    # the file's own would (PLG-21).
+    if source.description is not None:
+        meta = {**meta, "description": source.description}
+    if source.argument_hint is not None:
+        meta = {**meta, "argument-hint": source.argument_hint}
 
     name = detect.dialect_for(path, meta, body, dialect)
     if name is None:
@@ -259,7 +355,7 @@ def load_prompt(
     return FilePrompt(
         path=path,
         live=live,
-        name=f"{library}_{stem(path)}",
+        name=f"{library}_{source.name}",
         description=parsed.description,
         title=parsed.title,
         arguments=parsed.arguments,
@@ -275,7 +371,7 @@ def load_prompt(
 
 
 def load_prompts(
-    files: Sequence[Path],
+    sources: Sequence[Path | PromptSource],
     *,
     library: str,
     plugin: str = "",
@@ -286,20 +382,22 @@ def load_prompts(
     dialect: str = detect.AUTO,
     skipped: list[tuple[Path, str]] | None = None,
 ) -> list[FilePrompt]:
-    """Every prompt file ``harvest`` already found for one plugin, joined to a library.
+    """Every prompt ``harvest`` already found for one plugin, joined to a library.
 
-    ``library`` is the library the prompts join. A broken file is skipped
-    rather than raised: a bad prompt must not take the skills down with it.
-    Given ``skipped``, each one is added to it as ``(path, reason)`` for the
-    caller to report once, in ``/health`` and the log; without it, it is logged
-    here.
+    ``library`` is the library the prompts join. They are loaded in the order
+    given, which is the caller's to decide: it is the order a name clash is
+    settled in. A broken one is skipped rather than raised: a bad prompt must
+    not take the skills down with it. Given ``skipped``, each one is added to
+    it as ``(path, reason)`` for the caller to report once, in ``/health`` and
+    the log; without it, it is logged here.
     """
     prompts: list[FilePrompt] = []
-    for path in sorted(files):
+    for source in map(_source, sources):
+        path = source.path
         try:
             prompts.append(
                 load_prompt(
-                    path,
+                    source,
                     library,
                     plugin=plugin,
                     tags=tags,

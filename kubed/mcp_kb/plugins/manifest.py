@@ -60,6 +60,15 @@ class Manifest:
     components: Components
 
 
+def manifest_file(root: Path) -> str | None:
+    """Which of ``MANIFEST_FILES`` the plugin ships, root-relative: the one read.
+
+    Also what an inline object-map command is named by in ``/health``, since
+    the manifest is the only file it has.
+    """
+    return next((name for name in MANIFEST_FILES if readable(root, name)), None)
+
+
 def read_manifest(root: Path) -> Manifest | None:
     """The plugin's manifest, or None when it ships none.
 
@@ -69,11 +78,11 @@ def read_manifest(root: Path) -> Manifest | None:
     and keywords into the catalogue. A link inside the root still resolves,
     which is the ConfigMap case.
     """
-    for name in MANIFEST_FILES:
-        path = readable(root, name)
-        if path is not None:
-            break
-    else:
+    name = manifest_file(root)
+    if name is None:
+        return None
+    path = readable(root, name)
+    if path is None:
         return None
 
     try:
