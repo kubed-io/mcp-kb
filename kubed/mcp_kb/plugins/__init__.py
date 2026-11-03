@@ -24,7 +24,7 @@ from .address import Address, parse_address
 
 if TYPE_CHECKING:
     from ..config import BasicAuth, Config, LibraryConfig, PluginConfig
-    from .manifest import Components
+    from .manifest import CommandEntry, Components
 
 
 @dataclass(frozen=True)
@@ -70,12 +70,20 @@ class Globs:
     ``commands`` or an entry's -- because that is a Claude signal and the file
     it selects may sit anywhere, penpot's ``prompts/`` included. A config's own
     ``prompts:`` glob is not a command declaration and leaves it empty.
+    ``command_dirs`` are the directories among those declarations, and
+    ``command_map`` the object-map commands, which name no pattern at all.
+
+    ``agents`` is ``None`` for the default ``agents/`` scan, as the other kinds
+    are, and ``()`` for a plugin that is not Claude-format and so has none.
     """
 
     skills: tuple[str, ...] | None = None
     prompts: tuple[str, ...] | None = None
     files: tuple[str, ...] | None = None
     commands: tuple[str, ...] = ()
+    agents: tuple[str, ...] | None = None
+    command_dirs: tuple[str, ...] = ()
+    command_map: tuple[CommandEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -99,6 +107,12 @@ class Plugin:
     strict: bool = True
     # The entry's source is the marketplace's own subdir in its own fetch.
     root_entry: bool = False
+    # Set by ``with_manifest``: it has a plugin.json or is a marketplace entry,
+    # the MCP server names it declares (read, never run), and what its
+    # manifest and entry got wrong without failing it.
+    claude_format: bool = False
+    servers: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
 
     @property
     def labels(self) -> frozenset[str]:

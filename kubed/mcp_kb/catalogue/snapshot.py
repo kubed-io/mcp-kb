@@ -30,6 +30,7 @@ its error.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
@@ -37,7 +38,7 @@ from pathlib import Path, PurePosixPath
 
 from ..config import Config, scrub
 from ..plugins import Fetch, Globs, Plugin
-from ..plugins.manifest import read_manifest
+from ..plugins.manifest import CommandEntry, Components, read_manifest
 from ..plugins.select import select
 from ..sources import AccessRefused, SourceError, fingerprint, materialise
 from ..sources.live import Revalidator, is_live
@@ -157,21 +158,6 @@ def build_fetch(
     )
 
 
-def _without_root(skills: tuple[str, ...] | None) -> tuple[str, ...] | None:
-    # Task 3 replaces this: "." will name the plugin root. Until then it is
-    # dropped, since it is no glob and `Path.glob(".")` raises.
-    return None if skills is None else tuple(p for p in skills if p != ".")
-
-
-def _own(plugin: Plugin) -> Globs:
-    """The globs the plugin itself names: a declared plugin's, or its entry's."""
-    if plugin.entry is None:
-        return plugin.globs
-    skills = _without_root(plugin.entry.skills)
-    commands = plugin.entry.commands
-    return Globs(skills=skills, prompts=commands, commands=commands or ())
-
-
 def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
     """The plugin completed by its own manifest, and the globs it serves.
 
@@ -179,36 +165,144 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
     Its ``keywords`` join the plugin's labels -- obra/superpowers is tagged
     nowhere but there -- and its ``description`` and ``version`` fill in only
     what the entry or the config left empty: a declared value always wins,
-    and a marketplace entry is completed, never overridden. The globs are per
-    kind, so a plugin may name its skills and leave its commands to the
-    manifest; ``None`` for a kind is ``harvest.DEFAULTS``. A manifest that
-    does not parse raises: that is the plugin's failure, not a reason to guess.
+    and a marketplace entry is completed, never overridden.
+
+    The components merge as Claude Code merges them, per kind:
+
+    - a declared plugin's own ``skills:`` and ``prompts:`` are exactly what it
+      serves of that kind (LIB-33);
+    - a manifest's ``skills`` add to the conventions (PLG-20), and so do an
+      entry's (LIB-30) -- except an entry at the marketplace root, whose list
+      is all it serves beside the manifest's (LIB-32);
+    - ``commands`` and ``agents`` replace their conventions (PLG-21, PLG-22),
+      the entry's appended to the manifest's, and a default folder they leave
+      unread is noted (PLG-23);
+    - only a Claude-format plugin -- one with a manifest, or a marketplace
+      entry -- has agents at all.
+
+    ``None`` for a kind is ``harvest.DEFAULTS``. A manifest that does not
+    parse raises, and so does a ``strict: false`` entry that names components
+    beside one (LIB-31): either is the plugin's failure, not a reason to guess.
     """
-    own = _own(plugin)
     manifest = read_manifest(root)
-    if manifest is None:
-        return plugin, own
-    declared = manifest.components
+    entry = plugin.entry
+    if manifest is not None and entry is not None and not plugin.strict and entry.named:
+        raise ValueError("conflicting manifests")
+    found = manifest.components if manifest is not None else Components()
+    listed = entry if entry is not None else Components()
+    claude_format = manifest is not None or entry is not None
+    config = plugin.globs
+    notes = [*found.notes, *listed.notes]
+
+    if config.skills is not None:
+        skills = config.skills
+    elif plugin.root_entry and listed.skills is not None:
+        skills = _joined(listed.skills, found.skills)
+    elif found.skills is None and listed.skills is None:
+        skills = None
+    else:
+        skills = _joined(harvest.DEFAULTS["skills"], found.skills, listed.skills)
+
+    prompts = config.prompts
+    commands: tuple[str, ...] = ()
+    command_dirs: tuple[str, ...] = ()
+    command_map: tuple[CommandEntry, ...] = ()
+    if prompts is None and (found.commands is not None or listed.commands is not None):
+        prompts = commands = _joined(found.commands, listed.commands)
+        command_dirs = _joined(found.command_dirs, listed.command_dirs)
+        command_map = (*found.command_map, *listed.command_map)
+        notes += _ignored(root, "commands")
+
+    if not claude_format:
+        agents: tuple[str, ...] | None = ()
+    elif found.agents is not None or listed.agents is not None:
+        agents = _joined(found.agents, listed.agents)
+        notes += _ignored(root, "agents")
+    else:
+        agents = None
+
+    servers = _servers(root, (found, listed), notes)
     completed = replace(
         plugin,
-        description=plugin.description or manifest.description or "",
-        version=plugin.version or manifest.version,
-        keywords=tuple(dict.fromkeys((*plugin.keywords, *manifest.keywords))),
+        claude_format=claude_format,
+        servers=servers,
+        # Fetched content, and /health publishes it: no cache path, no userinfo.
+        notes=tuple(dict.fromkeys(scrub(unrooted(note, root)) for note in notes)),
     )
-    declared_skills = _without_root(declared.skills)
+    if manifest is not None:
+        completed = replace(
+            completed,
+            description=plugin.description or manifest.description or "",
+            version=plugin.version or manifest.version,
+            keywords=tuple(dict.fromkeys((*plugin.keywords, *manifest.keywords))),
+        )
     globs = Globs(
-        skills=own.skills if own.skills is not None else declared_skills,
-        prompts=own.prompts if own.prompts is not None else declared.commands,
-        files=own.files,
-        # Which of the prompt patterns in force came from a `commands`
-        # declaration: the entry's when it named any, else the manifest's.
-        commands=own.commands if own.prompts is not None else (declared.commands or ()),
+        skills=skills,
+        prompts=prompts,
+        files=config.files,
+        commands=commands,
+        agents=agents,
+        command_dirs=command_dirs,
+        command_map=command_map,
     )
     return completed, globs
 
 
+def _joined(*parts: tuple[str, ...] | None) -> tuple[str, ...]:
+    """The patterns of every part that has any, in order, each once."""
+    return tuple(dict.fromkeys(item for part in parts if part for item in part))
+
+
+def _ignored(root: Path, key: str) -> list[str]:
+    """PLG-23's note, when ``key`` replaced a default folder that is there."""
+    if not (root / key).is_dir():
+        return []
+    return [f'Default {key}/ folder is ignored because the manifest sets "{key}"']
+
+
+def _servers(
+    root: Path, components: Iterable[Components], notes: list[str]
+) -> tuple[str, ...]:
+    """The MCP server names a plugin declares, sorted (PLG-27).
+
+    Its root ``.mcp.json``, then each manifest's or entry's inline object and
+    the files it names. Only names are read: nothing here is ever started,
+    connected to or forwarded. A file that does not parse costs one note.
+    """
+    names = _server_file(root, ".mcp.json", notes, named=False)
+    for part in components:
+        names += part.mcp_servers
+        for rel in part.mcp_files:
+            names += _server_file(root, rel, notes, named=True)
+    return tuple(sorted(set(names)))
+
+
+def _server_file(root: Path, rel: str, notes: list[str], *, named: bool) -> list[str]:
+    """The server names in one JSON file: its ``mcpServers`` keys, else its own.
+
+    A root ``.mcp.json`` that is not there is ordinary; a file a manifest
+    names and does not ship is noted, as one that does not parse is.
+    """
+    path = harvest.readable(root, rel)
+    if path is None:
+        if named:
+            notes.append(f"mcpServers file {rel} is not in the plugin")
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        # ValueError covers a bad encoding, bad JSON and an integer too long
+        # to convert; RecursionError a file nested past the parser's stack.
+        data = None
+    if not isinstance(data, dict):
+        notes.append(f"{rel} is not a JSON object of MCP servers")
+        return []
+    servers = data.get("mcpServers")
+    return [str(name) for name in (servers if isinstance(servers, dict) else data)]
+
+
 def effective_globs(plugin: Plugin, root: Path) -> Globs:
-    """What the plugin serves: its own lists, else its manifest's, else None."""
+    """What the plugin serves: its config, manifest and entry, merged."""
     return with_manifest(plugin, root)[1]
 
 
@@ -608,6 +702,8 @@ def _plugin_status(
         "keywords": sorted(plugin.keywords),
         **({"version": plugin.version} if plugin.version else {}),
         "libraries": libraries,
+        # Already scrubbed and unrooted by with_manifest, which had the root.
+        **({"notes": list(plugin.notes)} if plugin.notes else {}),
     }
     if record is None or admitted is None:
         # A record that is not ok carries why; one that never got a root has
@@ -693,6 +789,10 @@ def log_changes(before: dict[str, dict], after: dict[str, dict]) -> None:
         for row in now_.get("skipped", ()):
             if row["path"] not in known:
                 log.warning("plugin %s skips %s: %s", pid, row["path"], row["reason"])
+        noted = set(was.get("notes", ()))
+        for note in now_.get("notes", ()):
+            if note not in noted:
+                log.warning("plugin %s: %s", pid, note)
 
     for name, now_ in after.get("libraries", {}).items():
         was = before.get("libraries", {}).get(name, {})

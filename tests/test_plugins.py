@@ -567,8 +567,10 @@ def test_every_escape_has_one_note_saying_so(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_root_skills_path_harvests_as_it_did_before(tmp_path):
-    """`"."` is kept in the components, and dropped where it would be a glob."""
+def test_a_root_skills_path_is_the_plugin_root(tmp_path):
+    """`"."` is kept in the components, and harvested as the plugin root --
+    a directory hit -- rather than handed to `Path.glob`, which raises."""
+    from kubed.mcp_kb.catalogue.harvest import DEFAULTS
     from kubed.mcp_kb.catalogue.snapshot import build_plugin, with_manifest
 
     root = manifest(tmp_path, {"skills": "./"})
@@ -580,14 +582,14 @@ def test_a_root_skills_path_harvests_as_it_did_before(tmp_path):
     completed, globs = with_manifest(plugin(), root)
     record = build_plugin(completed, root, globs=globs)
 
-    assert globs.skills == ()
+    assert globs.skills == (*DEFAULTS["skills"], ".")
     assert record.status == "ok"
-    assert record.skills == ()
+    assert [row.name for row in record.skills] == ["a"]
 
 
 @pytest.mark.unit
 def test_a_root_entry_skills_path_builds_without_raising(tmp_path):
-    """The same `"."` guard, for an entry's skills as for a manifest's."""
+    """`"."` is the plugin root for a root entry's skills as for a manifest's."""
     from dataclasses import replace
 
     from kubed.mcp_kb.catalogue.snapshot import build_plugin, with_manifest
@@ -602,5 +604,6 @@ def test_a_root_entry_skills_path_builds_without_raising(tmp_path):
     completed, globs = with_manifest(root_entry, tmp_path)
     record = build_plugin(completed, tmp_path, globs=globs)
 
-    assert globs.skills == ()
+    assert globs.skills == (".",)
     assert record.status == "ok"
+    assert [row.name for row in record.skills] == ["a"]

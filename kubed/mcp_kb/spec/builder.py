@@ -175,6 +175,18 @@ PLUGIN_STATUS = {
             "the tree, or its manifest does not parse.",
         ),
         "skipped": SKIPPED,
+        "notes": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Present when not empty: what the server noticed in the "
+                "plugin's own files without failing it -- its manifest's or "
+                "marketplace entry's defects, such as a path without its `./` "
+                "or a `commands` item that names no file, a default folder a "
+                "replacing key leaves unread, and an `.mcp.json` or "
+                "`mcpServers` file that does not parse."
+            ),
+        },
     },
 }
 
@@ -225,8 +237,7 @@ LIBRARY_STATUS = {
             "description": (
                 "Present when the library's marketplace lists entries this "
                 "server does not install: `npm`, `archive` and `command` "
-                "sources, `strict: false` entries, and entries that are "
-                "malformed."
+                "sources, and entries that are malformed."
             ),
             "items": {
                 "type": "object",

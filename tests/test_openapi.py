@@ -137,6 +137,7 @@ def test_each_status_documents_every_field_report_can_produce():
     assert set(schemas["PluginStatus"]["properties"]) == {
         "status", "fetch", "root", "category", "tags", "keywords", "version",
         "libraries", "skills", "prompts", "files", "built", "error", "skipped",
+        "notes",
     }
     assert set(schemas["LibraryStatus"]["properties"]) == {
         "description", "categories", "plugins", "skills", "prompts", "files", "error",
@@ -226,6 +227,32 @@ async def test_a_real_health_response_matches_the_documented_fields(every_status
     ):
         for info in body[part].values():
             assert set(info) <= set(schemas[schema]["properties"]), (part, info)
+
+
+async def test_a_health_response_with_plugin_notes_validates(tmp_path):
+    """A plugin's `notes` (PLG-26) is present only when there is one to make,
+    so the healthy body above never carries it: a manifest path without its
+    `./` is the smallest tree that does."""
+    root = tmp_path / "kit"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text('{"skills": ["extra"]}')
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "kit", "source": f"file://{root}"}],
+            "libraries": [{"name": "kit", "plugins": ["kit"]}],
+        }
+    )
+    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
+    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
+        body = (await http.get("/health")).json()
+
+    assert body["plugins"]["kit"]["notes"] == [
+        "skills path 'extra' does not start with ./"
+    ]
+    validate("Health", body)
+    documented = build_spec()["components"]["schemas"]["PluginStatus"]["properties"]
+    assert set(body["plugins"]["kit"]) <= set(documented)
 
 
 async def test_a_failed_fetch_carries_only_its_status_and_error(every_status):

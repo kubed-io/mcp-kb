@@ -21,13 +21,15 @@ running it.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..plugins import Globs
 
 MAIN_FILE = "SKILL.md"
+
+PLUGIN_ROOT = PurePosixPath(".")
 
 DEFAULTS: dict[str, tuple[str, ...]] = {
     "skills": (
@@ -36,7 +38,7 @@ DEFAULTS: dict[str, tuple[str, ...]] = {
         ".claude/skills/*/SKILL.md",
         ".agents/skills/*/SKILL.md",
     ),
-    "prompts": ("prompts/**/*.md", ".github/prompts/*.prompt.md", "commands/*.md"),
+    "prompts": ("prompts/**/*.md", ".github/prompts/*.prompt.md", "commands/**/*.md"),
     "files": (),
 }
 
@@ -111,8 +113,13 @@ def _matches(base: Path, pattern: str) -> Iterator[Path]:
     is the path the config asked for: a ConfigMap key ``shared/foo.md`` resolves
     to ``..<timestamp>/shared/foo.md``, a name no client asked for and a
     directory Kubernetes deletes on the next update.
+
+    ``"."`` is the plugin root itself, a directory hit: a manifest says
+    ``"skills": ["./"]`` for a plugin whose skills sit at its root, and
+    ``Path.glob(".")`` raises rather than answer it.
     """
-    for hit in base.glob(pattern):
+    hits = [base] if PurePosixPath(pattern) == PLUGIN_ROOT else base.glob(pattern)
+    for hit in hits:
         # A pattern like "../**" can walk out of base and straight back in
         # -- resolve() then quietly collapses the ".." and the hit looks
         # like a plain interior file. Reject the escape before resolving.
