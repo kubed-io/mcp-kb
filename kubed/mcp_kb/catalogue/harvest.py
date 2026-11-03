@@ -20,6 +20,7 @@ running it.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -77,6 +78,23 @@ METADATA_DOTDIRS: frozenset[str] = frozenset({".claude-plugin"})
 FINGERPRINTED_DOTDIRS: frozenset[str] = CONVENTIONAL_DOTDIRS | METADATA_DOTDIRS
 
 
+def usable_name(text: object) -> bool:
+    """Whether a fetched name can be served: a command map's key, an agent's name.
+
+    It becomes a served prompt or agent name, a ``/health`` reason and a log
+    line, so it is one non-empty token: no whitespace, no control or other
+    invisible character, no ``/`` (a path) and no ``@`` (AGT-8's rename).
+    """
+    return (
+        isinstance(text, str)
+        and bool(text)
+        and not any(
+            c.isspace() or c in "/@" or unicodedata.category(c).startswith("C")
+            for c in text
+        )
+    )
+
+
 def patterns(kind: str, globs: Globs) -> tuple[str, ...]:
     """The globs for one kind: what ``globs`` says, else the conventions."""
     explicit = getattr(globs, kind)
@@ -125,8 +143,18 @@ def _matches(base: Path, pattern: str) -> Iterator[Path]:
     ``"."`` is the plugin root itself, a directory hit: a manifest says
     ``"skills": ["./"]`` for a plugin whose skills sit at its root, and
     ``Path.glob(".")`` raises rather than answer it.
+
+    A pattern ``Path.glob`` refuses matches nothing: before Python 3.13 a
+    ``**`` inside a component (``"x**.md"``) raises ``ValueError``, and the
+    pattern can be a fetched manifest's, which must not fail a build.
     """
-    hits = [base] if PurePosixPath(pattern) == PLUGIN_ROOT else base.glob(pattern)
+    if PurePosixPath(pattern) == PLUGIN_ROOT:
+        hits: Iterable[Path] = [base]
+    else:
+        try:
+            hits = list(base.glob(pattern))
+        except ValueError:
+            return
     for hit in hits:
         # A pattern like "../**" can walk out of base and straight back in
         # -- resolve() then quietly collapses the ".." and the hit looks

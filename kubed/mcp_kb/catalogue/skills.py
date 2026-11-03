@@ -83,11 +83,15 @@ class Skill:
 
 
 def _frontmatter(skill_md: Path) -> dict:
-    """Parse a SKILL.md YAML frontmatter block, tolerating a malformed one."""
+    """Parse a SKILL.md YAML frontmatter block, tolerating a malformed one.
+
+    ``TypeError`` is a key that is not a string (``1:``, ``true:``), which
+    python-frontmatter cannot take: malformed, like YAML that does not parse.
+    """
     text = skill_md.read_text(encoding="utf-8", errors="replace")
     try:
         meta = frontmatter.loads(text).metadata
-    except yaml.YAMLError:
+    except (yaml.YAMLError, TypeError):
         return {}
     return meta if isinstance(meta, dict) else {}
 

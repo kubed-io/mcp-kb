@@ -88,6 +88,10 @@ def read_marketplace(
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"{path.name} is not readable JSON: {exc}") from exc
+    except RecursionError:
+        # Fetched content nested past the parser's stack: the library's failure,
+        # not the server's, and nothing of the file is quoted back.
+        raise ValueError(f"{path.name} is nested too deeply to read") from None
     if not isinstance(data, dict) or not isinstance(data.get("plugins"), list):
         raise ValueError(f"{path.name} must be an object holding a plugins list")
 

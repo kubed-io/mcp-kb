@@ -381,13 +381,23 @@ def test_servers_are_names_from_every_place(tmp_path):
     assert _declared(tmp_path / "2", filed)._plugins[0].servers == ("y", "z")
 
 
-def test_an_entrys_servers_join_the_manifests(tmp_path):
+def test_an_entrys_servers_do_not_apply_beside_a_manifest(tmp_path):
+    """Claude Code: with a plugin.json, an entry's ``mcpServers`` don't apply."""
     root = tmp_path / "market"
     _skill(root, "plug/skills/a")
     _manifest(root / "plug", name="plug", mcpServers={"b": {}})
     _catalog(root, {"name": "plug", "source": "./plug", "mcpServers": {"a": {}}})
 
-    assert _marketplace(tmp_path, root)._plugins[0].servers == ("a", "b")
+    assert _marketplace(tmp_path, root)._plugins[0].servers == ("b",)
+
+
+def test_an_entrys_servers_count_without_a_manifest(tmp_path):
+    root = tmp_path / "market"
+    _skill(root, "plug/skills/a")
+    _write(root, "plug/.mcp.json", json.dumps({"mcpServers": {"c": {}}}))
+    _catalog(root, {"name": "plug", "source": "./plug", "mcpServers": {"a": {}}})
+
+    assert _marketplace(tmp_path, root)._plugins[0].servers == ("a", "c")
 
 
 def test_an_unparsable_mcp_json_is_a_note_and_nothing_else(tmp_path):
@@ -584,3 +594,148 @@ def test_a_manifest_agents_list_notes_the_folder(tmp_path):
         "more/other.md",
     )
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [AGENTS_NOTE]
+
+
+# -- fetched content that must not take the server down -------------------------
+
+
+def _glob_as_on_3_11(monkeypatch) -> None:
+    """``Path.glob`` as Python 3.11 and 3.12 have it: a partial ``**`` raises."""
+    real = Path.glob
+
+    def glob(self, pattern, *args, **kwargs):
+        if any("**" in part and part != "**" for part in str(pattern).split("/")):
+            raise ValueError("Invalid pattern: '**' can only be an entire component")
+        return real(self, pattern, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "glob", glob)
+
+
+@pytest.mark.parametrize(
+    ("key", "paths"),
+    [
+        ("agents", ["./x**.md", "./agents/good.md"]),
+        ("commands", ["./x**.md", "./cmds/ok.md"]),
+        ("skills", ["./x**", "./extra"]),
+    ],
+)
+def test_a_component_glob_python_refuses_matches_nothing(
+    tmp_path, monkeypatch, key, paths
+):
+    _glob_as_on_3_11(monkeypatch)
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _skill(root, "extra/b")
+    _command(root, "cmds/ok.md")
+    _write(root, "agents/good.md", "---\nname: good\ndescription: Good.\n---\nGo.\n")
+    _manifest(root, name="kit", **{key: paths})
+
+    knowledge_base = _declared(tmp_path, root)
+
+    assert knowledge_base.status["plugins"]["kit"]["status"] == "ok"
+    assert "a" in _served(knowledge_base)
+    if key == "agents":
+        cards = knowledge_base.catalogue.agent_cards()
+        assert [card["name"] for card in cards] == ["kit_good"]
+    if key == "commands":
+        assert _names(knowledge_base) == ["kit_ok"]
+    if key == "skills":
+        assert _served(knowledge_base) == {"a", "b"}
+
+
+def test_a_marketplace_too_deep_to_parse_fails_the_library_and_quotes_nothing(
+    tmp_path,
+):
+    root = tmp_path / "market"
+    _write(root, ".claude-plugin/marketplace.json", "[" * 100000)
+
+    knowledge_base = _marketplace(tmp_path, root)
+
+    library = knowledge_base.status["libraries"]["lib"]
+    assert library["error"] == "marketplace.json is nested too deeply to read"
+    assert knowledge_base._plugins == []
+
+
+NOT_TEXT_KEY = "---\n1: x\ntrue: y\ndescription: d\n---\nBody $ARGUMENTS\n"
+KEY_REASON = "frontmatter has a key that is not a string"
+
+
+def test_a_prompt_file_with_a_key_that_is_not_text_is_skipped(tmp_path):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _write(root, "prompts/bad.md", NOT_TEXT_KEY)
+    _command(root, "prompts/ok.md")
+
+    knowledge_base = _declared(tmp_path, root)
+    status = knowledge_base.status["plugins"]["kit"]
+
+    assert status["status"] == "ok"
+    assert _names(knowledge_base) == ["kit_ok"]
+    assert status["skipped"] == [{"path": "prompts/bad.md", "reason": KEY_REASON}]
+
+
+def test_a_command_file_with_a_key_that_is_not_text_is_skipped(tmp_path):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _write(root, "cmds/bad.md", NOT_TEXT_KEY)
+    _command(root, "cmds/ok.md")
+    _manifest(root, name="kit", commands=["./cmds/bad.md", "./cmds/ok.md"])
+
+    knowledge_base = _declared(tmp_path, root)
+    status = knowledge_base.status["plugins"]["kit"]
+
+    assert status["status"] == "ok"
+    assert _names(knowledge_base) == ["kit_ok"]
+    assert status["skipped"] == [{"path": "cmds/bad.md", "reason": KEY_REASON}]
+
+
+def test_inline_content_with_a_key_that_is_not_text_is_skipped(tmp_path):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _manifest(
+        root,
+        name="kit",
+        commands={"bad": {"content": NOT_TEXT_KEY}, "ok": {"content": "Ok."}},
+    )
+
+    knowledge_base = _declared(tmp_path, root)
+    status = knowledge_base.status["plugins"]["kit"]
+
+    assert status["status"] == "ok"
+    assert _names(knowledge_base) == ["kit_ok"]
+    assert status["skipped"] == [
+        {"path": ".claude-plugin/plugin.json", "reason": KEY_REASON}
+    ]
+
+
+def test_a_skill_with_a_key_that_is_not_text_is_read_as_no_frontmatter(tmp_path):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _write(root, "skills/odd/SKILL.md", "---\n1: x\nname: named\n---\nBody.\n")
+
+    knowledge_base = _declared(tmp_path, root)
+
+    assert knowledge_base.status["plugins"]["kit"]["status"] == "ok"
+    # As a frontmatter block that does not parse: named by its folder.
+    assert _served(knowledge_base) == {"a", "odd"}
+
+
+@pytest.mark.parametrize(
+    "key", ["", "a\nb", "x/y", "sp ace", "tab\there", "a\x07b", "../../etc", "d@x"]
+)
+def test_a_commands_map_key_that_is_not_a_name_is_dropped(tmp_path, key):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _manifest(
+        root,
+        name="kit",
+        commands={key: {"content": "Bad."}, "ok": {"content": "Ok."}},
+    )
+
+    knowledge_base = _declared(tmp_path, root)
+    status = knowledge_base.status["plugins"]["kit"]
+
+    assert status["status"] == "ok"
+    assert _names(knowledge_base) == ["kit_ok"]
+    assert status["notes"] == [f"commands entry {key!r} is not a usable name"]
+    assert "skipped" not in status

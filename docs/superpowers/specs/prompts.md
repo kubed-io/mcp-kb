@@ -30,7 +30,9 @@ block (`---` then `---`) is valid.
 **PRM-6.** The body is the text after the frontmatter block exactly as written.
 
 **PRM-7.** A file that cannot be read, whose YAML does not parse, or whose frontmatter breaks a rule
-below is skipped with a reason. The plugin's other prompts, skills and files still serve.
+below is skipped with a reason. A frontmatter key that is not a string (`1:`, `true:`) is skipped
+with `frontmatter has a key that is not a string`, and so is an inline command's (PLG-21). The
+plugin's other prompts, skills and files still serve.
 
 **PRM-8.** A frontmatter field of the wrong type (a mapping or a list where text is expected, a
 non-list where a list is expected) skips the file with a reason naming the field. It MUST NOT stop

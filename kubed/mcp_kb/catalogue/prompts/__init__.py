@@ -212,6 +212,13 @@ class MissingArguments(ValueError):
         )
 
 
+NOT_TEXT_KEY = "frontmatter has a key that is not a string"
+
+
+class _NoFrontmatter(ValueError):
+    """No frontmatter block at all: a file's failure, an inline body's choice."""
+
+
 def _split(text: str) -> tuple[dict, str]:
     """Frontmatter and body, raising ValueError when there is no frontmatter block.
 
@@ -227,9 +234,14 @@ def _split(text: str) -> tuple[dict, str]:
     block itself, when the body text happens to recur there -- so a LogQL line
     like ``|= "error"\\n`` renders exactly as written.
     """
-    post = frontmatter.loads(text)
+    try:
+        post = frontmatter.loads(text)
+    except TypeError:
+        # A key like `1:` or `true:` -- python-frontmatter passes the mapping
+        # as keyword arguments. Fetched content, so the reason quotes none.
+        raise ValueError(NOT_TEXT_KEY) from None
     if post.metadata == {} and post.content.strip() == text.strip():
-        raise ValueError("no YAML frontmatter")
+        raise _NoFrontmatter("no YAML frontmatter")
     meta = post.metadata if isinstance(post.metadata, dict) else {}
     if not post.content:
         return meta, ""
@@ -294,10 +306,14 @@ def _source(source: Path | PromptSource) -> PromptSource:
 
 
 def _inline(content: str) -> tuple[dict, str]:
-    """An inline body's frontmatter and body: unlike a file's, the block is optional."""
+    """An inline body's frontmatter and body: unlike a file's, the block is optional.
+
+    Only an absent block is forgiven. One that does not parse raises, as a
+    file's does, and the command is skipped.
+    """
     try:
         return _split(content)
-    except ValueError:
+    except _NoFrontmatter:
         return {}, content
 
 
@@ -407,7 +423,7 @@ def load_prompts(
                     dialect=dialect,
                 )
             )
-        except (OSError, ValueError, yaml.YAMLError) as exc:
+        except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
             if skipped is None:
                 log.warning("skipping prompt %s: %s", path, exc)
             else:

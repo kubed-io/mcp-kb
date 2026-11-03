@@ -456,7 +456,59 @@ def test_a_clash_is_renamed_and_reported(tmp_path):
     assert _owners(knowledge_base)["drawio_diagrammer@extra"] == "extra@drawio"
 
 
+def _mix(tree: AgentsTree) -> Config:
+    """Two plugins named ``extra``, from two marketplaces, in one library ``mix``.
+
+    Both ship a ``diagrammer`` after drawio's, so the second one's rename is
+    taken too: the only way to reach AGT-8's ``unserved``, since a frontmatter
+    name cannot hold the ``@`` of a rename.
+    """
+    other = tree.root / "other"
+    _write(
+        other,
+        ".claude-plugin/marketplace.json",
+        json.dumps({"name": "other", "plugins": [{"name": "extra", "source": "./"}]}),
+    )
+    _write(other, ".claude-plugin/plugin.json", json.dumps({"name": "extra"}))
+    _write(other, "agents/diagrammer.md", _agent("diagrammer"))
+    return Config.model_validate(
+        {
+            "libraries": [
+                {"name": "drawio", "source": f"file://{tree.root / 'market'}"},
+                {"name": "other", "source": f"file://{other}"},
+                {
+                    "name": "mix",
+                    "plugins": ["drawio@drawio", "extra@drawio", "extra@other"],
+                },
+            ]
+        }
+    )
+
+
 def test_a_clash_on_the_renamed_name_is_unserved(tmp_path):
+    knowledge_base = KnowledgeBase(_mix(agents_tree(tmp_path)), tmp_path / "cache")
+
+    catalogue = knowledge_base.catalogue
+    owners = {
+        name: catalogue.agent_definition(name)["_meta"]["io.kubed.mcp-kb/agent"][
+            "plugin"
+        ]
+        for name in _names(knowledge_base, "mix")
+    }
+    assert owners["mix_diagrammer"] == "drawio@drawio"
+    assert owners["mix_diagrammer@extra"] == "extra@drawio"
+    library = knowledge_base.status["libraries"]["mix"]
+    assert library["unserved"] == [
+        {
+            "plugin": "extra@other",
+            "path": "agents/diagrammer.md",
+            "reason": "mix_diagrammer@extra is already served by plugin 'extra@drawio'",
+        }
+    ]
+    assert library["agents"] == 4
+
+
+def test_an_agent_named_like_a_rename_does_not_squat_it(tmp_path):
     tree = agents_tree(tmp_path)
     _entries(tree, before=[("sneak", {"agents/d.md": _agent("diagrammer@extra")})])
     # Ahead of extra, behind drawio: the marketplace keeps drawio first.
@@ -469,19 +521,23 @@ def test_a_clash_on_the_renamed_name_is_unserved(tmp_path):
 
     owners = _owners(knowledge_base)
     assert owners["drawio_diagrammer"] == "drawio@drawio"
-    assert owners["drawio_diagrammer@extra"] == "sneak@drawio"
-    assert "drawio_db_migrator" in owners
-    library = knowledge_base.status["libraries"]["drawio"]
-    assert library["unserved"] == [
-        {
-            "plugin": "extra@drawio",
-            "path": "agents/diagrammer.md",
-            "reason": (
-                "drawio_diagrammer@extra is already served by plugin 'sneak@drawio'"
-            ),
-        }
+    assert owners["drawio_diagrammer@extra"] == "extra@drawio"
+    assert "sneak@drawio" not in owners.values()
+    assert "unserved" not in knowledge_base.status["libraries"]["drawio"]
+    assert knowledge_base.status["plugins"]["sneak@drawio"]["skipped"] == [
+        {"path": "agents/d.md", "reason": "agent frontmatter name is not a usable name"}
     ]
-    assert library["agents"] == 4
+
+
+@pytest.mark.parametrize(
+    "name", ["a\nb", "x/y", "sp ace", "tab\there", "a\x07b", "../../etc", "d@x"]
+)
+def test_an_agent_name_that_is_not_a_name_is_skipped(tmp_path, name):
+    _write(tmp_path, "a.md", f"---\nname: {json.dumps(name)}\ndescription: d\n---\n")
+
+    assert parse_agent(tmp_path / "a.md") == (
+        "agent frontmatter name is not a usable name"
+    )
 
 
 def test_a_twin_in_one_plugin_is_skipped(tmp_path):
@@ -661,22 +717,17 @@ def test_a_row_that_no_longer_parses_is_reported_and_keeps_its_claim(tmp_path):
 
 
 def test_renames_and_unserved_agents_are_logged_once(tmp_path, caplog):
-    tree = agents_tree(tmp_path)
-    _entries(tree, before=[("sneak", {"agents/d.md": _agent("diagrammer@extra")})])
-    market = tree.root / "market/.claude-plugin/marketplace.json"
-    catalog = json.loads(market.read_text())
-    catalog["plugins"] = [catalog["plugins"][i] for i in (1, 0, 2)]
-    market.write_text(json.dumps(catalog))
+    config = _mix(agents_tree(tmp_path))
 
     with caplog.at_level(logging.INFO, logger="kubed.mcp_kb.catalogue.snapshot"):
-        knowledge_base = tree.knowledge_base(tmp_path / "cache")
+        knowledge_base = KnowledgeBase(config, tmp_path / "cache")
         boot = caplog.text
         caplog.clear()
         knowledge_base.refresh(force=True)
 
-    assert boot.count("drawio_diagrammer@extra") == 1
+    assert boot.count("mix_diagrammer@extra") == 2  # renamed once, unserved once
     assert "agents/diagrammer.md" in boot
-    assert "drawio_diagrammer@extra" not in caplog.text
+    assert "mix_diagrammer@extra" not in caplog.text
 
 
 def test_a_live_agent_is_reread(tmp_path, caplog):

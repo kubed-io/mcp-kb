@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Skill links work behind a multiplexing gateway: set `Kb-Resource-Prefix` (or `?prefix=`), e.g. `kb+`, and kb writes it in front of every address in text.
 - A library can list `categories`, and `Kb-Category` (`?category=`) selects every library listing one.
 - A plugin's `commands` may be an object map, and commands in subfolders are served as `<library>_<folder>_<name>`.
+- **Discover the agents your plugins ship** through the experimental `agents/list` and `agents/get`, scoped like everything else.
 
 ### Changed
 

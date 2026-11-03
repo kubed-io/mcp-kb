@@ -88,9 +88,9 @@ observability part of `grafana`.
 **SCP-20.** A thing is in scope when it belongs to the scoped library (if one is set) and its
 plugin, in that library, matches the categories and the tags (SCP-15 to SCP-17).
 
-**SCP-21.** The scope applies to skills, prompts and library-level files alike, and to every
-surface that lists or reads them: `resources/list`, `resources/read`, `prompts/list`,
-`prompts/get`, `skills/list`, `skills/get` and the four mirror tools.
+**SCP-21.** The scope applies to skills, prompts, agents and library-level files alike, and to
+every surface that lists or reads them: `resources/list`, `resources/read`, `prompts/list`,
+`prompts/get`, `skills/list`, `skills/get`, `agents/list`, `agents/get` and the four mirror tools.
 
 **SCP-22.** Out of scope means not listed and not readable. An index (`_index.md`) lists only the
 skills in scope, and `_files.md` lists only the library files in scope. An index or `_files.md`
@@ -101,8 +101,9 @@ that falls back to a plugin root (see [skills.md](skills.md)) tries only the roo
 scope, or the root of the in-scope skill it was addressed under.
 
 **SCP-24.** A read of an out-of-scope address fails exactly as a read of an absent one does, on
-`resources/read`, the `read_resource` tool, `skills/get` (`Skill not found`) and `prompts/get` or
-`get_prompt` alike: the same error code and the same message.
+`resources/read`, the `read_resource` tool, `skills/get` (`Skill not found`), `agents/get`
+(`Agent not found`, with `data.reason: "agent_not_found"`) and `prompts/get` or `get_prompt` alike:
+the same error code and the same message.
 
 **SCP-25.** A hint that names the file to read instead of a directory is computed from the
 request's scope. A directory the scope cannot see fails as an absent address does.
@@ -118,8 +119,9 @@ and its plugin's tags and keywords, as for a skill.
 ## Refusing a scope that names nothing
 
 **SCP-29.** A scope that names nothing fails every MCP request with invalid params (-32602) and a
-message saying what there is instead. `initialize`, `server/discover`, `skills/list` and
-`skills/get` are refused alike, so the first request a client makes is the one that fails.
+message saying what there is instead. `initialize`, `server/discover`, `skills/list`, `skills/get`,
+`agents/list` and `agents/get` are refused alike, so the first request a client makes is the one
+that fails.
 
 **SCP-30.** A scope with no selectors is never refused.
 
@@ -135,7 +137,7 @@ message saying what there is instead. `initialize`, `server/discover`, `skills/l
 | 6 | a requested category is unknown (SCP-32) | refused: `The scope names category '<x>', which no library lists and no plugin declares. The categories are: <sorted>.` |
 | 7 | a requested tag is unknown (SCP-33) | refused: `The scope names tag '<x>', which nothing carries. The tags are: <sorted>.` |
 | 8 | no library is set and the server serves nothing at all | served, not refused |
-| 9 | categories or tags are set and the scope would be shown no listing row and no prompt | refused: `The scope names things that exist, but nothing in library '<x>' carries the combination: <what was asked>.` (`any library` when none is set) |
+| 9 | categories or tags are set and the scope would be shown no listing row, no prompt and no agent | refused: `The scope names things that exist, but nothing in library '<x>' carries the combination: <what was asked>.` (`any library` when none is set) |
 
 Rows 6 and 7 use the plural (`categories`, `tags`) when several are unknown. An empty list is
 written `none`.

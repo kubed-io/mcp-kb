@@ -4,8 +4,8 @@ An agent is a markdown file: YAML frontmatter naming it and saying when to use
 it, then the system prompt as the body. This module is the pure reading of one
 -- no FastMCP, no catalogue -- so the harvest can record it and a later layer
 can serve it. A file that is wrong in its *content* gives back the reason it is
-skipped (AGT-6) rather than raising; only an unreadable file raises, which fails
-the plugin as it does for a prompt.
+skipped (AGT-6) rather than raising; only an unreadable file raises ``OSError``,
+and the harvest skips it with a fixed reason, so it never fails the plugin.
 
 ``Agent`` and ``AgentRoster`` are what a snapshot serves of them: one agent
 under the name its library gave it (AGT-8), and every one of them, admitted by
@@ -24,6 +24,7 @@ import frontmatter
 import yaml
 
 from ..mcp.scope import EVERYTHING, Scope
+from .harvest import usable_name
 
 # Model families (AGT-9): the first one named in a value, by position, wins.
 ROLES: dict[str, str] = {"opus": "large", "sonnet": "medium", "haiku": "small"}
@@ -66,6 +67,8 @@ def parse_agent(path: Path) -> ParsedAgent | str:
     name = meta.get("name")
     if not isinstance(name, str) or not name.strip():
         return "agent frontmatter has no name"
+    if not usable_name(name):
+        return "agent frontmatter name is not a usable name"
     description = meta.get("description")
     if not isinstance(description, str) or not description.strip():
         return "agent frontmatter has no description"

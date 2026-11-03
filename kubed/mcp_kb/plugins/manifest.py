@@ -17,7 +17,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from ..catalogue.harvest import readable
+from ..catalogue.harvest import readable, usable_name
 
 MANIFEST_FILES = (".claude-plugin/plugin.json", "plugin.json")
 
@@ -159,6 +159,11 @@ def _commands(
 def _command_map(value: dict, notes: list[str]) -> tuple[CommandEntry, ...]:
     entries = []
     for name, item in value.items():
+        # The key is the served prompt's name and a log line: quoted by repr,
+        # which escapes a newline, and every note below quotes a good one.
+        if not usable_name(name):
+            notes.append(f"commands entry {name!r} is not a usable name")
+            continue
         if not isinstance(item, dict):
             notes.append(f"commands entry '{name}' is not an object")
             continue

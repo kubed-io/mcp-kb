@@ -227,7 +227,8 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
     else:
         agents = None
 
-    servers = _servers(root, (found, listed), notes)
+    # Claude Code: beside a plugin.json, an entry's `mcpServers` don't apply.
+    servers = _servers(root, (found,) if manifest is not None else (listed,), notes)
     completed = replace(
         plugin,
         claude_format=claude_format,
@@ -271,9 +272,10 @@ def _servers(
 ) -> tuple[str, ...]:
     """The MCP server names a plugin declares, sorted (PLG-27).
 
-    Its root ``.mcp.json``, then each manifest's or entry's inline object and
-    the files it names. Only names are read: nothing here is ever started,
-    connected to or forwarded. A file that does not parse costs one note.
+    Its root ``.mcp.json``, then its manifest's inline object and the files it
+    names -- or, with no manifest, its entry's (LIB-30). Only names are read:
+    nothing here is ever started, connected to or forwarded. A file that does
+    not parse costs one note.
     """
     names = _server_file(root, ".mcp.json", notes, named=False)
     for part in components:

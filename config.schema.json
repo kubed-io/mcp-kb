@@ -112,7 +112,7 @@
     },
     "PluginConfig": {
       "additionalProperties": false,
-      "description": "A folder of skills and prompts: a path under a source, plus its metadata.\n\nThe metadata fields are Claude's marketplace-entry fields, so a plugin\ndeclared here and one read out of a ``marketplace.json`` carry the same\nshape and a selector cannot tell them apart. The glob lists are this\nserver's own: omitted, a kind falls to the plugin's manifest and then to\nthe conventions.",
+      "description": "A folder of skills and prompts: a path under a source, plus its metadata.\n\nThe metadata fields are Claude's marketplace-entry fields, so a plugin\ndeclared here and one read out of a ``marketplace.json`` carry the same\nshape and a selector cannot tell them apart. The glob lists are this\nserver's own: omitted, a kind is the conventions and the plugin's own\n``plugin.json`` and entry, merged per kind as Claude Code merges them.",
       "properties": {
         "name": {
           "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",

@@ -189,6 +189,7 @@ that is a symlink resolving outside the root is not read.
 | the subdir is not a directory in the tree | `<subdir> is not a directory in <fetch key>` |
 | none of the three files exists | `no marketplace.json under <subdir, or />` |
 | the file is not readable JSON | `<file> is not readable JSON: …` |
+| the JSON is nested too deeply to parse | `<file> is nested too deeply to read` |
 | the JSON is not an object with a `plugins` list | `<file> must be an object holding a plugins list` |
 
 **LIB-13.** Each entry becomes a plugin with id `<entry name>@<library>`, and with the entry's
@@ -301,7 +302,10 @@ and `description` and `argumentHint`, when set, are the prompt's description and
 argument's hint, ahead of any the body's own frontmatter gives. `model` and `allowedTools` are
 dropped like the other client-only keys. A map item that is not an object, that has both or
 neither of `source` and `content`, whose `source` is not a path inside the plugin, or whose
-`content` is not text, is dropped with a note (PLG-26), and the rest of the map serves. A `source`
+`content` is not text, is dropped with a note (PLG-26), and the rest of the map serves. So is one
+whose key is not a usable name: empty, or holding whitespace, a control or other invisible
+character, `/` or `@`, noted `commands entry <key> is not a usable name` with the key quoted
+escaped. A `source`
 that is not a file in the plugin is skipped with `not a file in the plugin`. An inline command's
 path in `/health` is the manifest's. Every map command is read in the `claude` dialect.
 
@@ -334,7 +338,9 @@ got wrong without failing it:
 
 - a component path dropped for leaving the plugin root (PLG-16), and one served without `./`
   (PLG-24);
-- an object-map item dropped (PLG-21), and an `agents` item dropped (PLG-22);
+- an object-map item dropped (PLG-21), for its key as for its value, an `agents` item dropped
+  (PLG-22), and an `agents` item that names no file in the plugin,
+  `agents entry '<path>' is not in the plugin` (AGT-5);
 - a default folder ignored (PLG-23);
 - an `mcpServers` that is neither an object nor a path, a file it names that is not in the plugin,
   and a root `.mcp.json` or named file that is not a JSON object (PLG-27).
@@ -344,12 +350,14 @@ fails the plugin. kb logs a new note once, at `WARNING`.
 
 **PLG-27.** The MCP servers a plugin declares are the names in its root `.mcp.json` (the keys of its
 `mcpServers` object, else its top-level keys), in its manifest's `mcpServers` (an object's keys, or
-the file a string names, read the same way), and in its entry's `mcpServers`. Only the names are
-kept, sorted and deduplicated, and kb never connects to, starts or forwards a server.
+the file a string names, read the same way), and, only when it has no `plugin.json`, in its
+entry's `mcpServers`: beside a `plugin.json`, an entry's `mcpServers` don't apply, as in Claude
+Code. Only the names are kept, sorted and deduplicated. AGT-9 serves them as an agent definition's `_meta…servers`, and kb
+never connects to, starts or forwards a server.
 
 **LIB-30.** A marketplace entry beside a `plugin.json` with `strict` absent or true **appends** its
-`skills`, `commands` and `agents` to the manifest's, and its `mcpServers` names join the
-manifest's.
+`skills`, `commands` and `agents` to the manifest's. Its `mcpServers` don't apply beside a
+`plugin.json` (PLG-27).
 
 **LIB-31.** Without a `plugin.json`, the entry is the manifest, whatever `strict` says. Beside a
 `plugin.json`, an entry with `strict: false` that names any of `skills`, `commands`, `agents`,
