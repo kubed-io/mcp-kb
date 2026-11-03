@@ -82,9 +82,9 @@ exists elsewhere in the library.
 |---|---|
 | `agent` | The name |
 | `instructions` | The body, rendered as a prompt body is: `${CLAUDE_PLUGIN_ROOT}` by PRM-48 and PRM-61, every client-only placeholder left as written (PRM-50, `${CLAUDE_SKILL_DIR}` included), then the gateway prefix (SKL-41). Omitted when the body is blank |
-| `modelRoutingHint` | From `model`: `haiku` → `{"role": "small", "vision": false}`, `sonnet` → `medium`, `opus` → `large`. Omitted for `inherit`, a missing `model`, a full model id, or any other value |
+| `modelRoutingHint` | From `model`, by family: `opus` → `{"role": "large", "vision": false}`, `sonnet` → `medium`, `haiku` → `small`, whether `model` is an alias or a full id (`claude-opus-5-5`). The family is the first of the three found as a word in the value, case-insensitive, where a word is a run of letters. Omitted for `inherit`, a missing `model`, or a value naming none of the three |
 | `tools` | `[]` |
-| `_meta["io.kubed.mcp-kb/agent"]` | `plugin` (its id), `library`, `path` (the file, relative to its plugin root), `frontmatter` (verbatim, as JSON), and `servers`: the names of the MCP servers the plugin declares in a root `.mcp.json` or in its manifest's or entry's `mcpServers`, names only, sorted |
+| `_meta["io.kubed.mcp-kb/agent"]` | `plugin` (its id), `library`, `path` (the file, relative to its plugin root), `frontmatter` (verbatim, as JSON), and `servers`: the names of the MCP servers the plugin declares (PLG-27) |
 
 **AGT-10.** *(proposed)* `tools` is always empty. The extension allows only tools from kb's own
 `tools/list`, and an agent's tools belong to other servers. `_meta` carries what a host or a

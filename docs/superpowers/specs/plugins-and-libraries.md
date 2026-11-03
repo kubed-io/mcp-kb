@@ -283,8 +283,19 @@ normally in every other library. A failed plugin (PLG-19) claims nothing.
 
 ## Proposed: reading a plugin the way Claude Code does
 
-These requirements replace PLG and LIB requirements that disagree with them once built. They make
-one `plugin.json` mean the same in kb as in Claude Code, for the kinds kb serves.
+These requirements make one `plugin.json` mean the same in kb as in Claude Code, for the kinds kb
+serves. Once built, they replace the requirements that disagree with them:
+
+| Requirement | Becomes |
+|---|---|
+| PLG-14 | `agents` and `mcpServers` are read too |
+| PLG-15 | `commands` may also be an object map; `agents` takes a string or a list of strings |
+| PLG-16 | `.` and `./` name the plugin root; a `commands` directory is read recursively (PLG-25) |
+| PLG-17 | a manifest's `skills` adds (PLG-20), its `commands` and `agents` replace (PLG-21, PLG-22), and an entry's lists append (LIB-30) |
+| PLG-18 | a prompt is left out when an earlier prompt of the plugin has its **name** (PLG-25), not its file stem |
+| LIB-14 | an entry's `skills`, `commands` and `agents` append to the manifest's (LIB-30) |
+| LIB-19 | the `strict: false` row goes (LIB-31); an object `commands` is not a wrong type, and `agents` of the wrong type is |
+| PRM-41, PRM-43 | a prompt's name is `<library>_<name>` (PLG-25), and the clash is on that name |
 
 **PLG-20.** *(proposed)* A manifest `skills` list **adds** to the default skill scan, across all of
 kb's skill roots. `"."` and `"./"` name the plugin root.
@@ -292,27 +303,55 @@ kb's skill roots. `"."` and `"./"` name the plugin root.
 **PLG-21.** *(proposed)* A manifest `commands` **replaces** the default prompt scan, across all of
 kb's prompt conventions. It may be a path, a list of paths, or an **object map**. In a map, the key is
 the prompt's name, `source` names a file or `content` holds an inline body (exactly one of the
-two), and `description` and `argumentHint` fill the prompt's description and free-text argument.
-`model` and `allowedTools` are dropped like the other client-only keys.
+two), and `description` and `argumentHint`, when set, are the prompt's description and its
+free-text argument's hint, ahead of any the body's own frontmatter gives. `model` and
+`allowedTools` are dropped like the other client-only keys. A map item that is not an object, or
+that has both or neither of `source` and `content`, is dropped with a note (PLG-26), and the rest
+of the map serves. Every map command is read in the `claude` dialect.
 
 **PLG-22.** *(proposed)* A manifest `agents` list of `.md` files **replaces** the default `agents/`
-scan (see [agents.md](agents.md)).
+scan (see [agents.md](agents.md)). An item that is a directory or not a `.md` file is dropped with
+a note (PLG-26).
 
 **PLG-23.** *(proposed)* When a replacing key is set and its default folder exists, the folder is
 ignored, and `/health` notes `Default <folder>/ folder is ignored because the manifest sets "<key>"`.
 
 **PLG-24.** *(proposed)* A component path that doesn't start with `./` is still served, and
-`/health` notes it.
+`/health` notes it. This is a deliberate deviation: `claude plugin validate` refuses such a path,
+and kb serves rather than validates.
+
+**PLG-25.** *(proposed)* A prompt's name below its library is decided where it was found:
+
+| Found | Name |
+|---|---|
+| under `commands/` or `.claude/commands/`, or under a directory a `commands` declaration names | each folder between that directory and the file, then the file stem, joined with `_`: `commands/db/migrate.md` is `<library>_db_migrate` |
+| as a key of a `commands` object map | the key |
+| anywhere else | the file stem (PRM-42) |
+
+The `commands/` convention reads its subfolders (`commands/**/*.md`), and so does a directory
+named in a `commands` list. A later prompt of the plugin with an earlier one's name is skipped
+with `prompt <name> is already served by <path>`.
+
+**PLG-26.** *(proposed)* A plugin's `notes` in `/health` lists what PLG-21 to PLG-24 note,
+and a manifest `mcpServers` that is neither a path nor an object. It is present only when not
+empty. A note never fails the plugin.
+
+**PLG-27.** *(proposed)* The MCP servers a plugin declares are the names in its root `.mcp.json`
+(the keys of its `mcpServers` object, else its top-level keys), in its manifest's `mcpServers` (an
+object's keys, or the file a string names, read the same way), and in its entry's `mcpServers`.
+Only the names are kept, sorted and deduplicated. kb reads them for AGT-9 and never connects to,
+starts or forwards a server.
 
 **LIB-30.** *(proposed)* A marketplace entry beside a `plugin.json` with `strict` absent or true
 **appends** its `skills`, `commands` and `agents` to the manifest's.
 
-**LIB-31.** *(proposed)* An entry with `strict: false` that names any of `skills`, `commands` or
-`agents` beside a `plugin.json` is a conflict, and the plugin is skipped with the reason
-`conflicting manifests`.
+**LIB-31.** *(proposed)* Without a `plugin.json`, the entry is the manifest, whatever `strict` says.
+Beside a `plugin.json`, an entry with `strict: false` that names any of `skills`, `commands`,
+`agents`, `hooks`, `outputStyles` or `themes` is a conflict: the plugin fails (PLG-19) with the error
+`conflicting manifests`. An entry with `strict: false` that names none of them is ordinary.
 
 **LIB-32.** *(proposed)* An entry whose `source` is the marketplace root and that lists `skills`
 loads **only** those directories, and the default skill scan is off for it.
 
-**LIB-33.** *(proposed)* A config's own `skills:` and `prompts:` still override the manifest and the
-entry completely.
+**LIB-33.** *(proposed)* A declared plugin's own `skills:` and `prompts:` still override its manifest
+completely.
