@@ -583,3 +583,24 @@ def test_a_root_skills_path_harvests_as_it_did_before(tmp_path):
     assert globs.skills == ()
     assert record.status == "ok"
     assert record.skills == ()
+
+
+@pytest.mark.unit
+def test_a_root_entry_skills_path_builds_without_raising(tmp_path):
+    """The same `"."` guard, for an entry's skills as for a manifest's."""
+    from dataclasses import replace
+
+    from kubed.mcp_kb.catalogue.snapshot import build_plugin, with_manifest
+    from kubed.mcp_kb.plugins.manifest import read_components
+
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "SKILL.md").write_text("---\nname: a\ndescription: d\n---\nb\n")
+    root_entry = replace(
+        plugin(), entry=read_components({"skills": ["./"]}), root_entry=True
+    )
+
+    completed, globs = with_manifest(root_entry, tmp_path)
+    record = build_plugin(completed, tmp_path, globs=globs)
+
+    assert globs.skills == ()
+    assert record.status == "ok"

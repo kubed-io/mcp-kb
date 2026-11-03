@@ -27,7 +27,7 @@ from ..catalogue.harvest import readable
 from ..config import NAME
 from . import Fetch, Globs, Plugin, fetch_for
 from .address import Address, parse_address
-from .manifest import command_patterns, paths
+from .manifest import Components, read_components
 
 if TYPE_CHECKING:
     from ..config import Config, LibraryConfig, SourceConfig
@@ -136,11 +136,6 @@ def _plugin(
     # string and nothing else. `tests/test_config.py` pins it.)
     if not isinstance(name, str) or not re.fullmatch(NAME, name):
         raise _Skip(f"{name!r} is not a plugin name")
-    if raw.get("strict") is False:
-        # The entry would be the whole definition, the plugin's own manifest
-        # ignored. Skipped until something we pull actually publishes one.
-        raise _Skip("strict: false entries are not supported")
-
     where, subdir = _where(
         raw.get("source"), fetch=fetch, address=address, config=config
     )
@@ -154,8 +149,15 @@ def _plugin(
         version=_text(raw.get("version")),
         fetch=where,
         subdir=subdir,
-        globs=_globs(raw),
+        globs=Globs(),
         marketplace=library.name,
+        entry=_components(raw),
+        strict=raw.get("strict") is not False,
+        root_entry=(
+            isinstance(raw.get("source"), str)
+            and where == fetch
+            and subdir == _join(address.subdir, "")
+        ),
     )
 
 
@@ -296,7 +298,7 @@ def _join(subdir: str, relative: str) -> str:
     return "/".join(parts)
 
 
-def _globs(raw: dict) -> Globs:
+def _components(raw: dict) -> Components:
     """The components an entry lists itself, and None for the ones it does not.
 
     Grafana's entries are what this is for: one repository, seven plugins, each
@@ -304,14 +306,9 @@ def _globs(raw: dict) -> Globs:
     of the catalogue without a hand-written glob here.
     """
     try:
-        skills = paths(raw.get("skills"), "skills")
-        commands = command_patterns(raw.get("commands"))
+        return read_components(raw)
     except ValueError as exc:
         raise _Skip(str(exc)) from exc
-    # The commands twice: what to serve as prompts, and the note that the entry
-    # called them commands -- which is what makes them Claude's wherever in the
-    # tree they sit.
-    return Globs(skills=skills, prompts=commands, commands=commands or ())
 
 
 def _label(raw: object) -> str:

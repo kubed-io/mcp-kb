@@ -24,6 +24,7 @@ from .address import Address, parse_address
 
 if TYPE_CHECKING:
     from ..config import BasicAuth, Config, LibraryConfig, PluginConfig
+    from .manifest import Components
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,11 @@ class Plugin:
     globs: Globs
     dialect: str = "auto"
     marketplace: str | None = None
+    # A marketplace entry's own components; None for a declared plugin.
+    entry: Components | None = None
+    strict: bool = True
+    # The entry's source is the marketplace's own subdir in its own fetch.
+    root_entry: bool = False
 
     @property
     def labels(self) -> frozenset[str]:

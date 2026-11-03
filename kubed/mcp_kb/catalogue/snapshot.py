@@ -157,6 +157,21 @@ def build_fetch(
     )
 
 
+def _without_root(skills: tuple[str, ...] | None) -> tuple[str, ...] | None:
+    # Task 3 replaces this: "." will name the plugin root. Until then it is
+    # dropped, since it is no glob and `Path.glob(".")` raises.
+    return None if skills is None else tuple(p for p in skills if p != ".")
+
+
+def _own(plugin: Plugin) -> Globs:
+    """The globs the plugin itself names: a declared plugin's, or its entry's."""
+    if plugin.entry is None:
+        return plugin.globs
+    skills = _without_root(plugin.entry.skills)
+    commands = plugin.entry.commands
+    return Globs(skills=skills, prompts=commands, commands=commands or ())
+
+
 def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
     """The plugin completed by its own manifest, and the globs it serves.
 
@@ -169,10 +184,10 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
     manifest; ``None`` for a kind is ``harvest.DEFAULTS``. A manifest that
     does not parse raises: that is the plugin's failure, not a reason to guess.
     """
+    own = _own(plugin)
     manifest = read_manifest(root)
     if manifest is None:
-        return plugin, plugin.globs
-    own = plugin.globs
+        return plugin, own
     declared = manifest.components
     completed = replace(
         plugin,
@@ -180,11 +195,7 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
         version=plugin.version or manifest.version,
         keywords=tuple(dict.fromkeys((*plugin.keywords, *manifest.keywords))),
     )
-    # Task 3 replaces this: "." will name the plugin root. Until then it is
-    # dropped, as it was before the manifest could say it, since it is no glob.
-    declared_skills = declared.skills
-    if declared_skills is not None:
-        declared_skills = tuple(p for p in declared_skills if p != ".")
+    declared_skills = _without_root(declared.skills)
     globs = Globs(
         skills=own.skills if own.skills is not None else declared_skills,
         prompts=own.prompts if own.prompts is not None else declared.commands,

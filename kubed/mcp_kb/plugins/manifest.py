@@ -116,24 +116,6 @@ def read_components(data: dict) -> Components:
     )
 
 
-def paths(value: object, field: str) -> tuple[str, ...] | None:
-    """A manifest's component paths as harvest patterns, escapes dropped.
-
-    Shared with ``marketplace.py``, whose entries carry the same two fields in
-    the same spelling -- ``["./skills/loki"]`` -- and must read identically.
-    """
-    found = _paths(value, field, [])
-    # Task 3 replaces this: "." will name the plugin root. Until then a
-    # consumer of this wrapper keeps what it always had, which is nothing.
-    return None if found is None else tuple(p for p in found if p != ".")
-
-
-def command_patterns(value: object) -> tuple[str, ...] | None:
-    """``paths`` for commands: a file is itself, a directory is every markdown
-    file under it -- which is what Claude reads a directory of commands as."""
-    return _commands(value, [])[0]
-
-
 def _paths(value: object, field: str, notes: list[str]) -> tuple[str, ...] | None:
     found = _strings(value, field)
     if found is None:
