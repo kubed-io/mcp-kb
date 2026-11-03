@@ -307,6 +307,11 @@ class Catalogue:
         self._revalidate = revalidate
         self._memo: dict[tuple[Scope, bool], list[Entry]] = {}
 
+    @property
+    def agents(self) -> AgentRoster:
+        """The agents this catalogue holds; ``len()`` counts those served."""
+        return self._agents
+
     # -- listing ------------------------------------------------------------
 
     def entries(self, scope: Scope = EVERYTHING, full: bool = False) -> list[Entry]:

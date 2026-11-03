@@ -59,7 +59,9 @@ SKIPPED = {
         "frontmatter `name` breaks the Agent Skills naming rule or differs "
         "from its directory, or that a skill before it already serves at that "
         "address; a prompt whose name a prompt before it already has, or whose "
-        "file does not parse or cannot be read. A clash with another plugin is "
+        "file does not parse or cannot be read; an agent file with no usable "
+        "name or description, or whose name this plugin already serves. A "
+        "clash with another plugin is "
         "not listed here: it fails the later plugin in that library instead, "
         "under the library's `conflicts`."
     ),
@@ -140,7 +142,7 @@ PLUGIN_STATUS = {
     "description": (
         "One plugin, keyed under `plugins` by its id: its config name, or "
         "`<entry>@<library>` for a marketplace entry. `skills`, `prompts`, "
-        "`files` and `built` are the plugin's own harvest, independent of "
+        "`agents`, `files` and `built` are the plugin's own harvest, independent of "
         "which libraries serve it, and are absent when `status` is `failed`."
     ),
     "required": [
@@ -204,6 +206,7 @@ LIBRARY_STATUS = {
         "plugins",
         "skills",
         "prompts",
+        "agents",
         "files",
     ],
     "properties": {
@@ -264,9 +267,9 @@ LIBRARY_STATUS = {
             "type": "object",
             "additionalProperties": {"type": "string"},
             "description": (
-                "Present when not empty: agents served under "
-                "`<name>@<plugin name>` because an earlier plugin of this "
-                "library serves `<name>`, each mapped to why."
+                "Present when a later plugin's agent took "
+                "`<name>@<plugin>`: keyed by the served name, the value says "
+                "who has the short one"
             ),
         },
         "unserved": {
@@ -297,7 +300,7 @@ HEALTH = {
         "inside `fetches` and `plugins`, never raised as a failed request."
     ),
     "required": [
-        "status", "generation", "built", "skills", "prompts",
+        "status", "generation", "built", "skills", "prompts", "agents",
         "libraries", "plugins", "fetches",
     ],
     "properties": {
@@ -308,6 +311,7 @@ HEALTH = {
         "built": _field("string", "When the current snapshot was assembled."),
         "skills": _field("integer", "Skills in the current index."),
         "prompts": _field("integer", "Prompts currently served."),
+        "agents": _field("integer", "Agents currently served, across libraries."),
         "libraries": {
             "type": "object",
             "additionalProperties": {"$ref": "#/components/schemas/LibraryStatus"},

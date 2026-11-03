@@ -148,7 +148,7 @@ def test_each_status_documents_every_field_report_can_produce():
 def test_health_documents_every_top_level_field():
     props = set(build_spec()["components"]["schemas"]["Health"]["properties"])
     assert props == {
-        "status", "generation", "built", "skills", "prompts",
+        "status", "generation", "built", "skills", "prompts", "agents",
         "libraries", "plugins", "fetches",
     }
 
@@ -283,3 +283,33 @@ async def test_a_real_reindex_response_matches_the_documented_fields(knowledge_b
         schemas["Reindex"]["allOf"][1]["properties"]
     )
     assert set(body) == documented
+
+
+async def test_health_counts_the_agents_and_validates(tmp_path):
+    """Over the Part B tree: 4 + 1 + 0 agents served, `renamed` and
+    `unserved` present, and the body is held to the published schema."""
+    from tests.test_agents import agents_tree
+
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
+        health = (await http.get("/health")).json()
+        reindex = (await http.post("/reindex")).json()
+
+    assert health["agents"] == 5
+    assert reindex["agents"] == 5
+    assert health["libraries"]["drawio"]["renamed"]
+    validate("Health", health)
+    validate("Reindex", reindex)
+
+
+def test_an_unserved_agent_validates_against_the_library_schema():
+    row = {"plugin": "extra@drawio", "path": "agents/a.md", "reason": "taken"}
+    library = {
+        "description": "d", "categories": [], "plugins": [], "skills": 0,
+        "prompts": 0, "agents": 0, "files": 0, "unserved": [row],
+        "renamed": {"diagrammer@extra": "drawio has diagrammer"},
+    }
+    validate("LibraryStatus", library)
+    with pytest.raises(jsonschema.ValidationError):
+        validate("LibraryStatus", {**library, "unserved": [{"plugin": "x"}]})
