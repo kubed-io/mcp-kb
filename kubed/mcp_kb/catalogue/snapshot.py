@@ -212,13 +212,14 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
         prompts = commands = _joined(found.commands, listed.commands)
         command_dirs = _joined(found.command_dirs, listed.command_dirs)
         command_map = (*found.command_map, *listed.command_map)
-        notes += _ignored(root, "commands")
+        mapped = (item.source for item in command_map if item.source)
+        notes += _ignored(root, "commands", (*commands, *mapped))
 
     if not claude_format:
         agents: tuple[str, ...] | None = ()
     elif found.agents is not None or listed.agents is not None:
         agents = _joined(found.agents, listed.agents)
-        notes += _ignored(root, "agents")
+        notes += _ignored(root, "agents", agents)
         notes += [
             f"agents entry '{rel}' is not in the plugin"
             for rel in agents
@@ -260,9 +261,16 @@ def _joined(*parts: tuple[str, ...] | None) -> tuple[str, ...]:
     return tuple(dict.fromkeys(item for part in parts if part for item in part))
 
 
-def _ignored(root: Path, key: str) -> list[str]:
-    """PLG-23's note, when ``key`` replaced a default folder that is there."""
+def _ignored(root: Path, key: str, paths: Iterable[str]) -> list[str]:
+    """PLG-23's note, when ``key`` replaced a default folder that is there.
+
+    As in Claude Code, a key that names the folder or a path inside it
+    (``"./agents/reviewer.md"``, ``"./commands/"``) reads it, and earns none;
+    so does ``"./"`` as a commands directory, whose pattern starts ``**``.
+    """
     if not (root / key).is_dir():
+        return []
+    if any(PurePosixPath(path).parts[:1] in ((key,), ("**",)) for path in paths):
         return []
     return [f'Default {key}/ folder is ignored because the manifest sets "{key}"']
 

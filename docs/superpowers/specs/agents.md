@@ -35,8 +35,10 @@ or a marketplace entry. A plugin declared bare in the config has no agents.
 subfolders included, unless its `plugin.json` or its marketplace entry lists `agents`. Then the
 list decides, by the rules in [plugins-and-libraries.md](plugins-and-libraries.md). An entry
 whose path does not end in `.md`, a directory included, is dropped with the note
-`agents entry '<path>' is not a .md file`. A `.md` path that names no file in the plugin serves
-nothing and is noted `agents entry '<path>' is not in the plugin` (PLG-26).
+`agents entry '<path>' is not a .md file`. A listed path is a path, not a glob, and names the
+one file it spells, in a dot folder too; a `.md` path that names no file in the plugin, or one
+that resolves outside it, serves nothing and is noted `agents entry '<path>' is not in the
+plugin` (PLG-26).
 
 **AGT-6.** An agent file is YAML frontmatter and a Markdown body. Its frontmatter MUST parse into
 a non-empty mapping with string keys, convert to JSON, and carry `name` and `description` as

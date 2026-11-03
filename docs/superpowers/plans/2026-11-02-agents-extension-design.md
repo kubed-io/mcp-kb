@@ -3,7 +3,7 @@
 > **History.** Both parts were planned in [2026-11-03-agents-extension](2026-11-03-agents-extension.md)
 > (issue #33) and shipped in PR #35: parity first, then the extension built on it, in one pull
 > request. What it asked for now lives in the
-> living spec: [agents](../specs/agents.md) (AGT-1–16), [plugins-and-libraries](../specs/plugins-and-libraries.md) (PLG-20–24, LIB-30–33).
+> living spec: [agents](../specs/agents.md) (AGT-1–16), [plugins-and-libraries](../specs/plugins-and-libraries.md) (PLG-20–27, LIB-30–33).
 > **Overtaken:**
 > - *Background* (parity gaps, marketplace row): "the entry is never merged with the manifest" — the manifest already completes an entry: description, version, keywords, and whichever of `skills`/`commands` the entry leaves out (PLG-17, LIB-14).
 > - *Part 1, the details*: `${CLAUDE_PLUGIN_ROOT}` does not render as plain `skill://<library>`.

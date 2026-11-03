@@ -203,6 +203,18 @@ def readable(base: Path, rel: str | Path) -> Path | None:
     return target if target is not None and target.is_file() else None
 
 
+def listed(root: Path, rels: Iterable[str]) -> list[Path]:
+    """Each of ``rels`` that is a regular file inside ``root``, sorted.
+
+    A path, not a glob, as Claude Code reads a manifest's ``agents``:
+    ``agents/[draft].md`` is that file, not a character class. What is
+    returned is the spelling asked for, as ``_matches`` keeps it, so a
+    ConfigMap key is not swapped for the ``..<timestamp>`` it resolves to.
+    """
+    base = root.resolve()
+    return sorted({base / rel for rel in rels if readable(base, rel) is not None})
+
+
 def matching(root: Path, globs: Iterable[str]) -> set[Path]:
     """Every regular file inside ``root`` that one of ``globs`` selects.
 
@@ -234,7 +246,7 @@ def agent_files(root: Path, globs: Globs) -> list[tuple[Path, tuple[str, ...]]]:
         return []
     base = root.resolve()
     if globs.agents is not None:
-        return [(f, ()) for f in sorted(matching(root, globs.agents))]
+        return [(f, ()) for f in listed(root, globs.agents)]
     return [
         (f, f.relative_to(base / AGENTS_DIR).parts[:-1])
         for f in sorted(matching(root, (f"{AGENTS_DIR}/**/*.md",)))
@@ -251,7 +263,7 @@ def agent_paths(root: Path, globs: Globs) -> tuple[Path, ...]:
     if folder is not None and folder.is_dir():
         found.append(base / AGENTS_DIR)
     if globs.agents is not None:
-        found += sorted(matching(root, globs.agents))
+        found += listed(root, globs.agents)
     return tuple(found)
 
 

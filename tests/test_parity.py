@@ -599,6 +599,68 @@ def test_a_manifest_agents_list_notes_the_folder(tmp_path):
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [AGENTS_NOTE]
 
 
+def test_a_listed_agent_is_a_path_not_a_glob(tmp_path):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _write(root, "agents/[draft].md", "---\nname: draft\ndescription: D.\n---\nGo.\n")
+    _write(root, "agents/d.md", "---\nname: d\ndescription: D.\n---\nGo.\n")
+    _write(root, "agents/x.md", "---\nname: x\ndescription: X.\n---\nGo.\n")
+    _manifest(root, name="kit", agents=["./agents/[draft].md", "./agents/*.md"])
+
+    knowledge_base = _declared(tmp_path, root)
+
+    cards = knowledge_base.catalogue.agent_cards()
+    assert [card["name"] for card in cards] == ["kit_draft"]
+    assert knowledge_base.status["plugins"]["kit"]["notes"] == [
+        "agents entry 'agents/*.md' is not in the plugin"
+    ]
+
+
+def test_a_listed_agent_in_a_dot_folder_is_served_and_one_outside_is_not(tmp_path):
+    outside = tmp_path / "elsewhere.md"
+    outside.write_text("---\nname: out\ndescription: O.\n---\nGo.\n")
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _write(root, ".private/wip.md", "---\nname: wip\ndescription: W.\n---\nGo.\n")
+    (root / "agents").mkdir()
+    (root / "agents/out.md").symlink_to(outside)
+    _manifest(root, name="kit", agents=["./.private/wip.md", "./agents/out.md"])
+
+    knowledge_base = _declared(tmp_path, root)
+
+    cards = knowledge_base.catalogue.agent_cards()
+    assert [card["name"] for card in cards] == ["kit_wip"]
+    assert knowledge_base.status["plugins"]["kit"]["notes"] == [
+        "agents entry 'agents/out.md' is not in the plugin"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("agents", ["./agents/helper.md"]),
+        ("agents", ["./more/other.md", "./agents/helper.md"]),
+        ("commands", ["./commands/deploy.md"]),
+        ("commands", "./commands/"),
+        ("commands", "./"),
+        ("commands", {"ship": {"source": "./commands/deploy.md"}}),
+    ],
+)
+def test_a_key_naming_its_default_folder_earns_no_note(tmp_path, key, value):
+    # Claude Code: a path inside the folder "names a file in the default
+    # folder and produces no warning", and "./commands/" keeps the folder.
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _command(root, "commands/deploy.md")
+    _write(root, "agents/helper.md", "---\nname: helper\n---\nHelp.\n")
+    _write(root, "more/other.md", "---\nname: other\n---\nOther.\n")
+    _manifest(root, name="kit", **{key: value})
+
+    knowledge_base = _declared(tmp_path, root)
+
+    assert "notes" not in knowledge_base.status["plugins"]["kit"]
+
+
 # -- fetched content that must not take the server down -------------------------
 
 

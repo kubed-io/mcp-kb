@@ -313,9 +313,11 @@ path in `/health` is the manifest's. Every map command is read in the `claude` d
 [agents.md](agents.md)). An item that does not name a `.md` file is dropped with a note (PLG-26).
 
 **PLG-23.** When `commands` or `agents` is set and the plugin root has the folder of that name, the
-folder is read only for what the key names, and the plugin notes
+folder is read only for what the key names. When no path the key declares names the folder, a
+path inside it or the plugin root, the plugin notes
 `Default <folder>/ folder is ignored because the manifest sets "<key>"`, whether the manifest or
-the entry set it.
+the entry set it. As in Claude Code, `"agents": ["./agents/reviewer.md"]`, `"commands": "./commands/"`,
+a `commands` map item whose `source` is in `commands/`, and `"commands": "./"` earn no note.
 
 **PLG-24.** A component path that doesn't start with `./` is still served, and the plugin notes it.
 This is a deliberate deviation: `claude plugin validate` refuses such a path, and kb serves rather
