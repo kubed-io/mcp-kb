@@ -133,6 +133,9 @@ class _Root:
     # must not reach, since those paths are the skills' own addresses.
     skills: tuple[Path, ...] = ()
     library_categories: frozenset[str] = frozenset()
+    # The plugin's agent files and folder, resolved: served by the agents
+    # extension alone, so a fallback must not hand them out (AGT-3).
+    agents: tuple[Path, ...] = ()
 
     def admits(self, scope: Scope) -> bool:
         return scope.admits_labels(
@@ -220,6 +223,7 @@ class LibraryFiles:
         *,
         plugin: Plugin,
         library_categories: frozenset[str] = frozenset(),
+        agent_paths: Sequence[Path] = (),
     ) -> None:
         """Register one plugin's contribution to ``library``.
 
@@ -227,6 +231,9 @@ class LibraryFiles:
         harvest.py already excludes a skill's own files from ``files`` before
         this is called, but a registered path that still resolves inside one of
         ``skill_dirs`` is refused rather than silently served.
+
+        ``agent_paths`` are the plugin's agent folder and files: the root-wide
+        fallbacks refuse them, while ``files`` stays the operator's word.
         """
         base = root.resolve()
         dirs = [d.resolve() for d in skill_dirs]
@@ -239,6 +246,7 @@ class LibraryFiles:
             plugin=plugin,
             skills=tuple(dirs),
             library_categories=library_categories,
+            agents=tuple(a.resolve() for a in agent_paths),
         )
         self._roots.setdefault(library, []).append(entry)
 
@@ -317,12 +325,13 @@ class LibraryFiles:
         if harvest.hidden(Path(rel)):
             return None
         excluded = self._skill_dirs(library)
+        agents = self._agent_paths(library)
         for entry in self._roots.get(library, ()):
             if not entry.admits(scope):
                 continue
             target = entry.holds(rel, excluded)
             if target is not None:
-                return self._serve(target)
+                return None if _inside(target, agents) else self._serve(target)
         return None
 
     def read_under(self, library: str, root: Path, rel: str) -> str | None:
@@ -337,12 +346,13 @@ class LibraryFiles:
         """
         base = root.resolve()
         excluded = self._skill_dirs(library)
+        agents = self._agent_paths(library)
         for entry in self._roots.get(library, ()):
             if entry.base != base:
                 continue
             target = entry.holds(rel, excluded)
             if target is not None:
-                return self._serve(target)
+                return None if _inside(target, agents) else self._serve(target)
         return None
 
     def _skill_dirs(self, library: str) -> tuple[Path, ...]:
@@ -360,6 +370,15 @@ class LibraryFiles:
         plugin at a time, so only a reader sees them all.
         """
         return tuple(d for entry in self._roots.get(library, ()) for d in entry.skills)
+
+    def _agent_paths(self, library: str) -> tuple[Path, ...]:
+        """Every agent folder and file of every plugin registered for ``library``.
+
+        Gathered library-wide like ``_skill_dirs``, and for the same reason: an
+        agent file is served at ``agents/*`` alone (AGT-3), whichever root a
+        fallback finds it under. Only the fallbacks consult this.
+        """
+        return tuple(a for entry in self._roots.get(library, ()) for a in entry.agents)
 
     def _serve(self, target: Path) -> str:
         # A live fetch's file may have moved since it was copied, and a read is

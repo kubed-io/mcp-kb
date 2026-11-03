@@ -762,6 +762,7 @@ def _serve_library(
             [Path(d) for d in records[pid].skill_dirs],
             plugin=plugin,
             library_categories=lib_categories,
+            agent_paths=[root / a for a in records[pid].agent_paths],
         )
         prompts += loaded
         counts = {"skills": len(own), "prompts": len(loaded), "files": len(files)}

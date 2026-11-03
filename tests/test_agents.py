@@ -732,3 +732,69 @@ def test_a_live_agent_is_reread(tmp_path, caplog):
     catalogue.agent_cards()
     catalogue.agent_definition("kit_still")
     assert asked == []
+
+
+def _read(tmp_path: Path, uri: str) -> str | None:
+    tree = agents_tree(tmp_path)
+    return tree.knowledge_base(tmp_path / "cache").catalogue.read(uri)
+
+
+def test_the_library_fallback_refuses_an_agent_file(tmp_path):
+    assert _read(tmp_path, "skill://drawio/agents/diagrammer.md") is None
+
+
+def test_the_skill_fallback_refuses_an_agent_file(tmp_path):
+    assert _read(tmp_path, "skill://drawio/drawio/agents/diagrammer.md") is None
+
+
+def test_a_dotted_path_does_not_slip_past_the_refusal(tmp_path):
+    assert _read(tmp_path, "skill://drawio/agents/../agents/diagrammer.md") is None
+    assert _read(tmp_path, "skill://drawio/./agents/diagrammer.md") is None
+
+
+def test_a_listed_agent_file_is_refused_wherever_it_sits(tmp_path):
+    root = tmp_path / "kit"
+    _write(root, "roles/reviewer.md", _agent("reviewer"))
+    _write(root, "roles/notes.md", "notes\n")
+    _write(
+        root,
+        ".claude-plugin/plugin.json",
+        json.dumps({"name": "kit", "agents": ["./roles/reviewer.md"]}),
+    )
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "kit", "source": f"file://{root}"}],
+            "libraries": [{"name": "kit", "plugins": ["kit"]}],
+        }
+    )
+    catalogue = KnowledgeBase(config, tmp_path / "cache").catalogue
+
+    assert catalogue.read("skill://kit/roles/reviewer.md") is None
+    assert catalogue.read("skill://kit/roles/notes.md") == "notes\n"
+
+
+def test_an_operator_files_glob_still_serves_agents(tmp_path):
+    root = tmp_path / "kit"
+    _write(root, "agents/a.md", _agent("a"))
+    _write(root, ".claude-plugin/plugin.json", json.dumps({"name": "kit"}))
+    config = Config.model_validate(
+        {
+            "plugins": [
+                {
+                    "name": "kit",
+                    "source": f"file://{root}",
+                    "files": ["agents/**/*.md"],
+                }
+            ],
+            "libraries": [{"name": "kit", "plugins": ["kit"]}],
+        }
+    )
+    catalogue = KnowledgeBase(config, tmp_path / "cache").catalogue
+
+    listing = catalogue.read("skill://kit/_files.md")
+    assert listing is not None and "agents/a.md" in listing
+    assert catalogue.read("skill://kit/agents/a.md") == _agent("a")
+
+
+def test_a_bare_plugins_agents_folder_is_not_guarded(tmp_path):
+    assert _read(tmp_path, "skill://drive/agents/x.md") == _agent("x")
