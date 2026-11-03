@@ -136,12 +136,12 @@ def test_each_status_documents_every_field_report_can_produce():
     }
     assert set(schemas["PluginStatus"]["properties"]) == {
         "status", "fetch", "root", "category", "tags", "keywords", "version",
-        "libraries", "skills", "prompts", "files", "built", "error", "skipped",
-        "notes",
+        "libraries", "skills", "prompts", "files", "agents", "built", "error",
+        "skipped", "notes",
     }
     assert set(schemas["LibraryStatus"]["properties"]) == {
-        "description", "categories", "plugins", "skills", "prompts", "files", "error",
-        "skipped", "conflicts",
+        "description", "categories", "plugins", "skills", "prompts", "files",
+        "agents", "error", "skipped", "conflicts", "renamed", "unserved",
     }
 
 

@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import mimetypes
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -57,8 +58,11 @@ import yaml
 
 from ..mcp.scope import EVERYTHING, Scope
 from . import placeholders
+from .agents import Agent, AgentRoster, ParsedAgent, parse_agent, routing_hint
 from .harvest import hidden, readable
 from .skills import LibraryFiles, Skill, SkillIndex
+
+log = logging.getLogger(__name__)
 
 SCHEME = "skill://"
 MAIN_FILE = "SKILL.md"
@@ -71,6 +75,8 @@ LIBRARY_FILES = "_files.md"
 RESERVED_NAMES = frozenset({INDEX, LIBRARY_FILES})
 # Distinct scopes a catalogue remembers listings for before starting over.
 MEMO_LIMIT = 64
+# Where an agent definition says what kb knows of it (AGT-9).
+AGENT_META = "io.kubed.mcp-kb/agent"
 
 
 def _count(n: int, noun: str = "skill") -> str:
@@ -234,6 +240,14 @@ def _children(skills: list[Skill], folder: str) -> dict[str, int]:
     return dict(sorted(found.items()))
 
 
+def _agent_path(agent: Agent) -> str:
+    """An agent's file as its plugin names it: relative to the plugin root."""
+    for base in (agent.root, agent.root.resolve()):
+        if agent.path.is_relative_to(base):
+            return agent.path.relative_to(base).as_posix()
+    return agent.path.name
+
+
 def mime_for(path: str) -> str:
     """The media type of a path, defaulting to markdown rather than octets.
 
@@ -284,8 +298,10 @@ class Catalogue:
         resources: LibraryFiles,
         revalidate: Callable[[Path], None] | None = None,
         libraries: Sequence[LibraryText] = (),
+        agents: AgentRoster | None = None,
     ):
         self._libraries = list(libraries)
+        self._agents = agents if agents is not None else AgentRoster()
         self._index = index
         self._resources = resources
         self._revalidate = revalidate
@@ -503,6 +519,87 @@ class Catalogue:
             rel = skill.path.relative_to(base).as_posix()
             dirs["" if rel == "." else rel] = f"{SCHEME}{skill.address}"
         return dirs
+
+    # -- agents -------------------------------------------------------------
+
+    def agent_cards(self, scope: Scope = EVERYTHING) -> list[dict]:
+        """A card for every agent ``scope`` admits, in name order (AGT-7).
+
+        Answered from the snapshot: a live agent is re-read on a definition
+        only (AGT-16), so listing never costs a round trip.
+        """
+        return [
+            {
+                "name": agent.name,
+                "description": agent.parsed.description,
+                "capabilities": list(agent.parsed.capabilities),
+            }
+            for agent in self._agents.visible(scope)
+        ]
+
+    def agent_definition(self, name: str, scope: Scope = EVERYTHING) -> dict | None:
+        """AGT-9's fields for one agent, or None when absent or out of scope.
+
+        The extension's envelope and the gateway prefix are the protocol
+        layer's to add. ``instructions`` renders ``${CLAUDE_PLUGIN_ROOT}`` as a
+        prompt body does, through the plugin's own skills in this library, and
+        leaves every other placeholder -- ``${CLAUDE_SKILL_DIR}`` included, an
+        agent being no skill -- as written.
+        """
+        agent = self._agents.get(name, scope)
+        if agent is None:
+            return None
+        parsed = self._agent_parsed(agent)
+        definition: dict = {"agent": agent.name}
+        if parsed.body.strip():
+            definition["instructions"] = placeholders.substitute(
+                parsed.body,
+                plugin_root=f"{SCHEME}{agent.library}",
+                skills=self.plugin_skill_dirs(agent.library, agent.plugin, scope),
+            )
+        hint = routing_hint(parsed.model)
+        if hint is not None:
+            definition["modelRoutingHint"] = hint
+        definition["tools"] = []
+        definition["_meta"] = {
+            AGENT_META: {
+                "plugin": agent.plugin,
+                "library": agent.library,
+                "path": _agent_path(agent),
+                "frontmatter": parsed.frontmatter,
+                "servers": list(agent.servers),
+            }
+        }
+        return definition
+
+    def _agent_parsed(self, agent: Agent) -> ParsedAgent:
+        """The agent as its file reads now if it is live, else the snapshot's.
+
+        A live file is revalidated, then parsed again (AGT-16). A read that
+        fails, or an edit that no longer parses, serves the copy parsed when
+        the snapshot was built: a file half saved is no reason to fail a get.
+        The warning names the agent and its plugin-relative path, never the
+        cache path it was read from.
+        """
+        if not agent.live:
+            return agent.parsed
+        try:
+            if self._revalidate is not None:
+                self._revalidate(agent.path)
+            parsed = parse_agent(agent.path)
+        except OSError:
+            parsed = "agent file is not readable"
+        if isinstance(parsed, str):
+            log.warning(
+                "re-reading agent %s (%s of plugin %s): %s; serving the last"
+                " good copy",
+                agent.name,
+                _agent_path(agent),
+                agent.plugin,
+                parsed,
+            )
+            return agent.parsed
+        return parsed
 
     def _library_files(self, library: str, scope: Scope) -> list[str]:
         """The library-level files this caller may see, empty when none are.

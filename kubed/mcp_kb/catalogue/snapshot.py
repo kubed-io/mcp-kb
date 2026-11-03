@@ -49,7 +49,7 @@ from ..plugins.select import select
 from ..sources import AccessRefused, SourceError, fingerprint, materialise
 from ..sources.live import Revalidator, is_live
 from . import harvest
-from .agents import parse_agent
+from .agents import Agent, AgentRoster, ParsedAgent, parse_agent
 from .index import AgentRow, FetchRecord, PluginRecord, PromptRow, SkillRow, now
 from .prompts import FilePrompt, PromptSource, load_prompts, prompt_name
 from .prompts.detect import COPILOT_SUFFIX
@@ -590,6 +590,10 @@ def build_snapshot(
     serves fails in that library only (see ``_Claims``): the earlier one keeps
     serving, ``/health`` names the conflict under the library, and the same
     plugin serves normally in any other library.
+
+    Agents are parsed once per plugin from the paths their rows name, and claim
+    their names per library in the same walk (see ``_AgentNames``). A clash
+    between agents renames the later one rather than failing its plugin.
     """
     del config  # the libraries are already resolved; kept for the call shape
     by_id = {plugin.id: plugin for plugin in plugins}
@@ -610,13 +614,22 @@ def build_snapshot(
     served: dict[str, dict[str, int]] = {}
     vanished: dict[str, list[dict[str, str]]] = {}
     status_libraries: dict[str, dict] = {}
+    # Library-independent, so read once: every plugin some library lists.
+    listed = {pid for lib in libraries for pid in lib.plugins}
+    read_agents = {
+        pid: _read_agents(Path(records[pid].root or ""), admitted[pid].agents)
+        for pid in admitted
+        if pid in listed
+    }
+    agents: list[Agent] = []
 
     for lib in libraries:
-        entry, own, loaded = _serve_library(
-            lib, by_id, records, admitted, resources, served, vanished
+        entry, own, loaded, named = _serve_library(
+            lib, by_id, records, admitted, resources, served, vanished, read_agents
         )
         skills += own
         prompts += loaded
+        agents += named
         status_libraries[lib.name] = entry
 
     status_plugins = {
@@ -627,6 +640,7 @@ def build_snapshot(
             admitted.get(plugin.id),
             served.get(plugin.id),
             vanished.get(plugin.id, []),
+            read_agents.get(plugin.id),
         )
         for plugin in plugins
     }
@@ -654,6 +668,7 @@ def build_snapshot(
                 )
                 for lib in libraries
             ],
+            AgentRoster(agents),
         ),
         prompts=tuple(prompts),
         status={
@@ -673,14 +688,17 @@ def _serve_library(
     resources: LibraryFiles,
     served: dict[str, dict[str, int]],
     vanished: dict[str, list[dict[str, str]]],
-) -> tuple[dict, list[Skill], list[FilePrompt]]:
-    """One library's plugins in order: its ``/health`` entry, skills and prompts.
+    read_agents: dict[str, _ReadAgents],
+) -> tuple[dict, list[Skill], list[FilePrompt], list[Agent]]:
+    """One library's plugins in order: its ``/health`` entry, skills, prompts
+    and agents.
 
     Registers the library's files on ``resources`` as it goes. ``served`` and
     ``vanished`` are written for a plugin the first time any library serves
     it, since both are the plugin's own and the same in every library.
     """
     claims = _Claims()
+    names = _AgentNames(lib.name)
     lib_categories = frozenset(lib.categories)
     entry: dict = {
         "description": lib.description,
@@ -689,10 +707,12 @@ def _serve_library(
         "skills": 0,
         "prompts": 0,
         "files": 0,
+        "agents": 0,
     }
     conflicts: dict[str, str] = {}
     skills: list[Skill] = []
     prompts: list[FilePrompt] = []
+    agents: list[Agent] = []
     for pid in lib.plugins:
         plugin = by_id[pid]
         if pid not in admitted:
@@ -748,13 +768,25 @@ def _serve_library(
         served.setdefault(pid, counts)
         for key, count in counts.items():
             entry[key] += count
+        named = names.claim(
+            plugin,
+            Path(records[pid].root or ""),
+            read_agents[pid],
+            library_categories=lib_categories,
+        )
+        agents += named
+        entry["agents"] += len(named)
     if lib.error:
         entry["error"] = lib.error
     if lib.skipped:
         entry["skipped"] = list(lib.skipped)
     if conflicts:
         entry["conflicts"] = conflicts
-    return entry, skills, prompts
+    if names.renamed:
+        entry["renamed"] = names.renamed
+    if names.unserved:
+        entry["unserved"] = names.unserved
+    return entry, skills, prompts, agents
 
 
 def _plugin_status(
@@ -764,6 +796,7 @@ def _plugin_status(
     admitted: _Admitted | None,
     served: dict[str, int] | None,
     vanished: list[dict[str, str]],
+    read_agents: _ReadAgents | None = None,
 ) -> dict:
     """One plugin's entry in ``/health``: what it is, and what it yielded."""
     entry: dict = {
@@ -794,8 +827,13 @@ def _plugin_status(
         "files": len(admitted.files),
     }
     entry.update(counts)
+    # Likewise: the agents that parsed, once read; else the rows recorded.
+    entry["agents"] = (
+        len(admitted.agents) if read_agents is None else len(read_agents.parsed)
+    )
     entry["built"] = record.built
-    skipped = [*record.skipped, *admitted.skipped, *vanished]
+    gone = [] if read_agents is None else read_agents.gone
+    skipped = [*record.skipped, *admitted.skipped, *vanished, *gone]
     if skipped:
         entry["skipped"] = skipped
     return entry
@@ -835,7 +873,8 @@ def log_changes(before: dict[str, dict], after: dict[str, dict]) -> None:
     once, with its reason, when it happens -- at boot, where ``before`` is
     empty, and on every rebuild after -- and says nothing while it stays as it
     was. A library says what it serves whenever that count or its error
-    changes; a plugin says once what it skips and once why it failed.
+    changes, and once each agent it renames or leaves unserved; a plugin says
+    once what it skips and once why it failed.
     """
     for key, now_ in after.get("fetches", {}).items():
         was = before.get("fetches", {}).get(key, {})
@@ -869,23 +908,40 @@ def log_changes(before: dict[str, dict], after: dict[str, dict]) -> None:
 
     for name, now_ in after.get("libraries", {}).items():
         was = before.get("libraries", {}).get(name, {})
-        watched = ("skills", "prompts", "files", "error", "conflicts")
+        watched = (
+            "skills", "prompts", "files", "agents", "error", "conflicts",
+            "renamed", "unserved",
+        )
         if all(now_.get(k) == was.get(k) for k in watched):
             continue
-        counts = [
-            _count(now_.get(key, 0), noun)
-            for key, noun in (
-                ("skills", "skill"),
-                ("prompts", "prompt"),
-                ("files", "file"),
-            )
-        ]
-        log.info("library %s is serving %s, %s and %s", name, *counts)
+        kinds = [("skills", "skill"), ("prompts", "prompt"), ("files", "file")]
+        if now_.get("agents"):
+            kinds.append(("agents", "agent"))
+        counts = [_count(now_.get(key, 0), noun) for key, noun in kinds]
+        log.info(
+            "library %s is serving %s and %s",
+            name,
+            ", ".join(counts[:-1]),
+            counts[-1],
+        )
         if now_.get("error") and now_.get("error") != was.get("error"):
             log.warning("library %s: %s", name, now_["error"])
         for pid, message in now_.get("conflicts", {}).items():
             if message != was.get("conflicts", {}).get(pid):
                 log.error("library %s: plugin %s: %s", name, pid, message)
+        for agent, message in now_.get("renamed", {}).items():
+            if message != was.get("renamed", {}).get(agent):
+                log.info("library %s serves agent %s: %s", name, agent, message)
+        unserved = was.get("unserved", ())
+        for row in now_.get("unserved", ()):
+            if row not in unserved:
+                log.warning(
+                    "library %s: plugin %s: agent %s is not served: %s",
+                    name,
+                    row["plugin"],
+                    row["path"],
+                    row["reason"],
+                )
 
 
 @dataclass(frozen=True)
@@ -896,6 +952,7 @@ class _Admitted:
     files: list[str]
     prompts: list[PromptRow]
     skipped: list[dict[str, str]]
+    agents: list[AgentRow] = field(default_factory=list)
 
 
 def _admit(record: PluginRecord) -> _Admitted:
@@ -924,6 +981,10 @@ def _admit(record: PluginRecord) -> _Admitted:
     ``prompts/debug.md`` and ``prompts/sub/debug.md`` both would, or a file and
     an object-map command of one name. ``commands/a/x.md`` and
     ``commands/b/x.md`` are ``a_x`` and ``b_x``, and both serve.
+
+    An agent is left out when an agent before it, in path order, has its name
+    (AGT-6). Two plugins' agents of one name are a library's question, and
+    neither is left out for it (see ``_AgentNames``).
     """
     skipped: list[dict[str, str]] = []
 
@@ -973,7 +1034,21 @@ def _admit(record: PluginRecord) -> _Admitted:
             skip(where, f"prompt {row.name} is already served by {first}")
             continue
         names[row.name] = row
-    return _Admitted(list(served.values()), files, list(names.values()), skipped)
+
+    agents: dict[str, AgentRow] = {}
+    for row in sorted(record.agents, key=lambda r: r.path):
+        if row.name in agents:
+            first = agents[row.name].path
+            skip(row.path, f"agent {row.name} is already served by {first}")
+            continue
+        agents[row.name] = row
+    return _Admitted(
+        list(served.values()),
+        files,
+        list(names.values()),
+        skipped,
+        list(agents.values()),
+    )
 
 
 def unrooted(text: str, root: Path) -> str:
@@ -1014,6 +1089,106 @@ def _overlap(a: str, b: str) -> bool:
     serve nothing.
     """
     return _within(a, b) or _within(b, a)
+
+
+@dataclass(frozen=True)
+class _ReadAgents:
+    """One plugin's admitted agent rows, each beside what its file parses as.
+
+    ``None`` for a row whose file no longer parses, or is gone: a cold start
+    serves the rows ``index.json`` recorded, and the tree may have moved under
+    them. Such a row still claims its name (``_AgentNames``), so what is
+    renamed depends on the rows alone; ``gone`` is what ``/health`` reports
+    under the plugin for it, as for a vanished prompt.
+    """
+
+    rows: list[tuple[AgentRow, ParsedAgent | None]]
+    gone: list[dict[str, str]]
+
+    @property
+    def parsed(self) -> list[ParsedAgent]:
+        return [parsed for _, parsed in self.rows if parsed is not None]
+
+
+def _read_agents(root: Path, rows: Sequence[AgentRow]) -> _ReadAgents:
+    """Each admitted row parsed again from its file, at snapshot time."""
+    read: list[tuple[AgentRow, ParsedAgent | None]] = []
+    gone: list[dict[str, str]] = []
+    for row in rows:
+        try:
+            parsed = parse_agent(root / row.path)
+        except OSError:
+            # The errno text can carry a path, so the reason is fixed.
+            parsed = "agent file is not readable"
+        if isinstance(parsed, str):
+            gone.append({"path": row.path, "reason": unrooted(parsed, root)})
+            read.append((row, None))
+            continue
+        read.append((row, parsed))
+    return _ReadAgents(read, gone)
+
+
+@dataclass
+class _AgentNames:
+    """The agent names one library has handed out, and to which plugin (AGT-8).
+
+    Plugins claim in library order, and each plugin's agents in path order.
+    The first claimant of ``<library>_<name>`` keeps it; a later plugin's is
+    served as ``<library>_<name>@<plugin name>`` and listed in ``renamed``;
+    and when that is taken too, only that agent is left out, in ``unserved``.
+    So a plugin appended to a library renames nothing that was there before.
+    """
+
+    library: str
+    taken: dict[str, str] = field(default_factory=dict)
+    renamed: dict[str, str] = field(default_factory=dict)
+    unserved: list[dict[str, str]] = field(default_factory=list)
+
+    def claim(
+        self,
+        plugin: Plugin,
+        root: Path,
+        read: _ReadAgents,
+        *,
+        library_categories: frozenset[str],
+    ) -> list[Agent]:
+        """The agents of ``plugin`` this library serves, under their names."""
+        agents: list[Agent] = []
+        for row, parsed in read.rows:
+            base = f"{self.library}_{row.name}"
+            name = base
+            if base in self.taken:
+                name = f"{base}@{plugin.name}"
+                if name in self.taken:
+                    reason = f"{name} is already served by plugin '{self.taken[name]}'"
+                    self.unserved.append(
+                        {"plugin": plugin.id, "path": row.path, "reason": reason}
+                    )
+                    continue
+            self.taken[name] = plugin.id
+            if parsed is None:
+                # Its claim stands for this snapshot; there is nothing to serve.
+                continue
+            if name != base:
+                self.renamed[name] = (
+                    f"{base} is already served by plugin '{self.taken[base]}'"
+                )
+            agents.append(
+                Agent(
+                    name=name,
+                    library=self.library,
+                    plugin=plugin.id,
+                    root=root,
+                    path=root / row.path,
+                    parsed=parsed,
+                    servers=plugin.servers,
+                    category=plugin.category,
+                    tags=plugin.labels,
+                    library_categories=library_categories,
+                    live=is_live(plugin.fetch),
+                )
+            )
+        return agents
 
 
 @dataclass

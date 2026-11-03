@@ -168,6 +168,7 @@ PLUGIN_STATUS = {
         "skills": _field("integer", "Skills this plugin yields."),
         "prompts": _field("integer", "Prompts this plugin yields."),
         "files": _field("integer", "Library-level files this plugin yields."),
+        "agents": _field("integer", "Agents this plugin yields."),
         "built": _field("string", "When this plugin was last harvested."),
         "error": _field(
             "string",
@@ -226,6 +227,7 @@ LIBRARY_STATUS = {
         "skills": _field("integer", "Skills served in this library."),
         "prompts": _field("integer", "Prompts served in this library."),
         "files": _field("integer", "Library-level files served in this library."),
+        "agents": _field("integer", "Agents served in this library."),
         "error": _field(
             "string",
             "Present when part of the library could not be resolved -- its "
@@ -257,6 +259,33 @@ LIBRARY_STATUS = {
                 "by plugin id; that plugin is not served in this library, and "
                 "serves normally in any other."
             ),
+        },
+        "renamed": {
+            "type": "object",
+            "additionalProperties": {"type": "string"},
+            "description": (
+                "Present when not empty: agents served under "
+                "`<name>@<plugin name>` because an earlier plugin of this "
+                "library serves `<name>`, each mapped to why."
+            ),
+        },
+        "unserved": {
+            "type": "array",
+            "description": (
+                "Present when not empty: agents this library does not serve, "
+                "because their renamed name is taken too."
+            ),
+            "items": {
+                "type": "object",
+                "required": ["plugin", "path", "reason"],
+                "properties": {
+                    "plugin": _field("string", "The plugin id."),
+                    "path": _field(
+                        "string", "The agent file, relative to the plugin root."
+                    ),
+                    "reason": _field("string", "Why it is not served."),
+                },
+            },
         },
     },
 }

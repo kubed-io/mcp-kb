@@ -6,17 +6,24 @@ it, then the system prompt as the body. This module is the pure reading of one
 can serve it. A file that is wrong in its *content* gives back the reason it is
 skipped (AGT-6) rather than raising; only an unreadable file raises, which fails
 the plugin as it does for a prompt.
+
+``Agent`` and ``AgentRoster`` are what a snapshot serves of them: one agent
+under the name its library gave it (AGT-8), and every one of them, admitted by
+a ``Scope`` exactly as a skill or a prompt of the same plugin is (AGT-15).
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import frontmatter
 import yaml
+
+from ..mcp.scope import EVERYTHING, Scope
 
 # Model families (AGT-9): the first one named in a value, by position, wins.
 ROLES: dict[str, str] = {"opus": "large", "sonnet": "medium", "haiku": "small"}
@@ -96,3 +103,64 @@ def routing_hint(model: str | None) -> dict | None:
         if word in ROLES:
             return {"role": ROLES[word], "vision": False}
     return None
+
+
+@dataclass(frozen=True)
+class Agent:
+    """One served agent: the name its library gave it, and what it was parsed as.
+
+    ``plugin``, ``category``, ``tags`` and ``library_categories`` are its
+    plugin's, in its library: what a scope admits it on. ``path`` is the file,
+    under ``root``, its plugin root. ``parsed`` is the copy read when the
+    snapshot was built; a ``live`` agent is read again on every definition and
+    falls back to it (AGT-16).
+    """
+
+    name: str
+    library: str
+    plugin: str
+    root: Path
+    path: Path
+    parsed: ParsedAgent
+    servers: tuple[str, ...]
+    category: str | None
+    tags: frozenset[str]
+    library_categories: frozenset[str] = frozenset()
+    live: bool = False
+
+    def admitted(self, scope: Scope) -> bool:
+        return scope.admits(
+            self.library,
+            self.category,
+            self.tags,
+            library_categories=self.library_categories,
+        )
+
+
+class AgentRoster:
+    """Every agent a snapshot serves, by name, and who may see each.
+
+    Names are unique across the roster: one is unique within its library
+    (AGT-8), and every name starts with its library's. Built once and never
+    edited, as the snapshot holding it is not.
+    """
+
+    def __init__(self, agents: Sequence[Agent] = ()):
+        self._agents = tuple(sorted(agents, key=lambda a: a.name))
+        self._by_name: dict[str, Agent] = {}
+        for agent in self._agents:
+            self._by_name.setdefault(agent.name, agent)
+
+    def __len__(self) -> int:
+        return len(self._agents)
+
+    def visible(self, scope: Scope = EVERYTHING) -> list[Agent]:
+        """The agents ``scope`` admits, in name order (AGT-7)."""
+        return [a for a in self._agents if a.admitted(scope)]
+
+    def get(self, name: str, scope: Scope = EVERYTHING) -> Agent | None:
+        """One agent by name, or None when it is absent or out of scope alike."""
+        found = self._by_name.get(name)
+        if found is None or not found.admitted(scope):
+            return None
+        return found

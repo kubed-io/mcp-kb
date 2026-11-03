@@ -6,14 +6,25 @@ serve it.
 """
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.catalogue.agents import ParsedAgent, parse_agent, routing_hint
+from kubed.mcp_kb.catalogue.agents import (
+    Agent,
+    AgentRoster,
+    ParsedAgent,
+    parse_agent,
+    routing_hint,
+)
+from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex
+from kubed.mcp_kb.catalogue.snapshot import build_snapshot
+from kubed.mcp_kb.catalogue.uris import Catalogue
 from kubed.mcp_kb.config import Config
+from kubed.mcp_kb.mcp.scope import Scope
 
 pytestmark = pytest.mark.unit
 
@@ -234,7 +245,11 @@ def test_the_default_scan_adds_a_segment_per_folder(tmp_path):
     assert record.agent_paths == ("agents",)
     skipped = knowledge_base.status["plugins"]["extra@drawio"]["skipped"]
     assert skipped == [
-        {"path": "agents/broken.md", "reason": "agent frontmatter has no description"}
+        {"path": "agents/broken.md", "reason": "agent frontmatter has no description"},
+        {
+            "path": "agents/twin-b.md",
+            "reason": "agent twin is already served by agents/twin-a.md",
+        },
     ]
 
 
@@ -369,3 +384,351 @@ def test_a_listed_agent_that_is_not_there_is_a_note(tmp_path):
     assert status["status"] == "ok"
     assert "agents entry 'agents/gone.md' is not in the plugin" in status["notes"]
     assert [a.name for a in knowledge_base._records["kit"].agents] == ["good"]
+
+
+# -- Task 7: names claimed per library, and the roster in the catalogue --------
+
+
+def _entries(tree: AgentsTree, before=(), after=()) -> None:
+    """``tree``'s marketplace with plugins put ahead of and after its own two.
+
+    Each plugin is ``(name, {path: text})``, written below ``plugins/<name>``
+    beside a manifest of its own, so every one of them is Claude-format.
+    """
+    market = tree.root / "market"
+    catalog = json.loads((market / ".claude-plugin/marketplace.json").read_text())
+
+    def entry(name: str, files: dict[str, str]) -> dict:
+        root = market / "plugins" / name
+        _write(root, ".claude-plugin/plugin.json", json.dumps({"name": name}))
+        for rel, text in files.items():
+            _write(root, rel, text)
+        return {"name": name, "source": f"./plugins/{name}"}
+
+    catalog["plugins"] = [
+        *(entry(*p) for p in before),
+        *catalog["plugins"],
+        *(entry(*p) for p in after),
+    ]
+    _write(market, ".claude-plugin/marketplace.json", json.dumps(catalog))
+
+
+def _names(knowledge_base: KnowledgeBase, library: str) -> list[str]:
+    cards = knowledge_base.catalogue.agent_cards(Scope.parse(library=library))
+    return [card["name"] for card in cards]
+
+
+def _owners(knowledge_base: KnowledgeBase) -> dict[str, str]:
+    """Each served agent's name in ``drawio``, mapped to its plugin."""
+    catalogue = knowledge_base.catalogue
+    return {
+        name: catalogue.agent_definition(name)["_meta"]["io.kubed.mcp-kb/agent"][
+            "plugin"
+        ]
+        for name in _names(knowledge_base, "drawio")
+    }
+
+
+def test_names_follow_claude_code(tmp_path):
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+
+    assert _names(knowledge_base, "drawio") == [
+        "drawio_db_migrator",
+        "drawio_diagrammer",
+        "drawio_diagrammer@extra",
+        "drawio_twin",
+    ]
+    assert _names(knowledge_base, "lone") == ["lone_solo"]
+    assert _names(knowledge_base, "drive") == []
+
+
+def test_a_clash_is_renamed_and_reported(tmp_path):
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+
+    status = knowledge_base.status["libraries"]
+    assert status["drawio"]["renamed"] == {
+        "drawio_diagrammer@extra": (
+            "drawio_diagrammer is already served by plugin 'drawio@drawio'"
+        )
+    }
+    assert "renamed" not in status["lone"]
+    assert "unserved" not in status["drawio"]
+    assert _owners(knowledge_base)["drawio_diagrammer@extra"] == "extra@drawio"
+
+
+def test_a_clash_on_the_renamed_name_is_unserved(tmp_path):
+    tree = agents_tree(tmp_path)
+    _entries(tree, before=[("sneak", {"agents/d.md": _agent("diagrammer@extra")})])
+    # Ahead of extra, behind drawio: the marketplace keeps drawio first.
+    market = tree.root / "market/.claude-plugin/marketplace.json"
+    catalog = json.loads(market.read_text())
+    catalog["plugins"] = [catalog["plugins"][i] for i in (1, 0, 2)]
+    market.write_text(json.dumps(catalog))
+
+    knowledge_base = tree.knowledge_base(tmp_path / "cache")
+
+    owners = _owners(knowledge_base)
+    assert owners["drawio_diagrammer"] == "drawio@drawio"
+    assert owners["drawio_diagrammer@extra"] == "sneak@drawio"
+    assert "drawio_db_migrator" in owners
+    library = knowledge_base.status["libraries"]["drawio"]
+    assert library["unserved"] == [
+        {
+            "plugin": "extra@drawio",
+            "path": "agents/diagrammer.md",
+            "reason": (
+                "drawio_diagrammer@extra is already served by plugin 'sneak@drawio'"
+            ),
+        }
+    ]
+    assert library["agents"] == 4
+
+
+def test_a_twin_in_one_plugin_is_skipped(tmp_path):
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+
+    skipped = knowledge_base.status["plugins"]["extra@drawio"]["skipped"]
+    assert {
+        "path": "agents/twin-b.md",
+        "reason": "agent twin is already served by agents/twin-a.md",
+    } in skipped
+
+
+def test_an_appended_plugin_renames_nothing(tmp_path):
+    tree = agents_tree(tmp_path)
+    before = _owners(tree.knowledge_base(tmp_path / "before"))
+    _entries(tree, after=[("late", {"agents/d.md": _agent("diagrammer")})])
+
+    after = _owners(tree.knowledge_base(tmp_path / "after"))
+
+    assert after == {**before, "drawio_diagrammer@late": "late@drawio"}
+
+
+def test_a_prepended_plugin_takes_the_short_name(tmp_path):
+    tree = agents_tree(tmp_path)
+    _entries(tree, before=[("first", {"agents/d.md": _agent("diagrammer")})])
+
+    knowledge_base = tree.knowledge_base(tmp_path / "cache")
+
+    owners = _owners(knowledge_base)
+    assert owners["drawio_diagrammer"] == "first@drawio"
+    assert owners["drawio_diagrammer@drawio"] == "drawio@drawio"
+    assert owners["drawio_diagrammer@extra"] == "extra@drawio"
+    assert knowledge_base.status["libraries"]["drawio"]["renamed"] == {
+        "drawio_diagrammer@drawio": (
+            "drawio_diagrammer is already served by plugin 'first@drawio'"
+        ),
+        "drawio_diagrammer@extra": (
+            "drawio_diagrammer is already served by plugin 'first@drawio'"
+        ),
+    }
+
+
+def test_a_conflicting_plugin_serves_no_agents(tmp_path):
+    tree = agents_tree(tmp_path)
+    skill = "---\nname: drawio\ndescription: Again.\n---\nAgain.\n"
+    _entries(
+        tree,
+        after=[
+            ("copy", {"skills/drawio/SKILL.md": skill, "agents/c.md": _agent("clone")})
+        ],
+    )
+
+    knowledge_base = tree.knowledge_base(tmp_path / "cache")
+
+    library = knowledge_base.status["libraries"]["drawio"]
+    assert "copy@drawio" in library["conflicts"]
+    assert "drawio_clone" not in _names(knowledge_base, "drawio")
+    assert library["agents"] == 4
+    assert knowledge_base.status["plugins"]["copy@drawio"]["agents"] == 1
+
+
+def test_counts(tmp_path):
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+
+    status = knowledge_base.status
+    assert status["plugins"]["drawio@drawio"]["agents"] == 1
+    assert status["plugins"]["extra@drawio"]["agents"] == 3
+    assert status["plugins"]["lone"]["agents"] == 1
+    assert status["plugins"]["drive"]["agents"] == 0
+    assert status["libraries"]["drawio"]["agents"] == 4
+    assert status["libraries"]["lone"]["agents"] == 1
+    assert status["libraries"]["drive"]["agents"] == 0
+
+
+def test_cards_and_definition_under_scope(tmp_path):
+    catalogue = agents_tree(tmp_path).knowledge_base(tmp_path / "cache").catalogue
+
+    assert catalogue.agent_cards(Scope.parse(tags="diagrams")) == [
+        {
+            "name": "drawio_diagrammer",
+            "description": "Draws diagrams.",
+            "capabilities": [],
+        }
+    ]
+    other = catalogue.agent_cards(Scope.parse(categories="other"))
+    assert [c["name"] for c in other] == [
+        "drawio_db_migrator",
+        "drawio_diagrammer@extra",
+        "drawio_twin",
+    ]
+    extra = Scope.parse(tags="extra")
+    assert catalogue.agent_definition("drawio_diagrammer", extra) is None
+    assert catalogue.agent_definition("nobody") is None
+    assert [c["name"] for c in catalogue.agent_cards()] == [
+        "drawio_db_migrator",
+        "drawio_diagrammer",
+        "drawio_diagrammer@extra",
+        "drawio_twin",
+        "lone_solo",
+    ]
+
+
+def test_the_definition(tmp_path):
+    catalogue = agents_tree(tmp_path).knowledge_base(tmp_path / "cache").catalogue
+
+    definition = catalogue.agent_definition("drawio_diagrammer")
+
+    assert definition == {
+        "agent": "drawio_diagrammer",
+        "instructions": (
+            "Read skill://drawio/drawio/SKILL.md in ${CLAUDE_PROJECT_DIR}.\n"
+        ),
+        "modelRoutingHint": {"role": "medium", "vision": False},
+        "tools": [],
+        "_meta": {
+            "io.kubed.mcp-kb/agent": {
+                "plugin": "drawio@drawio",
+                "library": "drawio",
+                "path": "agents/diagrammer.md",
+                "frontmatter": {
+                    "name": "diagrammer",
+                    "description": "Draws diagrams.",
+                    "model": "sonnet",
+                    "color": "cyan",
+                },
+                "servers": ["drawio"],
+            }
+        },
+    }
+
+
+def test_a_blank_body_and_no_model_leave_their_fields_out(tmp_path):
+    root = tmp_path / "kit"
+    _write(root, "agents/quiet.md", "---\nname: quiet\ndescription: d\n---\n\n  \n")
+    _write(root, ".claude-plugin/plugin.json", json.dumps({"name": "kit"}))
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "kit", "source": f"file://{root}"}],
+            "libraries": [{"name": "kit", "plugins": ["kit"]}],
+        }
+    )
+
+    catalogue = KnowledgeBase(config, tmp_path / "cache").catalogue
+
+    definition = catalogue.agent_definition("kit_quiet")
+    assert set(definition) == {"agent", "tools", "_meta"}
+    assert definition["_meta"]["io.kubed.mcp-kb/agent"]["servers"] == []
+
+
+def test_a_row_that_no_longer_parses_is_reported_and_keeps_its_claim(tmp_path):
+    """A cold start serves the rows the index recorded; a file that broke since
+    is reported under its plugin, and the names around it do not move."""
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+    drawio = tmp_path / "market/plugins/drawio/agents/diagrammer.md"
+    drawio.write_text("---\nname: diagrammer\n---\nNo description now.\n")
+
+    snapshot = build_snapshot(
+        knowledge_base.config,
+        knowledge_base._plugins,
+        knowledge_base._libraries,
+        knowledge_base._fetches,
+        knowledge_base._records,
+        1,
+    )
+
+    plugin = snapshot.status["plugins"]["drawio@drawio"]
+    assert plugin["agents"] == 0
+    assert {
+        "path": "agents/diagrammer.md",
+        "reason": "agent frontmatter has no description",
+    } in plugin["skipped"]
+    names = [c["name"] for c in snapshot.catalogue.agent_cards()]
+    assert "drawio_diagrammer" not in names
+    assert "drawio_diagrammer@extra" in names
+    assert snapshot.status["libraries"]["drawio"]["agents"] == 3
+    assert str(tmp_path / "cache") not in json.dumps(snapshot.status)
+
+
+def test_renames_and_unserved_agents_are_logged_once(tmp_path, caplog):
+    tree = agents_tree(tmp_path)
+    _entries(tree, before=[("sneak", {"agents/d.md": _agent("diagrammer@extra")})])
+    market = tree.root / "market/.claude-plugin/marketplace.json"
+    catalog = json.loads(market.read_text())
+    catalog["plugins"] = [catalog["plugins"][i] for i in (1, 0, 2)]
+    market.write_text(json.dumps(catalog))
+
+    with caplog.at_level(logging.INFO, logger="kubed.mcp_kb.catalogue.snapshot"):
+        knowledge_base = tree.knowledge_base(tmp_path / "cache")
+        boot = caplog.text
+        caplog.clear()
+        knowledge_base.refresh(force=True)
+
+    assert boot.count("drawio_diagrammer@extra") == 1
+    assert "agents/diagrammer.md" in boot
+    assert "drawio_diagrammer@extra" not in caplog.text
+
+
+def test_a_live_agent_is_reread(tmp_path, caplog):
+    """An agent of a live fetch is revalidated, then parsed again (AGT-16).
+
+    The stub stands in for the revalidator: what it writes is what a server
+    that moved would have brought down.
+    """
+    root = tmp_path / "kit"
+    _write(root, "agents/a.md", _agent("a"))
+    path = root / "agents/a.md"
+    upstream: list[str] = []
+    asked: list[Path] = []
+
+    def revalidate(target: Path) -> None:
+        asked.append(target)
+        if upstream:
+            target.write_text(upstream.pop(0))
+
+    def agent(name: str, live: bool) -> Agent:
+        return Agent(
+            name=name,
+            library="kit",
+            plugin="kit",
+            root=root,
+            path=path,
+            parsed=parse_agent(path),
+            servers=(),
+            category=None,
+            tags=frozenset(),
+            live=live,
+        )
+
+    catalogue = Catalogue(
+        SkillIndex([]),
+        LibraryFiles(),
+        revalidate,
+        agents=AgentRoster([agent("kit_a", True), agent("kit_still", False)]),
+    )
+
+    upstream.append(_agent("a").replace("Body.", "The edited body."))
+    assert catalogue.agent_definition("kit_a")["instructions"] == "The edited body.\n"
+    assert asked == [path]
+
+    upstream.append("---\nname: [unclosed\n---\nHalf saved.\n")
+    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.catalogue.uris"):
+        definition = catalogue.agent_definition("kit_a")
+    assert definition["instructions"] == "Body.\n"
+    assert "kit_a" in caplog.text
+    assert str(tmp_path) not in caplog.text
+
+    asked.clear()
+    catalogue.agent_cards()
+    catalogue.agent_definition("kit_still")
+    assert asked == []

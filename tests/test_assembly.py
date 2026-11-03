@@ -220,6 +220,7 @@ async def test_a_library_whose_marketplace_is_missing_says_so(market, tmp_path):
         "skills": 0,
         "prompts": 0,
         "files": 0,
+        "agents": 0,
         "error": "no marketplace.json under lgtm",
     }
     assert str(tmp_path) not in json.dumps(health)
@@ -608,6 +609,7 @@ async def test_a_marketplace_subdir_symlinked_out_of_the_tree_is_the_librarys_er
         "skills": 0,
         "prompts": 0,
         "files": 0,
+        "agents": 0,
         "error": f"link is not a directory in file://{linked}",
     }
     assert await _skills(kb) == []
