@@ -31,12 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Discover and load verified skills in MCP Skills clients through `skills/list` and `skills/get`.
 - Skill links work behind a multiplexing gateway: set `Kb-Resource-Prefix` (or `?prefix=`), e.g. `kb+`, and kb writes it in front of every address in text.
 - A library can list `categories`, and `Kb-Category` (`?category=`) selects every library listing one.
+- A plugin's `commands` may be an object map, and commands in subfolders are served as `<library>_<folder>_<name>`.
 
 ### Changed
 
 - Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Listing` and `Kb-Resource-Prefix`; the old `X-` names are still accepted.
 - **BREAKING:** A pin set under an old `X-` name (a gateway route header, a credential) no longer holds against a client-sent `Kb-` header, which now beats it; move such pins to the `Kb-` names.
 - **BREAKING:** Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
+- A plugin's `plugin.json` reads as Claude Code reads it: its `skills` add to the usual skill folders, and a marketplace entry's lists append to it.
+- Marketplace entries marked `strict: false` now load, unless they conflict with the plugin's own `plugin.json`.
 
 ### Fixed
 

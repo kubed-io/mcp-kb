@@ -11,7 +11,9 @@ globs is in [plugins-and-libraries.md](plugins-and-libraries.md); who may see wh
 
 **SKL-1.** A skill is a directory inside its plugin root that holds a regular file named
 `SKILL.md` and that the plugin's `skills` patterns select (PLG-9). With no patterns from the
-config or the manifest, these conventions apply. A `SKILL.md` at the plugin root is not one of them.
+config, these conventions apply, and a manifest's or entry's `skills` add to them (PLG-20, LIB-30);
+an entry at the marketplace root that lists `skills` is the exception (LIB-32). A `SKILL.md` at the
+plugin root is not one of the conventions.
 
 | Pattern | Reaches |
 |---|---|

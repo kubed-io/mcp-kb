@@ -121,7 +121,10 @@ names with a prefix, and these names are the agent's API.
   a handler that reimplements that filter is how a pinned client ends up seeing
   another library.
 - **Adding a prompt** → a file matching a plugin's `prompts:` globs, its
-  manifest's `commands`, or the convention; exposed as `<library>_<file stem>`.
+  manifest's `commands`, or the convention; exposed as `<library>_<name>`
+  (PLG-25): the folders below a commands directory then the stem
+  (`commands/db/migrate.md` is `<library>_db_migrate`), a `commands` map's key,
+  or else the file stem.
   No code. In this server's own dialect every placeholder must be a declared
   argument and a required argument cannot have a default; the server skips a
   file that breaks either rule, and `tests/test_prompts.py` loads a broken one
