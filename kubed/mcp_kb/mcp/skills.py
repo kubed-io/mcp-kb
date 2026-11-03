@@ -4,13 +4,17 @@ A skill:// resource is not itself an extension declaration. Skills-aware
 clients discover complete entries through skills/list and skills/get, then
 verify each file against that entry before loading it. Catalogue remains the
 authority for scope and content; a getter follows every snapshot replacement.
+
+The envelope, the scope check and the legacy declaration are shared with the
+Agents extension in ``agents.py``, so the two answer alike.
 """
 
 from __future__ import annotations
 
 import contextlib
+import copy
 import hashlib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 import frontmatter
 import yaml
@@ -62,21 +66,52 @@ def addressed(
     return {**entry, "resources": files}
 
 
-class AdvertiseLegacySkills(Middleware):
-    """Keep the declaration in initialize for handshake-era clients.
+def checked_scope(problem: Callable[[Scope], str | None]) -> Scope:
+    """This request's scope, or the refusal its scope earns (SCP-29).
+
+    Extension methods keep the same invalid-scope contract as resources and
+    prompts, including when a handler is invoked directly.
+    """
+    scope = requested_scope()
+    refusal = problem(scope)
+    if refusal:
+        raise MCPError(code=INVALID_PARAMS, message=refusal)
+    return scope
+
+
+def complete(**fields: object) -> dict:
+    """An extension result in the envelope every one of ours carries.
+
+    Local/live sources can change between calls. Clients may retain an
+    entry for verification, but must not reuse it as a fresh listing.
+    """
+    return {
+        "resultType": "complete",
+        "ttlMs": 0,
+        "cacheScope": "private",
+        **fields,
+    }
+
+
+class AdvertiseLegacyExtensions(Middleware):
+    """Keep the declarations in initialize for handshake-era clients.
 
     FastMCP 4 advertises registered extensions through server/discover, but
     its SDK's legacy serializer removes that capability from initialize.
-    This public middleware hook restores our extension after serialization;
-    otherwise existing Skills clients see a server with no Skills support.
+    This public middleware hook restores ours after serialization, each with
+    the value server/discover gives it; otherwise existing Skills and Agents
+    clients see a server that supports neither.
     """
+
+    def __init__(self, declared: Mapping[str, dict]):
+        self._declared = dict(declared)
 
     async def on_initialize(self, context, call_next):
         result = await call_next(context)
         if result is not None:
             result.capabilities.extensions = {
                 **(result.capabilities.extensions or {}),
-                EXTENSION_ID: {},
+                **copy.deepcopy(self._declared),
             }
         return result
 
@@ -100,28 +135,8 @@ class SkillsExtension(ServerExtension):
             MethodBinding("skills/get", GetSkillParams, self.get_skill),
         )
 
-    def _scope(self) -> Scope:
-        # Keep extension requests under the same invalid-scope contract as
-        # resources and prompts, including direct handler invocation.
-        scope = requested_scope()
-        problem = self._scope_problem(scope)
-        if problem:
-            raise MCPError(code=INVALID_PARAMS, message=problem)
-        return scope
-
-    @staticmethod
-    def _result(**fields: object) -> dict:
-        # Local/live sources can change between calls. Clients may retain an
-        # entry for verification, but must not reuse it as a fresh listing.
-        return {
-            "resultType": "complete",
-            "ttlMs": 0,
-            "cacheScope": "private",
-            **fields,
-        }
-
     async def list_skills(self, ctx, params: PaginatedRequestParams) -> dict:
-        scope = self._scope()
+        scope = checked_scope(self._scope_problem)
         if params.cursor is not None:
             raise MCPError(code=INVALID_PARAMS, message="Invalid skills cursor")
         catalogue, a = self._catalogue(), requested_addressing()
@@ -130,14 +145,14 @@ class SkillsExtension(ServerExtension):
             entry = addressed(catalogue, scope, a, catalogue.skill_entry(uri, scope))
             if entry is not None:
                 entries.append(entry)
-        return self._result(skills=entries)
+        return complete(skills=entries)
 
     async def get_skill(self, ctx, params: GetSkillParams) -> dict:
-        scope = self._scope()
+        scope = checked_scope(self._scope_problem)
         catalogue, a = self._catalogue(), requested_addressing()
         entry = catalogue.skill_entry(a.canonical(params.uri), scope)
         entry = addressed(catalogue, scope, a, entry)
         if entry is None:
             # Out-of-scope and absent skills have exactly the same error.
             raise MCPError(code=INVALID_PARAMS, message="Skill not found")
-        return self._result(skill=entry)
+        return complete(skill=entry)

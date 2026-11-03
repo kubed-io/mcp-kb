@@ -20,6 +20,8 @@ from .scope import Scope
 
 # The client capability a host declares when it builds its own skill list.
 EXTENSION_ID = "io.modelcontextprotocol/skills"
+# The draft Agent Discovery Extension, beside it: agents/list and agents/get.
+AGENTS_EXTENSION_ID = "io.modelcontextprotocol/agents"
 
 # Per-request scope, set once in a client's connection config -- which is how
 # one deployment serves several narrowly-scoped agents. Each setting is a
