@@ -1,22 +1,30 @@
 # Agents
 
 kb serves the subagent definitions that plugins ship, through the draft MCP Agent Discovery
-Extension (`io.modelcontextprotocol/agents`, agents-wg proposal 0000). It serves definitions only.
-The host builds and runs the agent. Agents are never served as resources, prompts or tools.
+Extension (`io.modelcontextprotocol/agents`, agents-wg proposal 0000 at `137d88b`, targeting MCP
+`2026-07-28`). It serves definitions only. The host builds and runs the agent. Agents are never
+served as resources, prompts or tools.
 
 **Every requirement in this file is proposed.** kb follows the newest draft of the extension and
-names it in the README, where the extension is marked experimental.
+names it in the README, where the extension is marked experimental. The rule behind every choice
+here is Claude Code's: a plugin's agents mean in kb what they mean there.
 
 ## Negotiation
 
-**AGT-1.** *(proposed)* kb declares `io.modelcontextprotocol/agents` in its capabilities, the same
-way it declares the Skills extension, legacy `initialize` included, with `listChanged: false`.
+**AGT-1.** *(proposed)* kb declares `io.modelcontextprotocol/agents` with the value
+`{"listChanged": false}` on `server/discover` and on legacy `initialize`, beside
+`io.modelcontextprotocol/skills` (HTTP-27). kb sends no `notifications/agents/list_changed`.
 
-**AGT-2.** *(proposed)* A client that doesn't declare the extension sees nothing different: no
-added tools, resources, prompts or instructions.
+**AGT-2.** *(proposed)* `agents/list` and `agents/get` answer any caller, whether or not it
+declared the extension, as the Skills extension does (SKL-44). Declaring it, or not, changes
+nothing else for anyone: `tools/list`, `resources/list`, `prompts/list` and the server
+`instructions` are the same either way.
 
-**AGT-3.** *(proposed)* No resource serves an agent file. The plugin-root fallback (see
-[skills.md](skills.md)) refuses any path under a plugin's agent paths.
+**AGT-3.** *(proposed)* The plugin-root fallback (SKL-30, and the library-wide fallback of
+[skills.md](skills.md)) never serves a Claude-format plugin's agent files: nothing under its
+`agents/` folder, and no file its manifest or marketplace entry lists under `agents`. A `files`
+glob the operator wrote that matches one still serves it as a library file, because the config is
+the operator's word (LIB-33).
 
 ## Which files are agents
 
@@ -24,26 +32,47 @@ added tools, resources, prompts or instructions.
 or a marketplace entry. A plugin declared bare in the config has no agents.
 
 **AGT-5.** *(proposed)* A plugin's agents are the `*.md` files under its `agents/` folder,
-subfolders included, unless `plugin.json` or the marketplace entry lists `agents`. Then the list
-decides, by the rules in [plugins-and-libraries.md](plugins-and-libraries.md).
+subfolders included, unless its `plugin.json` or its marketplace entry lists `agents`. Then the
+list decides, by the rules in [plugins-and-libraries.md](plugins-and-libraries.md), and an entry
+that is a directory or is not a `.md` file is dropped with a note in `/health`.
 
 **AGT-6.** *(proposed)* An agent file is YAML frontmatter and a Markdown body. Its frontmatter MUST
-carry `name` and `description`. A file without them, or one that doesn't parse, is skipped and
-listed with its reason under its plugin in `/health`.
+parse, convert to JSON, and carry `name` and `description` as non-empty strings. A file that
+breaks any of these is skipped and listed with its reason under its plugin's `skipped` in
+`/health`. Two files of one plugin that take the same name (AGT-7): the first in path order is
+served and the rest are skipped, each with `agent <name> is already served by <path>`.
 
 ## The roster: `agents/list`
 
-**AGT-7.** *(proposed)* `agents/list` returns a card for every agent in the caller's scope (see
-[scoping-and-instructions.md](scoping-and-instructions.md)), paginated by the standard MCP cursor:
+**AGT-7.** *(proposed)* `agents/list` takes no params but an optional `cursor`, and returns a card
+for every agent in the caller's scope (AGT-15), in name order:
 
 | Card field | Value |
 |---|---|
-| `name` | `<library>_<frontmatter name>`, with any subfolder that Claude Code makes part of the agent's name joined in with `_` |
-| `description` | The frontmatter `description` |
-| `capabilities` | The frontmatter `capabilities` list when present, else `[]` |
+| `name` | Found by the default scan: `<library>_<subfolder>_…_<frontmatter name>`, one `_` segment for each folder between `agents/` and the file. Listed in a manifest or an entry: `<library>_<frontmatter name>`. Renamed by AGT-8 when it clashes |
+| `description` | The frontmatter `description`, whitespace collapsed |
+| `capabilities` | The frontmatter `capabilities` when it is a list of strings, else `[]` |
 
-**AGT-8.** *(proposed)* Agent names are unique within what one client sees. Two agents that would
-take the same name in one library follow the same claim rule as prompts.
+It does not paginate: one page holds every card, and any `cursor` fails with `-32602`
+`Invalid agents cursor`, as SKL-48 does.
+
+**AGT-8.** *(proposed)* An agent name is unique within a library, so within anything one client
+sees. A library walks its plugins in order (LIB-4) and each served agent claims its name:
+
+- The first plugin to claim `<name>` keeps it.
+- A later plugin's agent with that name is served as `<name>@<plugin name>`, and the library's
+  `renamed` in `/health` maps the new name to `<name> is already served by plugin '<owner>'`.
+  PLG-1's plugin-name pattern has no `@`, so the suffix never reads as a subfolder segment.
+- When `<name>@<plugin name>` is taken too, that agent alone is not served in that library, and
+  the library's `unserved` in `/health` lists it with its plugin, path and reason.
+- A plugin that LIB-28 fails in a library serves no agents there either.
+
+The names are decided in library order alone, as Claude Code decides which agent loads first. kb
+stores no owner anywhere: the promise is that **a plugin added after a library's existing plugins
+never renames an agent**. A plugin added before them, a reordered library, or the first claimant's
+agent going away can rename one. Names are the library's and do not depend on the caller's scope,
+so a caller that sees only a later plugin sees `<name>@<plugin name>`, and can infer that `<name>`
+exists elsewhere in the library.
 
 ## The details: `agents/get`
 
@@ -52,25 +81,46 @@ take the same name in one library follow the same claim rule as prompts.
 | Field | Value |
 |---|---|
 | `agent` | The name |
-| `instructions` | The body, with `${CLAUDE_PLUGIN_ROOT}` resolved as in a prompt body. Client-only placeholders such as `${user_config.*}` and `${CLAUDE_PROJECT_DIR}` are left as written |
-| `modelRoutingHint` | From `model`: `haiku` → `small`, `sonnet` → `medium`, `opus` → `large`, with `vision: false`. Omitted for `inherit`, a missing `model`, or any other value |
+| `instructions` | The body, rendered as a prompt body is: `${CLAUDE_PLUGIN_ROOT}` by PRM-48 and PRM-61, every client-only placeholder left as written (PRM-50, `${CLAUDE_SKILL_DIR}` included), then the gateway prefix (SKL-41). Omitted when the body is blank |
+| `modelRoutingHint` | From `model`: `haiku` → `{"role": "small", "vision": false}`, `sonnet` → `medium`, `opus` → `large`. Omitted for `inherit`, a missing `model`, a full model id, or any other value |
 | `tools` | `[]` |
-| `_meta["io.kubed.mcp-kb/agent"]` | `plugin`, `library`, `path` (the file in its plugin), `frontmatter` (verbatim), and `servers`: the names of the MCP servers the plugin declares in `.mcp.json` or `mcpServers`, names only |
+| `_meta["io.kubed.mcp-kb/agent"]` | `plugin` (its id), `library`, `path` (the file, relative to its plugin root), `frontmatter` (verbatim, as JSON), and `servers`: the names of the MCP servers the plugin declares in a root `.mcp.json` or in its manifest's or entry's `mcpServers`, names only, sorted |
 
 **AGT-10.** *(proposed)* `tools` is always empty. The extension allows only tools from kb's own
 `tools/list`, and an agent's tools belong to other servers. `_meta` carries what a host or a
-gateway needs to find them.
+gateway needs to find them. `invalid_agent_definition` therefore never arises.
 
 **AGT-11.** *(proposed)* kb never connects to, starts or forwards the MCP servers a plugin declares.
 
+**AGT-16.** *(proposed)* An agent of a live fetch is re-read on `agents/get`, as a prompt is
+(PRM-60): its file is revalidated, then parsed again. When that read fails, `agents/get` answers
+from the copy parsed when the snapshot was built, and kb logs a warning. `agents/list` answers from
+the snapshot.
+
 ## Caching and errors
 
-**AGT-12.** *(proposed)* Both results carry `cacheScope: "private"` and a `ttlMs`.
+**AGT-12.** *(proposed)* Both results carry `resultType: "complete"`, `ttlMs: 0` and
+`cacheScope: "private"`, as the Skills extension's do (SKL-48).
 
-**AGT-13.** *(proposed)* An unknown agent, or one outside the caller's scope, is `-32602` with
-`data.reason: "agent_not_found"`. The two cases look the same to the caller.
+**AGT-13.** *(proposed)* An unknown agent, and one outside the caller's scope, fail alike with
+`-32602`, the message `Agent not found` and `data: {"reason": "agent_not_found"}`. A refused scope
+(SCP-29) fails both methods with `-32602` and the refusal message, as SKL-50 does.
+
+## Scope
+
+**AGT-15.** *(proposed)* An agent is in scope when its plugin is in scope in its library (SCP-20,
+SCP-27): the request's library, its plugin's `category` or its library's `categories`, and its
+plugin's `tags` and `keywords` under LIB-8's comma rule. The settings are those of SCP-2 to
+SCP-8: `Kb-Library`, `Kb-Category`, `Kb-Tag`, their `X-Skill-*` aliases, and `?library=`,
+`?category=`, `?tag=`, `?categories=`, `?tags=`. Neither method takes a library, category or tag
+param (SCP-9): the connection's scope is the only filter. An agent's frontmatter `capabilities`
+are not tags and narrow nothing. A scope reaching only agents is served, not refused (SCP-31).
 
 ## Health
 
-**AGT-14.** *(proposed)* `/health` counts agents for each plugin and each library, and lists
-skipped agent files with their reasons.
+**AGT-14.** *(proposed)* `/health` reports:
+
+- `agents` at the top level: the agents currently served, across libraries;
+- `agents` for each plugin (what it yields, library-independent) and each library (what it serves);
+- each skipped agent file under its plugin's `skipped`, with its reason (AGT-5, AGT-6);
+- a library's `renamed` and `unserved` (AGT-8), each present only when not empty.
