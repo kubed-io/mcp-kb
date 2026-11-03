@@ -173,19 +173,25 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
     if manifest is None:
         return plugin, plugin.globs
     own = plugin.globs
+    declared = manifest.components
     completed = replace(
         plugin,
         description=plugin.description or manifest.description or "",
         version=plugin.version or manifest.version,
         keywords=tuple(dict.fromkeys((*plugin.keywords, *manifest.keywords))),
     )
+    # Task 3 replaces this: "." will name the plugin root. Until then it is
+    # dropped, as it was before the manifest could say it, since it is no glob.
+    declared_skills = declared.skills
+    if declared_skills is not None:
+        declared_skills = tuple(p for p in declared_skills if p != ".")
     globs = Globs(
-        skills=own.skills if own.skills is not None else manifest.skills,
-        prompts=own.prompts if own.prompts is not None else manifest.commands,
+        skills=own.skills if own.skills is not None else declared_skills,
+        prompts=own.prompts if own.prompts is not None else declared.commands,
         files=own.files,
         # Which of the prompt patterns in force came from a `commands`
         # declaration: the entry's when it named any, else the manifest's.
-        commands=own.commands if own.prompts is not None else (manifest.commands or ()),
+        commands=own.commands if own.prompts is not None else (declared.commands or ()),
     )
     return completed, globs
 

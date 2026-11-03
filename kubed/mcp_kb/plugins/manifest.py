@@ -22,14 +22,42 @@ from ..catalogue.harvest import readable
 MANIFEST_FILES = (".claude-plugin/plugin.json", "plugin.json")
 
 
+COMPONENT_KEYS = ("skills", "commands", "agents", "hooks", "outputStyles", "themes")
+
+
+@dataclass(frozen=True)
+class CommandEntry:
+    """One item of an object-map ``commands``: a name, and a file or a body."""
+
+    name: str
+    source: str | None
+    content: str | None
+    description: str | None
+    argument_hint: str | None
+
+
+@dataclass(frozen=True)
+class Components:
+    """What a manifest, or a marketplace entry, says the plugin ships."""
+
+    skills: tuple[str, ...] | None = None  # "." is the plugin root
+    commands: tuple[str, ...] | None = None  # patterns; () when only a map is set
+    command_dirs: tuple[str, ...] = ()  # the directories among them
+    command_map: tuple[CommandEntry, ...] = ()
+    agents: tuple[str, ...] | None = None  # .md files only
+    mcp_servers: tuple[str, ...] = ()  # names from an inline object
+    mcp_files: tuple[str, ...] = ()  # paths a string mcpServers names
+    named: frozenset[str] = frozenset()  # which of COMPONENT_KEYS are present
+    notes: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True)
 class Manifest:
     name: str | None
     description: str | None
     version: str | None
     keywords: tuple[str, ...]
-    skills: tuple[str, ...] | None
-    commands: tuple[str, ...] | None
+    components: Components
 
 
 def read_manifest(root: Path) -> Manifest | None:
@@ -60,8 +88,31 @@ def read_manifest(root: Path) -> Manifest | None:
         description=_text(data.get("description")),
         version=_text(data.get("version")),
         keywords=_strings(data.get("keywords"), "keywords") or (),
-        skills=paths(data.get("skills"), "skills"),
-        commands=command_patterns(data.get("commands")),
+        components=read_components(data),
+    )
+
+
+def read_components(data: dict) -> Components:
+    """Every component key of a manifest or a marketplace entry, read.
+
+    A wrong-typed field raises ``ValueError`` naming it; any other defect in
+    what a publisher wrote is a note, so one bad item costs only itself.
+    """
+    notes: list[str] = []
+    skills = _paths(data.get("skills"), "skills", notes)
+    commands, command_dirs, command_map = _commands(data.get("commands"), notes)
+    agents = _agents(data.get("agents"), notes)
+    servers, files = _mcp(data.get("mcpServers"), notes)
+    return Components(
+        skills=skills,
+        commands=commands,
+        command_dirs=command_dirs,
+        command_map=command_map,
+        agents=agents,
+        mcp_servers=servers,
+        mcp_files=files,
+        named=frozenset(key for key in COMPONENT_KEYS if key in data),
+        notes=tuple(notes),
     )
 
 
@@ -71,19 +122,103 @@ def paths(value: object, field: str) -> tuple[str, ...] | None:
     Shared with ``marketplace.py``, whose entries carry the same two fields in
     the same spelling -- ``["./skills/loki"]`` -- and must read identically.
     """
-    found = _strings(value, field)
-    if found is None:
-        return None
-    return tuple(cleaned for item in found if (cleaned := _inside(item)))
+    found = _paths(value, field, [])
+    # Task 3 replaces this: "." will name the plugin root. Until then a
+    # consumer of this wrapper keeps what it always had, which is nothing.
+    return None if found is None else tuple(p for p in found if p != ".")
 
 
 def command_patterns(value: object) -> tuple[str, ...] | None:
     """``paths`` for commands: a file is itself, a directory is every markdown
-    file in it -- which is what Claude reads a directory of commands as."""
-    found = paths(value, "commands")
+    file under it -- which is what Claude reads a directory of commands as."""
+    return _commands(value, [])[0]
+
+
+def _paths(value: object, field: str, notes: list[str]) -> tuple[str, ...] | None:
+    found = _strings(value, field)
     if found is None:
         return None
-    return tuple(p if p.endswith(".md") else f"{p}/*.md" for p in found)
+    kept = (_inside(item, field, notes) for item in found)
+    return tuple(dict.fromkeys(cleaned for cleaned in kept if cleaned))
+
+
+def _commands(
+    value: object, notes: list[str]
+) -> tuple[tuple[str, ...] | None, tuple[str, ...], tuple[CommandEntry, ...]]:
+    if isinstance(value, dict):
+        return (), (), _command_map(value, notes)
+    found = _paths(value, "commands", notes)
+    if found is None:
+        return None, (), ()
+    patterns: list[str] = []
+    dirs: list[str] = []
+    for path in found:
+        if path.endswith(".md"):
+            patterns.append(path)
+            continue
+        dirs.append(path)
+        patterns.append("**/*.md" if path == "." else f"{path}/**/*.md")
+    return tuple(patterns), tuple(dirs), ()
+
+
+def _command_map(value: dict, notes: list[str]) -> tuple[CommandEntry, ...]:
+    entries = []
+    for name, item in value.items():
+        if not isinstance(item, dict):
+            notes.append(f"commands entry '{name}' is not an object")
+            continue
+        source, content = item.get("source"), item.get("content")
+        if (source is None) == (content is None):
+            notes.append(
+                f"commands entry '{name}' needs exactly one of source and content"
+            )
+            continue
+        if source is not None:
+            if isinstance(source, str):
+                source = _inside(source, "commands", notes)
+            else:
+                source = ""
+            if not source:
+                notes.append(f"commands entry '{name}' has no usable source")
+                continue
+        elif not isinstance(content, str):
+            notes.append(f"commands entry '{name}' content is not text")
+            continue
+        entries.append(
+            CommandEntry(
+                name=str(name),
+                source=source,
+                content=content,
+                description=_text(item.get("description")),
+                argument_hint=_text(item.get("argumentHint")),
+            )
+        )
+    return tuple(entries)
+
+
+def _agents(value: object, notes: list[str]) -> tuple[str, ...] | None:
+    found = _paths(value, "agents", notes)
+    if found is None:
+        return None
+    kept = []
+    for path in found:
+        if path.endswith(".md"):
+            kept.append(path)
+        else:
+            notes.append(f"agents entry '{path}' is not a .md file")
+    return tuple(kept)
+
+
+def _mcp(value: object, notes: list[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    if value is None:
+        return (), ()
+    if isinstance(value, dict):
+        return tuple(str(name) for name in value), ()
+    if isinstance(value, str):
+        path = _inside(value, "mcpServers", notes)
+        return (), ((path,) if path else ())
+    notes.append("mcpServers must be an object or a path")
+    return (), ()
 
 
 def _text(value: object) -> str | None:
@@ -101,9 +236,20 @@ def _strings(value: object, field: str) -> tuple[str, ...] | None:
     raise ValueError(f"{field} must be a string or a list of strings")
 
 
-def _inside(text: str) -> str:
-    """``text`` as a root-relative path, or ``""`` when it leaves the root."""
-    path = text.strip().removeprefix("./")
-    if not path or path.startswith("/") or ".." in PurePosixPath(path).parts:
+def _inside(text: str, field: str, notes: list[str]) -> str:
+    """``text`` as a root-relative path, or ``""`` when it leaves the root.
+
+    ``"."`` names the plugin root itself. A path that does not start ``./`` is
+    kept, and noted: Claude requires the prefix, and a publisher who left it
+    off should hear that.
+    """
+    path = text.strip()
+    if path in (".", "./"):
+        return "."
+    relative = path.removeprefix("./")
+    if not relative or path.startswith("/") or ".." in PurePosixPath(relative).parts:
+        notes.append(f"{field} path '{path}' leaves the plugin root")
         return ""
-    return path
+    if relative == path:
+        notes.append(f"{field} path '{path}' does not start with ./")
+    return relative

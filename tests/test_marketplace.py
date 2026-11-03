@@ -194,7 +194,7 @@ def test_an_entrys_commands_become_prompt_patterns(tmp_path):
     not it sits in a `commands/` tree."""
     plugin = only(read(tmp_path, entry(commands=["./prompts/brief.md", "commands"])))
 
-    patterns = ("prompts/brief.md", "commands/*.md")
+    patterns = ("prompts/brief.md", "commands/**/*.md")
     assert plugin.globs == Globs(prompts=patterns, commands=patterns)
 
 
