@@ -460,7 +460,10 @@ def test_an_mcp_json_too_deep_or_too_long_to_parse_is_a_note(tmp_path, text):
     assert status["notes"] == [".mcp.json is not a JSON object of MCP servers"]
 
 
-def test_a_manifest_too_deep_to_parse_fails_the_plugin_and_quotes_nothing(tmp_path):
+def test_a_manifest_too_deep_to_parse_fails_the_plugin_and_quotes_nothing(
+    tmp_path, monkeypatch
+):
+    _parser_out_of_stack(monkeypatch)
     root = tmp_path / "kit"
     _skill(root, "skills/a")
     _write(root, ".claude-plugin/plugin.json", "[" * 200000)
@@ -611,6 +614,23 @@ def _glob_as_on_3_11(monkeypatch) -> None:
     monkeypatch.setattr(Path, "glob", glob)
 
 
+def _parser_out_of_stack(monkeypatch) -> None:
+    """``json.loads`` as a runner with a small stack has it: deep nesting raises.
+
+    Since 3.14 how deep the parser goes depends on the thread's stack size, not
+    on the recursion limit, so the same input raises on one runner and parses
+    to the end on another. Every other text still goes to the real parser.
+    """
+    real = json.loads
+
+    def loads(text, *args, **kwargs):
+        if isinstance(text, str) and text.startswith("[" * 1000):
+            raise RecursionError("maximum recursion depth exceeded")
+        return real(text, *args, **kwargs)
+
+    monkeypatch.setattr(json, "loads", loads)
+
+
 @pytest.mark.parametrize(
     ("key", "paths"),
     [
@@ -644,8 +664,9 @@ def test_a_component_glob_python_refuses_matches_nothing(
 
 
 def test_a_marketplace_too_deep_to_parse_fails_the_library_and_quotes_nothing(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
+    _parser_out_of_stack(monkeypatch)
     root = tmp_path / "market"
     _write(root, ".claude-plugin/marketplace.json", "[" * 100000)
 
