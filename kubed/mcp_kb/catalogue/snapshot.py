@@ -49,7 +49,8 @@ from ..plugins.select import select
 from ..sources import AccessRefused, SourceError, fingerprint, materialise
 from ..sources.live import Revalidator, is_live
 from . import harvest
-from .index import FetchRecord, PluginRecord, PromptRow, SkillRow, now
+from .agents import parse_agent
+from .index import AgentRow, FetchRecord, PluginRecord, PromptRow, SkillRow, now
 from .prompts import FilePrompt, PromptSource, load_prompts, prompt_name
 from .prompts.detect import COPILOT_SUFFIX
 from .skills import LibraryFiles, Skill, SkillIndex, load_skills, naming_problem
@@ -218,6 +219,11 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
     elif found.agents is not None or listed.agents is not None:
         agents = _joined(found.agents, listed.agents)
         notes += _ignored(root, "agents")
+        notes += [
+            f"agents entry '{rel}' is not in the plugin"
+            for rel in agents
+            if harvest.readable(root, rel) is None
+        ]
     else:
         agents = None
 
@@ -333,6 +339,27 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
         ]
         sources += _mapped(root, globs.command_map, skipped=unloadable)
         prompts = _load_prompts(plugin, sources, skipped=unloadable)
+        agents: list[AgentRow] = []
+        for path, segments in harvest.agent_files(root, globs):
+            try:
+                parsed = parse_agent(path)
+            except OSError:
+                # One unreadable file skips itself, as a prompt's does; the
+                # errno text can carry a path, so the reason is fixed.
+                unloadable.append((path, "agent file is not readable"))
+                continue
+            if isinstance(parsed, str):
+                unloadable.append((path, parsed))
+                continue
+            agents.append(
+                AgentRow(
+                    path=_relative(path, root),
+                    name="_".join((*segments, parsed.name)),
+                )
+            )
+        agent_paths = tuple(
+            _relative(path, root) for path in harvest.agent_paths(root, globs)
+        )
     except OSError as exc:
         return failed_plugin(plugin, unrooted(str(exc), root))
 
@@ -351,6 +378,8 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
             {"path": _relative(path, root), "reason": unrooted(reason, root)}
             for path, reason in unloadable
         ),
+        agents=tuple(agents),
+        agent_paths=agent_paths,
     )
 
 

@@ -158,6 +158,14 @@ class FetchRecord:
 
 
 @dataclass(frozen=True)
+class AgentRow:
+    """One agent file: where it is (relative to its plugin root) and its name."""
+
+    path: str
+    name: str
+
+
+@dataclass(frozen=True)
 class PluginRecord:
     """One plugin's harvest out of its fetch's tree: every row built from it.
 
@@ -182,6 +190,9 @@ class PluginRecord:
     # parse -- as ``{"path", "reason"}`` rows. Kept on the record because the
     # harvest is the only pass that sees such a file: its rows never name it.
     skipped: tuple[dict[str, str], ...] = ()
+    # Agents and the paths a fallback must refuse, relative to the plugin root.
+    agents: tuple[AgentRow, ...] = ()
+    agent_paths: tuple[str, ...] = ()
 
 
 def _fetch_record_from_dict(raw: dict) -> FetchRecord:
@@ -208,6 +219,8 @@ def _plugin_record_from_dict(raw: dict) -> PluginRecord:
         files=tuple(raw["files"]),
         skill_dirs=tuple(raw["skill_dirs"]),
         skipped=tuple(_skipped_row(row) for row in raw["skipped"]),
+        agents=tuple(AgentRow(**a) for a in raw["agents"]),
+        agent_paths=tuple(raw["agent_paths"]),
     )
 
 

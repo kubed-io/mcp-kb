@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 MAIN_FILE = "SKILL.md"
 
+AGENTS_DIR = "agents"
+
 PLUGIN_ROOT = PurePosixPath(".")
 
 DEFAULTS: dict[str, tuple[str, ...]] = {
@@ -192,6 +194,37 @@ def matching(root: Path, globs: Iterable[str]) -> set[Path]:
 def files(root: Path, kind: str, globs: Globs) -> list[Path]:
     """Every regular file matching the kind's globs, inside root, sorted."""
     return sorted(matching(root, patterns(kind, globs)))
+
+
+def agent_files(root: Path, globs: Globs) -> list[tuple[Path, tuple[str, ...]]]:
+    """Each agent file, sorted, with the folders that name it.
+
+    The default scan (``agents/**/*.md``) names an agent by the folders between
+    ``agents/`` and the file; a file the plugin listed has none (AGT-5).
+    """
+    if globs.agents == ():
+        return []
+    base = root.resolve()
+    if globs.agents is not None:
+        return [(f, ()) for f in sorted(matching(root, globs.agents))]
+    return [
+        (f, f.relative_to(base / AGENTS_DIR).parts[:-1])
+        for f in sorted(matching(root, (f"{AGENTS_DIR}/**/*.md",)))
+    ]
+
+
+def agent_paths(root: Path, globs: Globs) -> tuple[Path, ...]:
+    """The ``agents/`` directory and every listed file: what a fallback refuses."""
+    if globs.agents == ():
+        return ()
+    base = root.resolve()
+    found: list[Path] = []
+    folder = inside(base / AGENTS_DIR, base)
+    if folder is not None and folder.is_dir():
+        found.append(base / AGENTS_DIR)
+    if globs.agents is not None:
+        found += sorted(matching(root, globs.agents))
+    return tuple(found)
 
 
 def skill_dirs(root: Path, globs: Globs) -> list[Path]:

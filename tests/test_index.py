@@ -9,6 +9,7 @@ import pytest
 
 from kubed.mcp_kb.catalogue.index import (
     INDEX_VERSION,
+    AgentRow,
     FetchRecord,
     Index,
     PluginRecord,
@@ -308,3 +309,19 @@ def test_a_skill_row_round_trips_to_a_skill(tmp_path):
         library="other", plugin=skill.plugin, root=skill.root, category=None, tags=frozenset()
     )
     assert twice.address == "other/alpha"
+
+
+@pytest.mark.unit
+def test_a_record_with_agents_round_trips(tmp_path):
+    path = tmp_path / "index.json"
+    record = _plugin_record(
+        agents=(AgentRow(path="agents/db/migrate.md", name="db_migrator"),),
+        agent_paths=("agents",),
+    )
+    written = _index(plugins={"flatsource": record})
+    written.write(path)
+
+    read = Index.read(path)
+
+    assert read == written
+    assert read.plugins["flatsource"].agents[0].name == "db_migrator"
