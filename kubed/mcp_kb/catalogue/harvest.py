@@ -301,8 +301,22 @@ def skill_dirs(root: Path, globs: Globs) -> list[Path]:
     return sorted(found)
 
 
+def command_files(root: Path, globs: Globs) -> set[Path]:
+    """Every file a ``commands`` declaration selects, which makes it ``claude``.
+
+    A listed folder's escaped pattern, and each listed file read as the path it
+    spells (PLG-21), as ``listed`` reads a manifest's agents: in a dot folder
+    too, and never one that resolves outside the plugin.
+    """
+    return matching(root, globs.commands) | set(listed(root, globs.command_files))
+
+
 def prompt_files(root: Path, globs: Globs) -> list[Path]:
-    return files(root, "prompts", globs)
+    """The prompt globs' matches, and the command files a declaration lists."""
+    return sorted(
+        matching(root, patterns("prompts", globs))
+        | set(listed(root, globs.command_files))
+    )
 
 
 def library_files(root: Path, globs: Globs, skill_dirs: Sequence[Path]) -> list[str]:

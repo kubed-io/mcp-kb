@@ -70,7 +70,9 @@ class Globs:
     ``commands`` or an entry's -- because that is a Claude signal and the file
     it selects may sit anywhere, penpot's ``prompts/`` included. A config's own
     ``prompts:`` glob is not a command declaration and leaves it empty.
-    ``command_dirs`` are the directories among those declarations, and
+    Only a declared *folder* is a pattern; ``command_files`` are the ``.md``
+    files those declarations list, read as paths and served beside
+    ``prompts`` (PLG-21). ``command_dirs`` are the folders as written, and
     ``command_map`` the object-map commands, which name no pattern at all.
 
     ``agents`` is ``None`` for the default ``agents/`` scan, as the other kinds
@@ -83,6 +85,7 @@ class Globs:
     commands: tuple[str, ...] = ()
     agents: tuple[str, ...] | None = None
     command_dirs: tuple[str, ...] = ()
+    command_files: tuple[str, ...] = ()
     command_map: tuple[CommandEntry, ...] = ()
 
 

@@ -89,7 +89,8 @@ the field. A non-string `description` or `version` is ignored.
 **PLG-16.** A component path (`skills`, `commands`, `agents`, `mcpServers`) loses a leading `./`,
 and `.` and `./` name the plugin root. A path that is empty, absolute or holds a `..` segment is
 dropped with a note (PLG-26) and the rest are kept. A `commands` path ending `.md` names that file;
-any other names a directory and becomes `<path>/**/*.md`, read recursively (PLG-25).
+any other names a directory, read recursively for `*.md` (PLG-25). Either is a path, not a glob
+(PLG-21).
 
 **PLG-17.** The manifest and the marketplace entry complete the plugin, for declared plugins and
 marketplace entries alike. The manifest's `description` and `version` are used only when the
@@ -308,6 +309,15 @@ character, `/` or `@`, noted `commands entry <key> is not a usable name` with th
 escaped. A `source`
 that is not a file in the plugin is skipped with `not a file in the plugin`. An inline command's
 path in `/health` is the manifest's. Every map command is read in the `claude` dialect.
+A path in a `commands` list, from a manifest or an entry, is a path and not a glob, as in Claude
+Code: `./cmds/[draft].md` is that file and never `cmds/d.md`, `./stars/*.md` names no file, and
+`./v[1]` is that folder and not `v1/`. A listed file is served in a dot folder too
+(`./.private/x.md`); one that names no file in the plugin, or resolves outside it, serves nothing
+and is noted `commands entry '<path>' is not in the plugin` (PLG-26). A listed folder is read
+without any hidden folder (SKL-3) on its path from the plugin root, its own included, so a listed
+`./.private/cmds` serves nothing and neither does `more/.h/x.md` under a listed `./more`. Claude
+Code reads both; this is a known difference. Every file a `commands` list selects is read in the
+`claude` dialect. A declared plugin's own `prompts:` is a glob (LIB-33).
 
 **PLG-22.** A manifest `agents` list of `.md` files **replaces** the default `agents/` scan (see
 [agents.md](agents.md)). An item that does not name a `.md` file is dropped with a note (PLG-26).
@@ -343,6 +353,8 @@ got wrong without failing it:
 - an object-map item dropped (PLG-21), for its key as for its value, an `agents` item dropped
   (PLG-22), and an `agents` item that names no file in the plugin,
   `agents entry '<path>' is not in the plugin` (AGT-5);
+- a listed `commands` file that names no file in the plugin,
+  `commands entry '<path>' is not in the plugin` (PLG-21);
 - a default folder ignored (PLG-23);
 - an `mcpServers` that is neither an object nor a path, a file it names that is not in the plugin,
   and a root `.mcp.json` or named file that is not a JSON object (PLG-27).

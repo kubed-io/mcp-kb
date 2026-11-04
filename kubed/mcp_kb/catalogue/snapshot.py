@@ -206,14 +206,21 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
 
     prompts = config.prompts
     commands: tuple[str, ...] = ()
+    command_files: tuple[str, ...] = ()
     command_dirs: tuple[str, ...] = ()
     command_map: tuple[CommandEntry, ...] = ()
     if prompts is None and (found.commands is not None or listed.commands is not None):
         prompts = commands = _joined(found.commands, listed.commands)
+        command_files = _joined(found.command_files, listed.command_files)
         command_dirs = _joined(found.command_dirs, listed.command_dirs)
         command_map = (*found.command_map, *listed.command_map)
         mapped = (item.source for item in command_map if item.source)
-        notes += _ignored(root, "commands", (*commands, *mapped))
+        notes += _ignored(root, "commands", (*command_files, *command_dirs, *mapped))
+        notes += [
+            f"commands entry '{rel}' is not in the plugin"
+            for rel in command_files
+            if harvest.readable(root, rel) is None
+        ]
 
     if not claude_format:
         agents: tuple[str, ...] | None = ()
@@ -251,6 +258,7 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
         commands=commands,
         agents=agents,
         command_dirs=command_dirs,
+        command_files=command_files,
         command_map=command_map,
     )
     return completed, globs
@@ -264,13 +272,15 @@ def _joined(*parts: tuple[str, ...] | None) -> tuple[str, ...]:
 def _ignored(root: Path, key: str, paths: Iterable[str]) -> list[str]:
     """PLG-23's note, when ``key`` replaced a default folder that is there.
 
-    As in Claude Code, a key that names the folder or a path inside it
-    (``"./agents/reviewer.md"``, ``"./commands/"``) reads it, and earns none;
-    so does ``"./"`` as a commands directory, whose pattern starts ``**``.
+    ``paths`` are the paths as listed, never the patterns made of them: an
+    escaped folder name is not the folder's name. As in Claude Code, a key
+    that names the folder or a path inside it (``"./agents/reviewer.md"``,
+    ``"./commands/"``) reads it, and earns none; so does ``"./"`` as a
+    commands directory, which reads the whole plugin.
     """
     if not (root / key).is_dir():
         return []
-    if any(PurePosixPath(path).parts[:1] in ((key,), ("**",)) for path in paths):
+    if any(path == "." or PurePosixPath(path).parts[:1] == (key,) for path in paths):
         return []
     return [f'Default {key}/ folder is ignored because the manifest sets "{key}"']
 
@@ -339,7 +349,7 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
         skills = load_skills(dirs, library="", plugin=plugin, root=root)
         files = harvest.library_files(root, globs, dirs)
         unloadable: list[tuple[Path, str]] = []
-        declared = harvest.matching(root, globs.commands)
+        declared = harvest.command_files(root, globs)
         sources = [
             (
                 _dialect(plugin, path, root, declared),

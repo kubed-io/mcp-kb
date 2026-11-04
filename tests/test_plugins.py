@@ -307,7 +307,8 @@ def test_penpots_manifest_shape_is_read_as_published(tmp_path):
         version="0.1.0",
         keywords=("penpot", "design"),
         components=Components(
-            commands=("prompts/design-brief.md", "prompts/deck-brief.md"),
+            commands=(),
+            command_files=("prompts/design-brief.md", "prompts/deck-brief.md"),
             named=frozenset({"commands"}),
         ),
     )
@@ -360,8 +361,28 @@ def test_a_file_among_command_directories_stays_a_file(tmp_path):
     root = manifest(tmp_path, {"commands": ["commands", "./one.md", "sub/*.md"]})
     read = read_manifest(root).components
 
-    assert read.commands == ("commands/**/*.md", "one.md", "sub/*.md")
+    assert read.commands == ("commands/**/*.md",)
+    assert read.command_files == ("one.md", "sub/*.md")
     assert read.command_dirs == ("commands",)
+
+
+@pytest.mark.unit
+def test_a_listed_command_folder_is_escaped_and_the_root_is_not(tmp_path):
+    root = manifest(tmp_path, {"commands": ["./v[1]", "./", "./[x].md"]})
+    read = read_manifest(root).components
+
+    assert read.commands == ("v[[]1]/**/*.md", "**/*.md")
+    assert read.command_files == ("[x].md",)
+    assert read.command_dirs == ("v[1]", ".")
+
+
+@pytest.mark.unit
+def test_listed_command_files_alone_still_set_the_key(tmp_path):
+    root = manifest(tmp_path, {"commands": ["./one.md"]})
+    read = read_manifest(root).components
+
+    assert read.commands == ()
+    assert read.command_files == ("one.md",)
 
 
 @pytest.mark.unit
