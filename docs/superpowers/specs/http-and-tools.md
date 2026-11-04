@@ -123,10 +123,10 @@ for the caller, as in [scoping-and-instructions.md](scoping-and-instructions.md)
 **HTTP-28.** Asking for a missing prompt argument by elicitation happens only on a modern
 connection whose client declared form elicitation, as in [prompts.md](prompts.md).
 
-**HTTP-41.** *(proposed)* The server names itself `mcp-kb` with the version HTTP-20 gives
+**HTTP-41.** The server names itself `mcp-kb` with the version HTTP-20 gives
 `info.version`: the installed `kubed-mcp-kb` distribution's, or `0.0.0` without one. That is the
-`serverInfo` of an `initialize` answer and the `io.modelcontextprotocol/serverInfo` entry in a
-result's `_meta`, in both eras, and it is never FastMCP's own version.
+`serverInfo` of a handshake-era `initialize` answer, and the `io.modelcontextprotocol/serverInfo`
+entry FastMCP stamps in a modern-era result's `_meta`. It is never FastMCP's own version.
 
 **HTTP-29.** Every cacheable result (`tools/list`, `prompts/list`, `resources/list`,
 `resources/templates/list`, `resources/read`, `server/discover`) carries `ttlMs` equal to the

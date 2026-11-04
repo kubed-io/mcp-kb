@@ -313,3 +313,16 @@ def test_an_unserved_agent_validates_against_the_library_schema():
     validate("LibraryStatus", library)
     with pytest.raises(jsonschema.ValidationError):
         validate("LibraryStatus", {**library, "unserved": [{"plugin": "x"}]})
+
+
+def test_without_the_distribution_the_version_is_the_placeholder(monkeypatch):
+    from importlib.metadata import PackageNotFoundError
+
+    from kubed.mcp_kb.spec import builder
+
+    def missing(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(builder, "metadata", missing)
+    assert builder.package_version() == "0.0.0"
+    assert builder.build_spec()["info"]["version"] == "0.0.0"
