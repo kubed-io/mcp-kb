@@ -17,7 +17,7 @@ async def test_serverinfo_is_kbs_own_version(kb_url):
     info = yaml.safe_load(httpx.get(f"{kb_url}/openapi.yaml").text)["info"]
     expected = {"name": "mcp-kb", "version": info["version"]}
     async with connect(kb_url, mode="legacy") as client:
-        server_info = client.initialize_result.serverInfo
+        server_info = client.initialize_result.server_info
         assert {"name": server_info.name, "version": server_info.version} == expected
     listing = await rpc(kb_url, "agents/list")
     assert listing["_meta"][SERVER_INFO_META_KEY] == expected
@@ -28,16 +28,16 @@ async def test_one_template_names_the_skill_space(kb_url):
     """SKL-53: one fixed template row names the skill:// address space."""
     async with connect(kb_url) as client:
         templates = await client.list_resource_templates()
-    assert [(t.uriTemplate, t.name) for t in templates] == [
+    assert [(t.uri_template, t.name) for t in templates] == [
         ("skill://{library}/{+path}", "skill")
     ]
 
 
 def test_every_fixture_plugin_is_ok(kb_url):
-    """HTTP-41: every fixture plugin loaded, and no fixture library errs."""
+    """HTTP-7, LIB-29: every fixture plugin loaded, and no fixture library errs."""
     report = health(kb_url)
     for plugin_id, plugin in report["plugins"].items():
-        if plugin_id.endswith(("@live", "@live-other")):
+        if plugin_id.endswith(("@live", "@live-other")) or plugin_id == "dav-kit":
             assert plugin["status"] == "ok", (plugin_id, plugin)
             assert not plugin.get("error"), (plugin_id, plugin)
     for name in ("live", "live-other", "clash", "clash-appended", "dav"):

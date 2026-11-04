@@ -79,7 +79,7 @@ on #51.
   repository root with the `wiki/` submodule checked out (`git submodule update --init`). Plain
   `pytest` must report every `tests/live/` test as skipped and none as failed.
 - **The live run** is the recipe in CONTRIBUTING.md's "Live checks" section, which ends in
-  `pytest -m live --kb-url http://127.0.0.1:8000 [--kb-dav-dir "$LIVE/dav"]`.
+  `pytest -m live --kb-url http://127.0.0.1:8000 [--kb-dav-dir="$LIVE/dav"]`.
 - **No change under `kubed/`.** When a live check fails, first check the fixture and the
   expectation against the spec. If kb is what is wrong, keep the assertion as the spec says. Mark
   the test `@pytest.mark.xfail(strict=True, reason="<REQ>: <what kb does instead>; bug to file")`
@@ -436,7 +436,7 @@ python -m tests.webdav_server --root "$LIVE/dav" --port 8090 &
 ```
 
   Prefix the `mcp-kb` line with `LIVE_DAV_PASSWORD=s3cret-app-password` (the test server's
-  password, not a secret), and add `--kb-dav-dir "$LIVE/dav"` to the `pytest` line.
+  password, not a secret), and add `--kb-dav-dir="$LIVE/dav"` to the `pytest` line.
 - Create: `tests/live/test_live_reread.py`.
 
 **Interfaces:**
@@ -474,7 +474,7 @@ python -m tests.webdav_server --root "$LIVE/dav" --port 8090 &
   tests skipped.
 
 - [ ] **Step 4: Run the whole live recipe**, with the WebDAV server and `--kb-dav-dir`.
-  Run: `pytest -m live --kb-url http://127.0.0.1:8000 --kb-dav-dir "$LIVE/dav" -v`
+  Run: `pytest -m live --kb-url http://127.0.0.1:8000 --kb-dav-dir="$LIVE/dav" -v`
   Expected:
   - every live test PASSes (or is a strict xfail, under Global Constraints);
   - kb's stderr has one warning naming `dav_editable` for the broken edit.
@@ -492,7 +492,7 @@ These steps are not the code agent's. They need a deployment, and a Claude Code 
 Post their results on #51 as one comment. The comment records the fixture commit `<sha>` and the
 image `kubed/mcp-kb:<sha>`, and holds no credential, no internal hostname and no token.
 
-1. **The deployment.** Deploy the branch image `:<sha>`. Add the four libraries from
+1. **The deployment.** Deploy the branch image `:<sha>`. Add the libraries `live`, `live-other`, `clash` and `clash-appended` from
    `tests/fixtures/live/config.yaml` to its config, pinned to `<sha>` (CONTRIBUTING.md, "Live
    checks"). Run `pytest -m live --kb-url <its URL>`. AGT-16 skips unless the deployment has a
    WebDAV source with a folder you can edit.
@@ -507,4 +507,5 @@ image `kubed/mcp-kb:<sha>`, and holds no credential, no internal hostname and no
      - the clash rename reaches the client as `clash_reviewer@second` (AGT-8);
      - an edit in the share shows on the next `agents/get` (AGT-16);
      - drawio's `diagrammer` reaches `skill://drawio/drawio/SKILL.md` with no `Unknown skill`
-       call (#50).
+       call (#50);
+     - `live_hooked`'s fixture hook (`echo never-run`) did not run, if the mod registers it.

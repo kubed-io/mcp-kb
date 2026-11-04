@@ -151,18 +151,34 @@ The live checks in `tests/live/` need a running kb and are not part of CI: plain
 ```bash
 LIVE=$(mktemp -d)
 sed "s#@ROOT@#$PWD#g" tests/fixtures/live/config.yaml > "$LIVE/config.yaml"
-mcp-kb --config "$LIVE/config.yaml" --cache-dir "$LIVE/cache" --host 127.0.0.1 --port 8000 &
-until curl -sf http://127.0.0.1:8000/health >/dev/null; do sleep 1; done
-pytest -m live --kb-url http://127.0.0.1:8000
+cp -r tests/fixtures/live/dav "$LIVE/dav"
+python -m tests.webdav_server --root "$LIVE/dav" --port 8090 & DAV=$!
+for _ in $(seq 30); do curl -s -o /dev/null http://127.0.0.1:8090/kb/ && break; sleep 1; done
+LIVE_DAV_PASSWORD=s3cret-app-password mcp-kb --config "$LIVE/config.yaml" --cache-dir "$LIVE/cache" --host 127.0.0.1 --port 8000 & KB=$!
+for _ in $(seq 30); do curl -sf http://127.0.0.1:8000/health >/dev/null && break; sleep 1; done
+pytest -m live --kb-url http://127.0.0.1:8000 --kb-dav-dir="$LIVE/dav"
+kill "$KB" "$DAV"; rm -rf "$LIVE"
 ```
+
+Ports 8000 and 8090 must be free before the block runs: a server already on one
+would answer the waits, and the run would test it instead of the new one.
+
+`--kb-dav-dir=` is written with `=` because, with a space, pytest takes the
+folder for a test path and never loads the options.
 
 Against a deployment:
 
-- add the config's libraries to the deployment's config, with each
-  `file://@ROOT@/tests/fixtures/live...` source rewritten as
-  `<its git source>://kubed-io/mcp-kb//tests/fixtures/live...?ref=<sha>`;
+- add the libraries `live`, `live-other`, `clash` and `clash-appended` to the
+  deployment's config, with each `file://@ROOT@/tests/fixtures/live...` source
+  rewritten as `<its git source>://kubed-io/mcp-kb//tests/fixtures/live...?ref=<sha>`;
+  leave out the `dav` source, the `dav-kit` plugin and the `dav` library (a
+  deployment has no share the check can edit, and `dav` alone fails validation
+  because `dav-kit` is declared in `plugins:`), so the two re-read tests skip;
 - push the fixtures first, because a ref names a pushed commit;
 - run with `--kb-url <its URL>`.
+
+`--kb-url` must be kb's own URL, not a gateway's, since HTTP-41 checks the
+serverInfo kb itself answers with.
 
 The re-read check skips without `--kb-dav-dir`.
 

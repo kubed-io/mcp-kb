@@ -1,4 +1,4 @@
-"""PLG-16..26, LIB-13: plugin.json parity, live."""
+"""PLG-16, PLG-17, PLG-20, PLG-21, PLG-23..26, LIB-13: plugin.json parity, live."""
 
 from __future__ import annotations
 
