@@ -38,7 +38,11 @@ whose path does not end in `.md`, a directory included, is dropped with the note
 `agents entry '<path>' is not a .md file`. A listed path is a path, not a glob, and names the
 one file it spells, in a dot folder too; a `.md` path that names no file in the plugin, or one
 that resolves outside it, serves nothing and is noted `agents entry '<path>' is not in the
-plugin` (PLG-26).
+plugin` (PLG-26). The default scan adds a name segment for each folder between `agents/` and the
+file (AGT-7); each segment, and the name they and the frontmatter `name` join into, MUST be a
+usable name, as the frontmatter `name` is (AGT-6). A file whose name is not, `agents/x@y/r.md`, is
+skipped with `agent name <name> is not a usable name`, the name quoted escaped, and never claims
+the name.
 
 **AGT-6.** An agent file is YAML frontmatter and a Markdown body. Its frontmatter MUST parse into
 a non-empty mapping with string keys, convert to JSON, and carry `name` and `description` as
@@ -147,6 +151,6 @@ are not tags and narrow nothing. A scope reaching only agents is served, not ref
 
 - `agents` at the top level: the agents currently served, across libraries;
 - `agents` for each plugin (what it yields, library-independent) and each library (what it serves);
-- each skipped agent file under its plugin's `skipped`, with its reason (AGT-6, AGT-8), and each
+- each skipped agent file under its plugin's `skipped`, with its reason (AGT-5, AGT-6, AGT-8), and each
   dropped or missing `agents` entry under its `notes` (AGT-5);
 - a library's `renamed` and `unserved` (AGT-8), each present only when not empty.
