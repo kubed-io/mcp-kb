@@ -35,6 +35,7 @@ from mcp_types import ToolAnnotations
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 from pydantic import ConfigDict, Field
 
+from ..catalogue.names import QualifiedNames
 from ..catalogue.prompts import FilePrompt, MissingArguments
 from ..catalogue.uris import SCHEME
 from .request import requested_addressing, requested_scope
@@ -68,7 +69,9 @@ class MCPFilePrompt(Prompt):
     ``PromptProvider``, so ``${CLAUDE_PLUGIN_ROOT}/skills/x/y.md`` renders as
     skill ``x``'s own address. Rendered literally, as
     ``skill://<library>/skills/x/y.md``, it would read as nothing: a skill's
-    files are served only at the skill's own address.
+    files are served only at the skill's own address. ``names`` is the same
+    plugin's qualified skill names (``<plugin>:<skill>``) within the caller's
+    scope, set per request alike, so a body citing one renders its address.
 
     A missing argument is the one failure translated here. FastMCP treats any
     other exception out of a render as its own fault: -32603 on the wire and a
@@ -84,6 +87,7 @@ class MCPFilePrompt(Prompt):
 
     file: FilePrompt
     skill_dirs: dict[str, str] = Field(default_factory=dict)
+    names: QualifiedNames = Field(default_factory=QualifiedNames)
 
     async def render(
         self, arguments: dict[str, object] | None = None
@@ -111,6 +115,7 @@ class MCPFilePrompt(Prompt):
             arguments,
             plugin_root=f"{SCHEME}{self.file.library}",
             skills=self.skill_dirs,
+            names=self.names,
         )
         return requested_addressing().text(text)
 
@@ -244,10 +249,11 @@ class PromptProvider(Provider):
         call -- FastMCP renders what it is handed. So the file is brought level
         with its server here, on the way out.
 
-        The map of the plugin's skills is set here too. It is built from the
+        The maps of the plugin's skills -- their directories and their
+        qualified names -- are set here too. It is built from the
         snapshot reference the revalidation used, so both work off one
         generation. The prompt was found by the lookup above, which takes its
-        own reference. The map is built only on a get, so the listing never
+        own reference. The maps are built only on a get, so the listing never
         pays for it.
         """
         prompt = await super()._get_prompt(name, version)
@@ -261,7 +267,10 @@ class PromptProvider(Provider):
         dirs = snapshot.catalogue.plugin_skill_dirs(
             prompt.file.library, prompt.file.plugin, requested_scope()
         )
-        return prompt.model_copy(update={"skill_dirs": dirs})
+        names = snapshot.catalogue.qualified_names(
+            prompt.file.library, prompt.file.plugin, requested_scope()
+        )
+        return prompt.model_copy(update={"skill_dirs": dirs, "names": names})
 
 
 class ReadOnlyPromptsAsTools(PromptsAsTools):

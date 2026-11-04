@@ -71,6 +71,11 @@ def _build(base):
     _write(kit, "skills/cite/SKILL.md", SKILL_ON_DISK)
     _write(kit, ".claude-plugin/plugin.json", json.dumps({"name": "kit"}))
     _write(kit, "agents/helper.md", AGENT)
+    _write(
+        kit,
+        "commands/cite.md",
+        "---\ndescription: Cite.\n---\n" + NAMES + "G $ARGUMENTS\n",
+    )
 
     extra = base / "extra"
     _write(
@@ -160,6 +165,24 @@ async def _agent(url, name, tags=None, prefix=None):
     return await _raw(url, "agents/get", _headers(tags, prefix), name=name)
 
 
+async def _prompt(url, name, arguments=None):
+    client = Client(StreamableHttpTransport(url))
+    async with client:
+        got = await client.get_prompt(name, arguments)
+    return got.messages[0].content.text
+
+
+async def _prompt_tool(url, name, arguments=None):
+    client = Client(
+        StreamableHttpTransport(url, headers={"X-MCP-Prompts": "off"})
+    )
+    async with client:
+        result = await client.call_tool(
+            "get_prompt", {"name": name, "arguments": arguments or {}}
+        )
+    return json.loads(result.content[0].text)["messages"][0]["content"]
+
+
 async def test_a_skill_body_reads_qualified_names_as_addresses(url):
     body = await _read(url, "skill://kit/cite/SKILL.md")
     assert body == HEAD + RESOLVED
@@ -215,3 +238,16 @@ async def test_the_preload_map_is_never_prefixed(url):
         "io.kubed.mcp-kb/agent"
     ]
     assert meta["skills"]["writing"] == "skill://kit/writing/SKILL.md"
+
+
+async def test_a_prompt_body_reads_qualified_names_as_addresses(url):
+    assert await _prompt(url, "kit_cite") == RESOLVED + "G \n"
+
+
+async def test_an_argument_value_is_never_rewritten(url):
+    text = await _prompt(url, "kit_cite", {"arguments": "kit:writing"})
+    assert text == RESOLVED + "G kit:writing\n"
+
+
+async def test_the_prompt_mirror_rewrites_alike(url):
+    assert await _prompt_tool(url, "kit_cite") == RESOLVED + "G \n"
