@@ -12,6 +12,9 @@ than a parse of `pyproject.toml`: this runs inside the deployed image too, at
 server registration, where there is no `pyproject.toml` to open, and
 `importlib.metadata` is what `setuptools_scm` already derives the real
 version from.
+
+The same version names the MCP server (`server.py`), so the document and the
+handshake never disagree.
 """
 
 from __future__ import annotations
@@ -43,6 +46,11 @@ def _info() -> tuple[str, str]:
     except PackageNotFoundError:
         return FALLBACK_DESCRIPTION, PLACEHOLDER_VERSION
     return found["Summary"] or FALLBACK_DESCRIPTION, found["Version"]
+
+
+def package_version() -> str:
+    """kb's own version: the one the OpenAPI document and the MCP server share."""
+    return _info()[1]
 
 
 def _field(kind: str, desc: str, **extra) -> dict:
