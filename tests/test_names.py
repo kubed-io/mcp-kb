@@ -22,6 +22,12 @@ def test_a_qualified_name_reads_as_the_skill_address():
     assert NAMES.rewrite("(`kit-extra:ops`)") == "(`skill://kit/ops/SKILL.md`)"
 
 
+def test_a_name_in_fenced_code_is_rewritten_alike():
+    # SKL-54 has no fence exception: writing-plans' plan header sits in one.
+    fenced = "```markdown\n> REQUIRED SUB-SKILL: Use kit:writing (recommended)\n```\n"
+    assert NAMES.rewrite(fenced) == fenced.replace("kit:writing", W)
+
+
 def test_the_first_plugin_of_that_name_that_serves_it_answers():
     assert NAMES.rewrite("kit:late") == "skill://kit/late/SKILL.md"
 

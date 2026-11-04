@@ -1,5 +1,18 @@
 # Live Checks Against a Running kb Implementation Plan
 
+> **History.** Shipped in #55 (a54378b), into `issue-38`, then to `main` in #62. It changes no
+> requirement. It checks [agents](../specs/agents.md) (AGT-6–8, AGT-16–17),
+> [plugins-and-libraries](../specs/plugins-and-libraries.md) (PLG-17, PLG-20–27),
+> [http-and-tools](../specs/http-and-tools.md) (HTTP-41) and [skills](../specs/skills.md)
+> (SKL-53–55).
+> **Overtaken:**
+> - No check needed a strict xfail, so no kb bug was filed from the run.
+> - Minor review items accepted on #55, not fixed: `greet`'s inline content isn't checked as a
+>   body; the broken-edit warning is checked on stderr only; `test_every_fixture_plugin_is_ok`
+>   doesn't assert that `live` exists; the leak check reports a count.
+> - The client half (`claude -p` with the mod) and the cluster run on `:<sha>` go on #51, as
+>   settled, and are not kept in the repo. When #62 was opened, neither had been posted yet.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A repeatable `pytest -m live --kb-url <url>` run that checks a running kb (a local

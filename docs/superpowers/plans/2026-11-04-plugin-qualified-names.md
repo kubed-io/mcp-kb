@@ -1,5 +1,21 @@
 # Plugin-Qualified Skill Names Implementation Plan
 
+> **History.** Shipped in #54 (628aeb5), into `issue-38`, then to `main` in #62. What it asked
+> for now lives in the living spec: [skills](../specs/skills.md) (SKL-54–55, SKL-41 reworded),
+> [prompts](../specs/prompts.md) (PRM-62, PRM-47 reworded), [agents](../specs/agents.md) (AGT-17,
+> AGT-9 reworded).
+> **Overtaken:**
+> - *What a name is*: `{`, `$` and `#` are on the list of characters a name may not follow, too,
+>   so `${input:topic}` and `#tool:x` stay placeholders (SKL-54). The review on #54 added them.
+> - *How it resolves*, "Commands are not rewritten": a command's name is served as written only
+>   when no in-scope skill shares it. A skill and a command of one name read as the skill, as in
+>   Claude Code (SKL-55), and the fixture pins `/kit:cite`.
+> - Task 1's `split_frontmatter` takes any delimiter line python-frontmatter does (three or more
+>   `-` and trailing blanks), not only `---`.
+> - "fenced code included" had no test until #62 added `test_a_name_in_fenced_code_is_rewritten_alike`.
+> - Deferred, not yet filed: the name table is rebuilt on every `SKILL.md`, prompt and agent read
+>   (about 3 ms a read on a 1000-skill library), and no test covers a prompt whose plugin is empty.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A `<plugin>:<skill>` name in served text reads as the skill's `skill://` address, and
@@ -14,9 +30,9 @@ builds that table from the skills the caller can see. Four places use it: `_skil
 
 **Tech Stack:** Python ≥3.11, FastMCP 4 (`fastmcp>=4.0.0,<5`), pytest + pytest-asyncio, uvicorn.
 
-**Spec:** this file's Design section, and SKL-54, SKL-55, PRM-62 and AGT-17, *(proposed)* in
+**Spec:** this file's Design section, and SKL-54, SKL-55, PRM-62 and AGT-17 in
 [skills.md](../specs/skills.md), [prompts.md](../specs/prompts.md) and
-[agents.md](../specs/agents.md) until Task 4. The brief is gap 1 of issue #38. Its decision is
+[agents.md](../specs/agents.md). The brief is gap 1 of issue #38. Its decision is
 on #50 and in #38's notes. There is no separate design doc.
 
 ## Design

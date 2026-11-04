@@ -1,5 +1,14 @@
 # kb's Own Version in `serverInfo` Implementation Plan
 
+> **History.** Shipped in #53 (f5abdc7), into `issue-38`, then to `main` in #62. What it asked
+> for now lives in the living spec: [http-and-tools](../specs/http-and-tools.md) (HTTP-41).
+> **Overtaken:**
+> - Task 1's contingency fired: a handshake-era result carries no `_meta` stamp, so
+>   `test_every_result_names_kb_and_its_version` runs in `auto` mode only, and `initialize`'s
+>   `serverInfo` covers the legacy era. HTTP-41 was reworded to say which era carries which.
+> - The tests read `initialize_result.server_info`, not the `.serverInfo` the plan's code uses,
+>   which FastMCP 4.1.6 deprecates.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `serverInfo.version` reports kb's package version instead of FastMCP's.
@@ -11,8 +20,7 @@ handshake share one lookup and cannot disagree.
 
 **Tech Stack:** Python ≥3.11, FastMCP 4 (`fastmcp>=4.0.0,<5`), pytest + pytest-asyncio.
 
-**Spec:** this file's Design section, and [HTTP-41](../specs/http-and-tools.md), which is
-*(proposed)* until Task 1 lands. The brief is gap 2 of issue #38, filed as #47. The change is small
+**Spec:** this file's Design section, and [HTTP-41](../specs/http-and-tools.md). The brief is gap 2 of issue #38, filed as #47. The change is small
 enough that it has no separate design doc.
 
 ## Design

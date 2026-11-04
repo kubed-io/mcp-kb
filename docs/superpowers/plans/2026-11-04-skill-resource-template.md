@@ -1,5 +1,16 @@
 # A Resource Template for `skill://` Implementation Plan
 
+> **History.** Shipped in #52 (f7e6bbb), into `issue-38`, then to `main` in #62. What it asked
+> for now lives in the living spec: [skills](../specs/skills.md) (SKL-53, and SKL-41's table
+> reworded to name the template's description and `uriTemplate`).
+> **Overtaken:**
+> - `test_a_read_never_resolves_through_the_template` no longer leans on FastMCP's regex failing
+>   on `{+path}`: it makes `SkillTemplate.matches` match every URI, so it fails if the
+>   `_get_resource_template` override goes, and it checks a directory address keeps its hint.
+> - The tests read FastMCP's non-deprecated `uri_template` and `mime_type`, not the `uriTemplate`
+>   and `mimeType` the plan's code uses.
+> - The `mimeType` dropped through `SkillTemplate.to_mcp_template` is as the Design says.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `resources/templates/list` tells a client that this server serves the `skill://`
@@ -12,8 +23,7 @@ None, so no read ever resolves through the template. Nothing in `catalogue/` cha
 
 **Tech Stack:** Python ≥3.11, FastMCP 4 (`fastmcp>=4.0.0,<5`), pytest + pytest-asyncio, uvicorn.
 
-**Spec:** this file's Design section, and [SKL-53](../specs/skills.md), *(proposed)* until
-Task 2. The brief is gap 3 of issue #38, and its decisions are on #49. There is no separate
+**Spec:** this file's Design section, and [SKL-53](../specs/skills.md). The brief is gap 3 of issue #38, and its decisions are on #49. There is no separate
 design doc.
 
 ## Design
