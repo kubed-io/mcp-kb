@@ -253,3 +253,23 @@ def skills_dir_module(tmp_path_factory):
     has to outlive a single test.
     """
     return _build_tree(tmp_path_factory.mktemp("skills"))
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--kb-url", default=None, help="a running kb's base URL, for tests/live"
+    )
+    parser.addoption(
+        "--kb-dav-dir",
+        default=None,
+        help="the folder the running kb's dav source serves; AGT-16 edits it",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--kb-url"):
+        return
+    skip = pytest.mark.skip(reason="a live check: needs --kb-url")
+    for item in items:
+        if item.get_closest_marker("live"):
+            item.add_marker(skip)

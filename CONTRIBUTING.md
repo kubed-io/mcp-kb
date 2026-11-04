@@ -32,7 +32,8 @@ clone without it works — the wiki tests skip and you have no wiki.
 The tests use a synthetic skills tree from `tests/conftest.py` and never clone an
 upstream repository, so the suite needs no network. `tests/webdav_server.py`
 stands up a real WebDAV server on loopback for the WebDAV backend; that is as far
-out as anything reaches.
+out as anything reaches; `tests/live/` reaches a running kb, and skips unless it
+is given `--kb-url`.
 
 ## Where things live
 
@@ -141,6 +142,29 @@ its reason** in `.github/zizmor.yml` or `.hadolint.yaml` — never a bare ignore
 
 There is no `Makefile`. Everything is `pyproject.toml` plus the scripts in
 `scripts/`.
+
+## Live checks
+
+The live checks in `tests/live/` need a running kb and are not part of CI: plain
+`pytest` skips every one. Locally, run this block, from the repository root:
+
+```bash
+LIVE=$(mktemp -d)
+sed "s#@ROOT@#$PWD#g" tests/fixtures/live/config.yaml > "$LIVE/config.yaml"
+mcp-kb --config "$LIVE/config.yaml" --cache-dir "$LIVE/cache" --host 127.0.0.1 --port 8000 &
+until curl -sf http://127.0.0.1:8000/health >/dev/null; do sleep 1; done
+pytest -m live --kb-url http://127.0.0.1:8000
+```
+
+Against a deployment:
+
+- add the config's libraries to the deployment's config, with each
+  `file://@ROOT@/tests/fixtures/live...` source rewritten as
+  `<its git source>://kubed-io/mcp-kb//tests/fixtures/live...?ref=<sha>`;
+- push the fixtures first, because a ref names a pushed commit;
+- run with `--kb-url <its URL>`.
+
+The re-read check skips without `--kb-dav-dir`.
 
 ## The changelog
 

@@ -1,0 +1,4 @@
+# Replace @ROOT@ with the repository root (sed), as CONTRIBUTING.md's
+# "Live checks" section shows.
+libraries:
+  - {name: live, source: "file://@ROOT@/tests/fixtures/live"}
