@@ -50,6 +50,7 @@ import yaml
 
 from .. import placeholders
 from ..harvest import COMMAND_DIRS
+from ..names import QualifiedNames
 from . import claude, copilot, detect, mcpkb
 from .mcpkb import PLACEHOLDER
 from .shape import Argument, Parsed
@@ -154,6 +155,7 @@ class FilePrompt:
         *,
         plugin_root: str | None = None,
         skills: Mapping[str, str] | None = None,
+        names: QualifiedNames | None = None,
     ) -> str:
         """Fill in the placeholders, raising ``MissingArguments`` on a missing one.
 
@@ -170,6 +172,10 @@ class FilePrompt:
         ``skill://<library>/skills/x/…``, it would read as nothing: a skill's
         files are served only at the skill's own address. Without
         ``plugin_root`` the map does nothing.
+
+        Given ``names``, the plugin-qualified skill names in the body are
+        rewritten to their addresses. That happens to the template, before
+        the dialect runs, so an argument's value is never rewritten.
 
         Plain and synchronous: the FastMCP-facing wrapper is what turns this
         into the async ``render`` a ``Prompt`` subclass must provide, and what
@@ -192,7 +198,10 @@ class FilePrompt:
             arg.name: given.get(arg.name, self.defaults.get(arg.name, ""))
             for arg in self.arguments
         }
-        text = DIALECTS[self.dialect].substitute(self.body(), values)
+        template = self.body()
+        if names is not None:
+            template = names.rewrite(template)
+        text = DIALECTS[self.dialect].substitute(template, values)
         if plugin_root is not None:
             text = placeholders.substitute(
                 text, plugin_root=plugin_root, skills=skills

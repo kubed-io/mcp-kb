@@ -675,6 +675,9 @@ def build_snapshot(
                     lib.description.strip(),
                     lib.notes.strip(),
                     lib.list_skills,
+                    tuple(
+                        (pid, by_id[pid].name) for pid in lib.plugins if pid in by_id
+                    ),
                 )
                 for lib in libraries
             ],

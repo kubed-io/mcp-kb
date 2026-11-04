@@ -664,6 +664,7 @@ def test_the_definition(tmp_path):
                     "color": "cyan",
                 },
                 "servers": ["drawio"],
+                "skills": {},
             }
         },
     }
