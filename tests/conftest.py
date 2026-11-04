@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import frontmatter
 import pytest
 
 from kubed.mcp_kb.catalogue import harvest
@@ -29,6 +30,29 @@ PROMPT_GLOBS = Globs(skills=(), prompts=("*.md",))
 # What each synthetic skills plugin declares about itself. A tag per plugin, so
 # a tag scope can tell the two apart the way a library scope can.
 PLUGIN_TAGS = {"flatsource": ("flat",), "deepsource": ("deep",)}
+
+# Frontmatter nested deeper than the YAML parser's stack, as far as
+# ``frontmatter_out_of_stack`` is concerned; the real parser may well read it.
+DEEP_YAML = "[" * 1000 + "]" * 1000
+
+
+@pytest.fixture
+def frontmatter_out_of_stack(monkeypatch):
+    """``frontmatter.loads`` as a runner with a small stack has it.
+
+    Since 3.14 how deep a parser goes depends on the thread's stack size, not
+    on the recursion limit, so real nesting raises ``RecursionError`` on one
+    runner and parses to the end on another. Text holding ``DEEP_YAML`` raises
+    here every time; every other text still goes to the real parser.
+    """
+    real = frontmatter.loads
+
+    def loads(text, *args, **kwargs):
+        if isinstance(text, str) and DEEP_YAML in text:
+            raise RecursionError("maximum recursion depth exceeded")
+        return real(text, *args, **kwargs)
+
+    monkeypatch.setattr(frontmatter, "loads", loads)
 
 
 def fetch_key(path: Path) -> str:

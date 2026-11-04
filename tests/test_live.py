@@ -29,6 +29,7 @@ from kubed.mcp_kb.config import BasicAuth, Config, EnvRef
 from kubed.mcp_kb.mcp.prompts import PromptProvider
 from kubed.mcp_kb.plugins import Fetch
 from kubed.mcp_kb.sources import live
+from tests.conftest import DEEP_YAML
 from tests.webdav_server import FOLDER, PASSWORD, USERNAME
 
 pytestmark = pytest.mark.unit
@@ -146,6 +147,28 @@ async def test_a_live_prompt_saved_mid_edit_serves_the_last_good_body(
 
     assert "the harvested body" in rendered
     assert "re-reading prompt" in caplog.text
+
+
+async def test_a_live_prompt_saved_too_deep_serves_the_last_good_body(
+    webdav, tmp_path, caplog, frontmatter_out_of_stack
+):
+    """Frontmatter nested past the parser's stack raises `RecursionError`,
+    which is neither of the above: it too falls back to the harvested body."""
+    webdav.write("prompts/p.md", PROMPT.format(body="the harvested body"))
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+    provider = PromptProvider(lambda: knowledge_base.snapshot)
+
+    webdav.write(
+        "prompts/p.md",
+        f"---\ndescription: A prompt.\nx: {DEEP_YAML}\n---\n\nthe edited body\n",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.catalogue.prompts"):
+        prompt = await provider.get_prompt("notes_p")
+        rendered = await prompt.render({})
+
+    assert "the harvested body" in rendered
+    assert "nested too deeply" in caplog.text
 
 
 # -- and what it does not ------------------------------------------------------

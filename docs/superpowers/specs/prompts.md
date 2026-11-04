@@ -31,8 +31,9 @@ block (`---` then `---`) is valid.
 
 **PRM-7.** A file that cannot be read, whose YAML does not parse, or whose frontmatter breaks a rule
 below is skipped with a reason. A frontmatter key that is not a string (`1:`, `true:`) is skipped
-with `frontmatter has a key that is not a string`, and so is an inline command's (PLG-21). The
-plugin's other prompts, skills and files still serve.
+with `frontmatter has a key that is not a string`, and so is an inline command's (PLG-21).
+Frontmatter nested too deeply for the parser is skipped with `frontmatter is nested too deeply to
+read`, and so is an inline command's. The plugin's other prompts, skills and files still serve.
 
 **PRM-8.** A frontmatter field of the wrong type (a mapping or a list where text is expected, a
 non-list where a list is expected) skips the file with a reason naming the field. It MUST NOT stop
@@ -282,4 +283,5 @@ and its body is re-read from disk on each render.
 another argument needs a refresh.
 
 **PRM-60.** When a live re-read fails (unreadable file, no frontmatter block, YAML that does not
-parse), the prompt renders the body last harvested and kb logs a warning.
+parse or is nested too deeply to read), the prompt renders the body last harvested and kb logs a
+warning.

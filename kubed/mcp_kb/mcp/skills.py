@@ -60,7 +60,7 @@ def addressed(
         )
         if file["uri"] == entry["uri"] and served != body:
             # An unparsable served body keeps the canonical frontmatter.
-            with contextlib.suppress(yaml.YAMLError, ValueError):
+            with contextlib.suppress(yaml.YAMLError, ValueError, RecursionError):
                 meta = frontmatter.loads(served).metadata
                 entry = {**entry, "frontmatter": meta}
     return {**entry, "resources": files}
