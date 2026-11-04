@@ -97,6 +97,14 @@ its tags are the library's name and `index`.
 SCP-3, any case), the listing adds one row per in-scope skill, by address: its `SKILL.md` URI, the
 name `<address>/SKILL.md`, the skill's description, and its library and plugin labels as tags.
 
+**SKL-53.** `resources/templates/list` returns one template under every scope a
+request is not refused for (SCP-29): `uriTemplate` `skill://{library}/{+path}`, `name` `skill`,
+no `mimeType`, and the description `A skill, index or file this server serves: {library} is a
+library's name and {path} a path below it. Start at skill://{library}/_index.md; resources/list
+names the libraries.` The description is text and carries the prefix (SKL-41); the `uriTemplate`
+never does. The template is for discovery only: a read resolves exactly as it would without it,
+and no tool lists it.
+
 ## Indexes
 
 **SKL-17.** An `_index.md` lists only what sits directly under it, one `<uri>: <text>` line each:
@@ -241,9 +249,9 @@ stay as they are).
 
 | Where | Prefixed |
 |---|---|
-| resource bodies, listing descriptions, read hints, an extension entry's `frontmatter` | yes |
+| resource bodies, listing descriptions, read hints, an extension entry's `frontmatter`, the template's description | yes |
 | tool results ([http-and-tools.md](http-and-tools.md)), instructions (INS-16), rendered prompts | yes |
-| a listing row's `uri` and `name`, an extension entry's `uri` and each file `uri` | never |
+| a listing row's `uri` and `name`, an extension entry's `uri` and each file `uri`, the template's `uriTemplate` | never |
 
 **SKL-42.** An incoming address (`resources/read`, `read_resource`, `skills/get`) MAY be
 `skill://…` or `<prefix>skill://…` for the request's own prefix. Any other prefix resolves to
