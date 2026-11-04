@@ -1,0 +1,17 @@
+# Replace @ROOT@ with the repository root (sed), as CONTRIBUTING.md's
+# "Live checks" section shows.
+# `dav` has no `refresh` on purpose: an unrefreshed fetch is never rebuilt, so
+# the snapshot's agent name stands, and what AGT-16 sees is the live re-read.
+sources:
+  - name: dav
+    url: "webdav+http://127.0.0.1:8090"
+    cache: live
+    auth: {username: dr-k, password: {env: LIVE_DAV_PASSWORD}}
+plugins:
+  - {name: dav-kit, source: "dav://kb"}
+libraries:
+  - {name: live, source: "file://@ROOT@/tests/fixtures/live"}
+  - {name: live-other, source: "file://@ROOT@/tests/fixtures/live/other"}
+  - {name: clash, plugins: [first@live, second@live, second@live-other]}
+  - {name: clash-appended, plugins: [first@live, second@live, second@live-other, late@live]}
+  - {name: dav, plugins: [dav-kit]}

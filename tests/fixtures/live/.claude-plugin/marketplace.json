@@ -1,0 +1,79 @@
+{
+  "name": "live",
+  "owner": {
+    "name": "kubed-io"
+  },
+  "plugins": [
+    {
+      "name": "first",
+      "source": "./plugins/first"
+    },
+    {
+      "name": "second",
+      "source": "./plugins/second"
+    },
+    {
+      "name": "late",
+      "source": "./plugins/late"
+    },
+    {
+      "name": "folders",
+      "source": "./plugins/folders"
+    },
+    {
+      "name": "listed-agents",
+      "source": "./plugins/listed-agents"
+    },
+    {
+      "name": "deep-yaml",
+      "source": "./plugins/deep-yaml"
+    },
+    {
+      "name": "servers",
+      "source": "./plugins/servers",
+      "mcpServers": {
+        "ignored": {
+          "type": "http",
+          "url": "https://example.invalid/ignored"
+        }
+      }
+    },
+    {
+      "name": "servers-file",
+      "source": "./plugins/servers-file"
+    },
+    {
+      "name": "names",
+      "source": "./plugins/names"
+    },
+    {
+      "name": "skills-add",
+      "source": "./plugins/skills-add"
+    },
+    {
+      "name": "undotted",
+      "source": "./plugins/undotted"
+    },
+    {
+      "name": "commands-map",
+      "source": "./plugins/commands-map"
+    },
+    {
+      "name": "commands-list",
+      "source": "./plugins/commands-list"
+    },
+    {
+      "name": "commands-path",
+      "source": "./plugins/commands-path"
+    },
+    {
+      "name": "versioned",
+      "source": "./plugins/versioned",
+      "version": "2.0.0"
+    },
+    {
+      "name": "manifest-versioned",
+      "source": "./plugins/manifest-versioned"
+    }
+  ]
+}

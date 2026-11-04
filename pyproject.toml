@@ -121,6 +121,7 @@ testpaths = ["tests"]
 markers = [
   "unit: mark a test as a unit test",
   "integration: mark a test as an integration test",
+  "live: a check against a running kb, skipped without --kb-url",
 ]
 
 [tool.ruff]
