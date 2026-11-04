@@ -30,6 +30,7 @@ NAMES = (
     "D kit:nope\n"
     "E https://kit:writing\n"
     "F /kit:db:migrate\n"
+    "G /kit:cite\n"  # a skill and a command share the name: the skill wins
 )
 RESOLVED = (
     "A skill://kit/writing/SKILL.md\n"
@@ -38,6 +39,7 @@ RESOLVED = (
     "D kit:nope\n"
     "E https://kit:writing\n"
     "F /kit:db:migrate\n"
+    "G skill://kit/cite/SKILL.md\n"
 )
 HEAD = "---\nname: cite\ndescription: See kit:writing.\n---\n\n"
 SKILL_ON_DISK = HEAD + NAMES  # what _build writes to kit's skills/cite/SKILL.md
@@ -74,7 +76,7 @@ def _build(base):
     _write(
         kit,
         "commands/cite.md",
-        "---\ndescription: Cite.\n---\n" + NAMES + "G $ARGUMENTS\n",
+        "---\ndescription: Cite.\n---\n" + NAMES + "H $ARGUMENTS\n",
     )
 
     extra = base / "extra"
@@ -241,13 +243,13 @@ async def test_the_preload_map_is_never_prefixed(url):
 
 
 async def test_a_prompt_body_reads_qualified_names_as_addresses(url):
-    assert await _prompt(url, "kit_cite") == RESOLVED + "G \n"
+    assert await _prompt(url, "kit_cite") == RESOLVED + "H \n"
 
 
 async def test_an_argument_value_is_never_rewritten(url):
     text = await _prompt(url, "kit_cite", {"arguments": "kit:writing"})
-    assert text == RESOLVED + "G kit:writing\n"
+    assert text == RESOLVED + "H kit:writing\n"
 
 
 async def test_the_prompt_mirror_rewrites_alike(url):
-    assert await _prompt_tool(url, "kit_cite") == RESOLVED + "G \n"
+    assert await _prompt_tool(url, "kit_cite") == RESOLVED + "H \n"

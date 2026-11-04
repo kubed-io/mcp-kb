@@ -541,9 +541,7 @@ class Catalogue:
         mine = next((t for t in self._libraries if t.name == library), None)
         pairs = dict(mine.plugins) if mine is not None else {}
         found: dict[str, dict[str, list[str]]] = {plugin: {}}
-        for skill in sorted(self._index.visible(scope), key=lambda s: s.address):
-            if skill.library != library:
-                continue
+        for skill in sorted(self._in_library(library, scope), key=lambda s: s.address):
             found.setdefault(skill.plugin, {}).setdefault(skill.name, []).append(
                 uri_for(skill)
             )

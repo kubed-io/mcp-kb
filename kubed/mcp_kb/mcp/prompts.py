@@ -69,9 +69,10 @@ class MCPFilePrompt(Prompt):
     ``PromptProvider``, so ``${CLAUDE_PLUGIN_ROOT}/skills/x/y.md`` renders as
     skill ``x``'s own address. Rendered literally, as
     ``skill://<library>/skills/x/y.md``, it would read as nothing: a skill's
-    files are served only at the skill's own address. ``names`` is the same
-    plugin's qualified skill names (``<plugin>:<skill>``) within the caller's
-    scope, set per request alike, so a body citing one renders its address.
+    files are served only at the skill's own address. ``names`` is the table of
+    qualified skill names (``<plugin>:<skill>``) the prompt's library serves in
+    the caller's scope, own plugin first, set per request alike, so a body
+    citing one renders its address.
 
     A missing argument is the one failure translated here. FastMCP treats any
     other exception out of a render as its own fault: -32603 on the wire and a

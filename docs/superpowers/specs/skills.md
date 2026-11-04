@@ -193,8 +193,9 @@ the frontmatter block, and the frontmatter is served as written.
   marketplace entry's name, or a declared plugin's `name` in the config.
 - **Answer.** The name resolves to the first candidate's skill named `<skill>`, among those in the
   caller's scope. When that plugin serves two such skills (SKL-11), the name is served as written.
-- **Unresolved names.** An out-of-scope skill, an absent one, and a name that is a command's, such
-  as `/<plugin>:<command>` or `/<plugin>:a:b`, are served as written.
+- **Unresolved names.** An out-of-scope skill, an absent one, and a command's name that no
+  in-scope skill shares, such as `/<plugin>:<command>` or `/<plugin>:a:b`, are served as
+  written. A skill and a command of one name read as the skill, as in Claude Code.
 - **Order.** The rewrite runs before SKL-25 and SKL-52, and the prefix (SKL-41) applies after
   both. Every other file is served without it, and `_manifest` still describes the bytes on disk
   (SKL-24).
