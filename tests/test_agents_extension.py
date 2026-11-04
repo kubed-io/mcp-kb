@@ -118,6 +118,7 @@ async def test_get_returns_the_definition(tmp_path, mode):
                     "color": "cyan",
                 },
                 "servers": ["drawio"],
+                "skills": {},
             }
         },
     }
