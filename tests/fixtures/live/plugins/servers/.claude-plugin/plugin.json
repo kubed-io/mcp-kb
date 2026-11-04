@@ -1,0 +1,9 @@
+{
+  "name": "servers",
+  "mcpServers": {
+    "alpha": {
+      "type": "http",
+      "url": "https://example.invalid/alpha"
+    }
+  }
+}

@@ -1,1 +1,50 @@
-{"name": "live", "owner": {"name": "kubed-io"}, "plugins": []}
+{
+  "name": "live",
+  "owner": {
+    "name": "kubed-io"
+  },
+  "plugins": [
+    {
+      "name": "first",
+      "source": "./plugins/first"
+    },
+    {
+      "name": "second",
+      "source": "./plugins/second"
+    },
+    {
+      "name": "late",
+      "source": "./plugins/late"
+    },
+    {
+      "name": "folders",
+      "source": "./plugins/folders"
+    },
+    {
+      "name": "listed-agents",
+      "source": "./plugins/listed-agents"
+    },
+    {
+      "name": "deep-yaml",
+      "source": "./plugins/deep-yaml"
+    },
+    {
+      "name": "servers",
+      "source": "./plugins/servers",
+      "mcpServers": {
+        "ignored": {
+          "type": "http",
+          "url": "https://example.invalid/ignored"
+        }
+      }
+    },
+    {
+      "name": "servers-file",
+      "source": "./plugins/servers-file"
+    },
+    {
+      "name": "names",
+      "source": "./plugins/names"
+    }
+  ]
+}
