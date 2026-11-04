@@ -928,7 +928,7 @@ def test_a_skipped_path_is_logged_when_first_skipped_and_not_on_every_rebuild(
     )
     knowledge_base = KnowledgeBase(config, tmp_path / "cache")
     skips = [m for level, m in _snapshot_lines(caplog) if "skips" in m]
-    assert len(skips) == 1 and skips[0].startswith("plugin lib skips skills/bad: ")
+    assert len(skips) == 1 and skips[0].startswith("plugin lib skips 'skills/bad': ")
 
     caplog.clear()
     knowledge_base.refresh(force=True)

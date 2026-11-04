@@ -118,7 +118,9 @@ plugin serves.
 | a skill | an earlier skill of the plugin has its address |
 | a library file | its name is `_index.md` or `_files.md` |
 | a library file | its address is a served skill's, lies inside one, or contains one |
+| a prompt | the name its path builds is not a usable name (PLG-25) |
 | a prompt | an earlier prompt of the plugin has its name (PLG-25) |
+| an agent | the name its folders and frontmatter `name` build is not a usable name (AGT-5) |
 
 **PLG-19.** A plugin **fails** when its fetch has no servable tree, its root is refused (PLG-8), its
 manifest is refused (PLG-15), its entry conflicts with its manifest (LIB-31), or reading its files
@@ -332,8 +334,12 @@ than validates.
 | anywhere else | the file stem (PRM-42) |
 
 The `commands/` convention reads its subfolders (`commands/**/*.md`), and so does a directory
-named in a `commands` list. Files come in path order, then the map's commands. A later prompt of
-the plugin with an earlier one's name is skipped with `prompt <name> is already served by <path>`.
+named in a `commands` list. Files come in path order, then the map's commands. A name built from a
+path, the folders and the stem together, MUST be a usable name, as a map key is (PLG-21): a file
+whose name is not, `commands/my db/x.md` or `prompts/a b.md`, is skipped with
+`prompt name <name> is not a usable name`, the name quoted escaped, and never claims the name. A
+later prompt of the plugin with an earlier one's name is skipped with
+`prompt <name> is already served by <path>`.
 
 **PLG-26.** A plugin's `notes` in `/health` lists what its manifest, its entry and its `.mcp.json`
 got wrong without failing it:

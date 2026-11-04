@@ -897,3 +897,72 @@ def test_a_commands_map_key_that_is_not_a_name_is_dropped(tmp_path, key):
     assert _names(knowledge_base) == ["kit_ok"]
     assert status["notes"] == [f"commands entry {key!r} is not a usable name"]
     assert "skipped" not in status
+
+
+@pytest.mark.parametrize(
+    ("rel", "name"),
+    [
+        ("commands/my db/x.md", "my db_x"),
+        ("commands/a\nb/x.md", "a\nb_x"),
+        ("commands/zero\u200bwidth/x.md", "zero\u200bwidth_x"),
+        ("commands/x@y/x.md", "x@y_x"),
+        ("prompts/a b.md", "a b"),
+    ],
+)
+def test_a_prompt_whose_path_is_not_a_usable_name_is_skipped(tmp_path, rel, name):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _command(root, rel)
+    ok_rel = "commands/db/ok.md" if rel.startswith("commands/") else "prompts/ok.md"
+    _command(root, ok_rel)
+
+    knowledge_base = _declared(tmp_path, root, library="lib")
+    status = knowledge_base.status["plugins"]["kit"]
+
+    assert status["status"] == "ok"
+    ok = "lib_db_ok" if rel.startswith("commands/") else "lib_ok"
+    assert _names(knowledge_base) == [ok]
+    assert status["skipped"] == [
+        {"path": rel, "reason": f"prompt name {name!r} is not a usable name"}
+    ]
+
+
+def test_a_bad_prompt_name_in_an_old_index_is_skipped_on_a_cold_start(tmp_path):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _command(root, "commands/db/migrate.md")
+    _command(root, "commands/top.md")
+    config = _config(root, "lib")
+    first = KnowledgeBase(config, tmp_path / "cache")
+    assert sorted(_names(first)) == ["lib_db_migrate", "lib_top"]
+    del first
+    # An index written before names built from paths were checked.
+    index = tmp_path / "cache" / "index.json"
+    text = index.read_text()
+    assert text.count('"db_migrate"') == 1
+    index.write_text(text.replace('"db_migrate"', '"my db_migrate"'))
+
+    second = KnowledgeBase(config, tmp_path / "cache")
+
+    assert _names(second) == ["lib_top"]
+    assert second.status["plugins"]["kit"]["skipped"] == [
+        {
+            "path": "commands/db/migrate.md",
+            "reason": "prompt name 'my db_migrate' is not a usable name",
+        }
+    ]
+
+
+def test_a_skip_whose_path_holds_a_newline_is_one_log_line(tmp_path, caplog):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _command(root, "commands/a\nb/x.md")
+
+    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
+        _declared(tmp_path, root)
+
+    lines = [r.getMessage() for r in caplog.records if "skips" in r.getMessage()]
+    assert lines == [
+        "plugin kit skips 'commands/a\\nb/x.md': "
+        "prompt name 'a\\nb_x' is not a usable name"
+    ]

@@ -197,6 +197,8 @@ splits back unambiguously.
 
 **PRM-42.** The stem of `x.prompt.md` is `x`. The stem of any other file is its name without its
 last extension. `prompts/debug.md` in a plugin the `grafana` library serves is `grafana_debug`.
+The stem is held to the usable-name rule PLG-25 gives: `prompts/a b.md` is skipped with
+`prompt name 'a b' is not a usable name`.
 
 **PRM-43.** The plugin is not part of the name. Two prompts in one plugin with the same name
 (`prompts/debug.md`, `prompts/sub/debug.md`, `debug.prompt.md`) serve the first, in the order

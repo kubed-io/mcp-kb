@@ -850,3 +850,40 @@ def test_an_operator_files_glob_still_serves_agents(tmp_path):
 
 def test_a_bare_plugins_agents_folder_is_not_guarded(tmp_path):
     assert _read(tmp_path, "skill://drive/agents/x.md") == _agent("x")
+
+
+@pytest.mark.parametrize(
+    ("folder", "name"),
+    [
+        ("a b", "a b_r"),
+        ("x@y", "x@y_r"),
+        ("a\nb", "a\nb_r"),
+        ("z\u200bw", "z\u200bw_r"),
+    ],
+)
+def test_an_agent_whose_folder_is_not_a_usable_name_is_skipped(tmp_path, folder, name):
+    tree = agents_tree(tmp_path)
+    _entries(
+        tree,
+        after=[
+            (
+                "odd",
+                {f"agents/{folder}/r.md": _agent("r"), "agents/ok/r.md": _agent("r")},
+            )
+        ],
+    )
+
+    knowledge_base = tree.knowledge_base(tmp_path / "cache")
+
+    assert "drawio_ok_r" in _names(knowledge_base, "drawio")
+    assert not [
+        n
+        for n in _names(knowledge_base, "drawio")
+        if n.endswith("_r") and n != "drawio_ok_r"
+    ]
+    assert knowledge_base.status["plugins"]["odd@drawio"]["skipped"] == [
+        {
+            "path": f"agents/{folder}/r.md",
+            "reason": f"agent name {name!r} is not a usable name",
+        }
+    ]

@@ -914,7 +914,7 @@ def log_changes(before: dict[str, dict], after: dict[str, dict]) -> None:
         known = {row["path"] for row in was.get("skipped", ())}
         for row in now_.get("skipped", ()):
             if row["path"] not in known:
-                log.warning("plugin %s skips %s: %s", pid, row["path"], row["reason"])
+                log.warning("plugin %s skips %r: %s", pid, row["path"], row["reason"])
         noted = set(was.get("notes", ()))
         for note in now_.get("notes", ()):
             if note not in noted:
@@ -991,6 +991,11 @@ def _admit(record: PluginRecord) -> _Admitted:
     never read, or read only under a scope that hides the skill -- and when it
     is named like an index the server generates.
 
+    A prompt or an agent is left out when the name its path built is not a
+    usable name (PLG-25, AGT-5): a folder or a stem holding a space, a control
+    character or an ``@``. Checked here and not only at harvest, so a row an
+    older ``index.json`` still holds is held to it on a cold start.
+
     A prompt is left out when a prompt before it has its name (PLG-25), as
     ``prompts/debug.md`` and ``prompts/sub/debug.md`` both would, or a file and
     an object-map command of one name. ``commands/a/x.md`` and
@@ -1042,15 +1047,21 @@ def _admit(record: PluginRecord) -> _Admitted:
 
     names: dict[str, PromptRow] = {}
     for row in record.prompts:
+        where = _relative(Path(row.path), root)
+        if not harvest.usable_name(row.name):
+            skip(where, f"prompt name {row.name!r} is not a usable name")
+            continue
         if row.name in names:
             first = _relative(Path(names[row.name].path), root)
-            where = _relative(Path(row.path), root)
             skip(where, f"prompt {row.name} is already served by {first}")
             continue
         names[row.name] = row
 
     agents: dict[str, AgentRow] = {}
     for row in sorted(record.agents, key=lambda r: r.path):
+        if not harvest.usable_name(row.name):
+            skip(row.path, f"agent name {row.name!r} is not a usable name")
+            continue
         if row.name in agents:
             first = agents[row.name].path
             skip(row.path, f"agent {row.name} is already served by {first}")
