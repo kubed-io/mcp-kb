@@ -171,6 +171,34 @@ bare `${CLAUDE_PLUGIN_ROOT}`, a path in a skipped skill and a path in another pl
 as SKL-25 says. `./`, `//` and `..` after the placeholder are not normalised. Nothing is served at
 an address that was not served before.
 
+**SKL-54.** *(proposed)* A **qualified skill name** is `<plugin>:<skill>`, optionally preceded by
+`/`. `<plugin>` matches PLG-1's name pattern and `<skill>` is a lowercase letter or digit followed
+by lowercase letters, digits and `-`.
+
+- A name is recognised only where it is not part of a longer token. The character before it
+  (before its `/` when it has one) is not a letter, a digit, or any of `_ . / : @ + ~ % -`. The
+  character after it is not a letter, a digit, or any of `_ : / ~ % + @ -`, nor a `.` followed by
+  one of those.
+- So `drawio:drawio` and `/drawio:drawio` are names, and a sentence ending `drawio:drawio.` holds
+  one.
+- `https://drawio:drawio`, `a/drawio:drawio`, `kb+drawio:drawio`, `drawio:drawio.md`,
+  `drawio:drawio/x` and `drawio:drawio:x` are not names.
+
+**SKL-55.** *(proposed)* In a skill's `SKILL.md`, a qualified skill name (SKL-54) in the body
+reads as `skill://<address>/SKILL.md` when it resolves, without its `/`. The body is the text after
+the frontmatter block, and the frontmatter is served as written.
+
+- **Candidates.** These are the plugins serving in the same library whose name is `<plugin>`. The
+  skill's own plugin comes first, then the library's plugins in order (LIB-4). A plugin's name is a
+  marketplace entry's name, or a declared plugin's `name` in the config.
+- **Answer.** The name resolves to the first candidate's skill named `<skill>`, among those in the
+  caller's scope. When that plugin serves two such skills (SKL-11), the name is served as written.
+- **Unresolved names.** An out-of-scope skill, an absent one, and a name that is a command's, such
+  as `/<plugin>:<command>` or `/<plugin>:a:b`, are served as written.
+- **Order.** The rewrite runs before SKL-25 and SKL-52, and the prefix (SKL-41) applies after
+  both. Every other file is served without it, and `_manifest` still describes the bytes on disk
+  (SKL-24).
+
 **SKL-26.** A read returns only the file addressed. Nothing a file cites is fetched with it.
 
 ## Library files

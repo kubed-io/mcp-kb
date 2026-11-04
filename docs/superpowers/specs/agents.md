@@ -110,6 +110,18 @@ parses, `agents/get` answers from the copy parsed when the snapshot was built, a
 warning. A re-read keeps the name the snapshot serves the agent under, even when the edit changes
 its frontmatter `name`, until the next refresh. `agents/list` answers from the snapshot.
 
+**AGT-17.** *(proposed)* `instructions` rewrites qualified skill names (SKL-54) as SKL-55 says.
+The agent's plugin is the own plugin and its library is the library, and the rewrite runs before
+PRM-48. `_meta["io.kubed.mcp-kb/agent"]` adds `skills`, an object that maps entries of the
+frontmatter `skills` to the `SKILL.md` addresses they resolve to.
+
+- **Entries.** The frontmatter `skills` is a list, whose string items are the entries, or one
+  string, split on `,`. Each entry is trimmed, and is the map's key as written.
+- **Resolution.** A qualified name resolves by SKL-55. A bare `<skill>` resolves to the one
+  in-scope skill of that name in the agent's own plugin.
+- **The rest.** An entry that does not resolve is left out, and `skills` is `{}` when none do.
+  `frontmatter` stays verbatim, and the addresses are never prefixed (SKL-41).
+
 ## Caching and errors
 
 **AGT-12.** Both results carry `resultType: "complete"`, `ttlMs: 0` and

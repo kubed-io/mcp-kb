@@ -227,6 +227,12 @@ own plugin, in the library serving the prompt, renders as that skill's address, 
 SKL-52 of [skills.md](skills.md): `${CLAUDE_PLUGIN_ROOT}/skills/drawio/SKILL.md` renders as
 `skill://drawio/drawio/SKILL.md`. The gateway prefix then applies as PRM-47 says.
 
+**PRM-62.** *(proposed)* In every dialect, a qualified skill name (SKL-54) in a prompt's body
+renders as [skills.md](skills.md)'s SKL-55 says. The prompt's plugin is the own plugin, and the
+library is the one serving the prompt. The rewrite runs on the body as written, before the
+dialect's placeholders, so an argument's value is never rewritten. It is the first step of PRM-47's
+order.
+
 **PRM-49.** `${CLAUDE_SKILL_DIR}` renders as written in a prompt: a prompt has no skill directory.
 
 **PRM-50.** Every placeholder that names something only the client has renders exactly as written,
