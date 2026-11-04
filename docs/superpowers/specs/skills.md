@@ -31,7 +31,8 @@ path the pattern matched, not by its symlink target.
 
 **SKL-5.** A skill's name is its frontmatter `name`, else its directory's name. Its description is
 the frontmatter `description` with each run of whitespace collapsed to one space, else empty.
-Frontmatter that does not parse, or has a key that is not a string, counts as absent.
+Frontmatter that does not parse, is nested too deeply to read, or has a key that is not a string,
+counts as absent.
 
 **SKL-6.** A skill's name MUST keep the Agent Skills naming rule: 1 to 64 lowercase letters,
 digits and single hyphens, no hyphen first or last. It MUST equal its directory's name, unless the

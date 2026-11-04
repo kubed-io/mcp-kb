@@ -15,6 +15,7 @@ import pytest
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue.snapshot import effective_globs
 from kubed.mcp_kb.config import Config
+from tests.conftest import DEEP_YAML
 
 pytestmark = pytest.mark.unit
 
@@ -795,6 +796,80 @@ def test_a_skill_with_a_key_that_is_not_text_is_read_as_no_frontmatter(tmp_path)
     root = tmp_path / "kit"
     _skill(root, "skills/a")
     _write(root, "skills/odd/SKILL.md", "---\n1: x\nname: named\n---\nBody.\n")
+
+    knowledge_base = _declared(tmp_path, root)
+
+    assert knowledge_base.status["plugins"]["kit"]["status"] == "ok"
+    # As a frontmatter block that does not parse: named by its folder.
+    assert _served(knowledge_base) == {"a", "odd"}
+
+
+DEEP = f"---\nname: named\ndescription: d\nx: {DEEP_YAML}\n---\nBody $ARGUMENTS\n"
+DEEP_REASON = "frontmatter is nested too deeply to read"
+
+
+def test_a_prompt_file_too_deep_to_parse_is_skipped_and_quotes_nothing(
+    tmp_path, frontmatter_out_of_stack
+):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _write(root, "prompts/bad.md", DEEP)
+    _command(root, "prompts/ok.md")
+
+    knowledge_base = _declared(tmp_path, root)
+    status = knowledge_base.status["plugins"]["kit"]
+
+    assert status["status"] == "ok"
+    assert _names(knowledge_base) == ["kit_ok"]
+    assert status["skipped"] == [{"path": "prompts/bad.md", "reason": DEEP_REASON}]
+
+
+def test_inline_content_too_deep_to_parse_is_skipped(
+    tmp_path, frontmatter_out_of_stack
+):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _manifest(
+        root,
+        name="kit",
+        commands={"bad": {"content": DEEP}, "ok": {"content": "Ok."}},
+    )
+
+    knowledge_base = _declared(tmp_path, root)
+    status = knowledge_base.status["plugins"]["kit"]
+
+    assert status["status"] == "ok"
+    assert _names(knowledge_base) == ["kit_ok"]
+    assert status["skipped"] == [
+        {"path": ".claude-plugin/plugin.json", "reason": DEEP_REASON}
+    ]
+
+
+def test_a_prompt_gone_too_deep_under_a_good_index_does_not_stop_a_cold_start(
+    tmp_path, frontmatter_out_of_stack
+):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _command(root, "prompts/bad.md")
+    _command(root, "prompts/ok.md")
+    config = _config(root, "kit")
+    first = KnowledgeBase(config, tmp_path / "cache")
+    assert _names(first) == ["kit_bad", "kit_ok"]
+    del first
+    # The index still lists it; the cold start parses every prompt again.
+    _write(root, "prompts/bad.md", DEEP)
+
+    second = KnowledgeBase(config, tmp_path / "cache")
+
+    assert _names(second) == ["kit_ok"]
+
+
+def test_a_skill_too_deep_to_parse_is_read_as_no_frontmatter(
+    tmp_path, frontmatter_out_of_stack
+):
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _write(root, "skills/odd/SKILL.md", DEEP)
 
     knowledge_base = _declared(tmp_path, root)
 

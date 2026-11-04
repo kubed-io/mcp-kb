@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A command or skill citing a skill of its own plugin through `${CLAUDE_PLUGIN_ROOT}/skills/<skill>/…` now renders an address that reads.
 - Docker quick start works without a checkout; native setup documents explicit config and cache paths on Windows and POSIX systems.
 - `serverInfo` now reports kb's own version, not FastMCP's.
+- A skill or prompt whose frontmatter is nested too deeply no longer stops the server; the prompt is skipped and the skill is named by its folder.
 
 ## [0.1.0] - 2026-09-18
 

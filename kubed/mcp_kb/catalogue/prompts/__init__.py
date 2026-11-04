@@ -222,6 +222,7 @@ class MissingArguments(ValueError):
 
 
 NOT_TEXT_KEY = "frontmatter has a key that is not a string"
+TOO_DEEP = "frontmatter is nested too deeply to read"
 
 
 class _NoFrontmatter(ValueError):
@@ -249,6 +250,9 @@ def _split(text: str) -> tuple[dict, str]:
         # A key like `1:` or `true:` -- python-frontmatter passes the mapping
         # as keyword arguments. Fetched content, so the reason quotes none.
         raise ValueError(NOT_TEXT_KEY) from None
+    except RecursionError:
+        # Nested past the parser's stack: a file's failure, not the build's.
+        raise ValueError(TOO_DEEP) from None
     if post.metadata == {} and post.content.strip() == text.strip():
         raise _NoFrontmatter("no YAML frontmatter")
     meta = post.metadata if isinstance(post.metadata, dict) else {}

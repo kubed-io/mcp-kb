@@ -87,11 +87,12 @@ def _frontmatter(skill_md: Path) -> dict:
 
     ``TypeError`` is a key that is not a string (``1:``, ``true:``), which
     python-frontmatter cannot take: malformed, like YAML that does not parse.
+    So is ``RecursionError``, nesting deeper than the parser's stack.
     """
     text = skill_md.read_text(encoding="utf-8", errors="replace")
     try:
         meta = frontmatter.loads(text).metadata
-    except (yaml.YAMLError, TypeError):
+    except (yaml.YAMLError, TypeError, RecursionError):
         return {}
     return meta if isinstance(meta, dict) else {}
 

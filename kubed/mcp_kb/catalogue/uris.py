@@ -451,7 +451,7 @@ class Catalogue:
             # Frontmatter travels as JSON, without inventing string forms for
             # YAML-only values that would fail a client's field-by-field check.
             json.dumps(metadata, allow_nan=False)
-        except (yaml.YAMLError, TypeError, ValueError):
+        except (yaml.YAMLError, TypeError, ValueError, RecursionError):
             return None
         description = metadata.get("description")
         if (

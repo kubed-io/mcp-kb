@@ -13,8 +13,10 @@ from mcp_types import Request, RequestParams
 from pydantic import ConfigDict, TypeAdapter
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.mcp.skills import EXTENSION_ID
-from tests.conftest import make_config
+from kubed.mcp_kb.catalogue.addressing import Addressing
+from kubed.mcp_kb.mcp.scope import EVERYTHING
+from kubed.mcp_kb.mcp.skills import EXTENSION_ID, addressed
+from tests.conftest import DEEP_YAML, make_config
 from tests.test_header_scope import server_url  # noqa: F401 - shared HTTP fixture
 
 
@@ -120,6 +122,53 @@ async def test_malformed_frontmatter_remains_an_ordinary_resource(skills_dir):
         with pytest.raises(MCPError) as error:
             await request(client, "skills/get", uri="skill://flatsource/alpha/SKILL.md")
         assert error.value.code == -32602
+
+
+async def test_frontmatter_gone_too_deep_remains_an_ordinary_resource(
+    skills_dir, frontmatter_out_of_stack
+):
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    # Clean when harvested, too deep when read: every read is off disk.
+    path = skills_dir / "flatsource" / "alpha" / "SKILL.md"
+    path.write_text(
+        f"---\nname: alpha\ndescription: d\nx: {DEEP_YAML}\n---\nBody.\n",
+        encoding="utf-8",
+    )
+    async with Client(server.mcp) as client:
+        listing = await request(client, "skills/list")
+        assert len(listing["skills"]) == 3
+        assert (await client.read_resource("skill://flatsource/alpha/SKILL.md"))[0].text
+        with pytest.raises(MCPError) as error:
+            await request(client, "skills/get", uri="skill://flatsource/alpha/SKILL.md")
+        assert error.value.code == -32602
+
+
+def test_a_served_body_too_deep_keeps_the_canonical_frontmatter(
+    skills_dir, monkeypatch
+):
+    path = skills_dir / "flatsource" / "alpha" / "SKILL.md"
+    path.write_text(
+        "---\nname: alpha\ndescription: d\nsee: skill://flatsource\n---\nBody.\n",
+        encoding="utf-8",
+    )
+    real = frontmatter.loads
+
+    def loads(text, *args, **kwargs):
+        # Only the addressed body is too deep: the canonical one parses.
+        if "kb+skill://" in text:
+            raise RecursionError("maximum recursion depth exceeded")
+        return real(text, *args, **kwargs)
+
+    monkeypatch.setattr(frontmatter, "loads", loads)
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    catalogue = server.snapshot.catalogue
+    uri = "skill://flatsource/alpha/SKILL.md"
+    entry = catalogue.skill_entry(uri, EVERYTHING)
+    assert entry is not None
+
+    got = addressed(catalogue, EVERYTHING, Addressing.parse("kb+"), entry)
+
+    assert got["frontmatter"] == entry["frontmatter"]
 
 
 @pytest.mark.integration
