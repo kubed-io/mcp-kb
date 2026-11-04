@@ -232,7 +232,8 @@ heading.
 ## The agent workflows
 
 `agent-issue.yml`, `agent-pr.yml` and `agent-review.yml` run Dr K's issue → spec
-→ plan → code → review flow on the self-hosted `claude` runner. A PR from a
+→ plan → code → review flow on the self-hosted `claude` runner. Each calls the
+workflow of the same name in kubed-io/actions, where the jobs live. A PR from a
 `issue-<N>` branch with the `agent` label is the agents' work.
 
 - **They start only on `repository_dispatch`**, which n8n sends. The commented-out
