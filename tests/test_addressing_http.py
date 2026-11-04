@@ -319,3 +319,16 @@ async def test_library_notes_are_addressed_in_the_instructions(tmp_path):
         both = await told({"Kb-Library": "lib", **PREFIX})
     assert "Start at skill://lib/s/SKILL.md." in plain
     assert "Start at kb+skill://lib/s/SKILL.md." in both
+
+
+@pytest.mark.integration
+async def test_the_template_description_follows_the_prefix(server_url):
+    for headers in (PREFIX, BOTH):
+        async with _client(server_url, headers) as client:
+            (template,) = await client.list_resource_templates()
+        assert template.uri_template == "skill://{library}/{+path}"
+        assert "Start at kb+skill://{library}/_index.md;" in template.description
+        assert "kb+kb+" not in template.description
+    async with _client(server_url) as client:
+        (plain,) = await client.list_resource_templates()
+    assert "Start at skill://{library}/_index.md;" in plain.description
