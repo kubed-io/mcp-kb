@@ -180,6 +180,15 @@ Reads return **only** what was asked for. A skill body may cite
 `references/FOO.md`; citing it does not fetch it. That laziness is the point —
 keep it when changing this code.
 
+`resources/templates/list` holds one fixed row, `skill://{library}/{+path}`, so a
+client with several servers can tell which one serves `skill://` addresses; it
+is for discovery and reads nothing. `CatalogueProvider._get_resource_template`
+returns None on purpose: FastMCP falls back to a matching template on every read
+miss, and a template that matched would turn a miss, and its hint, into a
+template read. The `uriTemplate` is never prefixed, because a gateway prefixes
+it itself and kb doing so as well would prefix it twice; the description is
+text, and is prefixed like any other.
+
 The **Skills extension** is a separate discovery surface in `mcp/skills.py`:
 `skills/list` and `skills/get` publish scoped entries from `Catalogue`, without
 expanding `resources/list` or adding mirror tools. Its complete manifests hash

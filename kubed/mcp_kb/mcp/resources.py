@@ -130,6 +130,8 @@ class CatalogueProvider(Provider):
                 uri_template=TEMPLATE_URI,
                 name="skill",
                 description=requested_addressing().text(TEMPLATE_DESCRIPTION),
+                # ResourceTemplate requires it; never matched against, because
+                # _get_resource_template below returns None.
                 parameters={
                     "type": "object",
                     "properties": {

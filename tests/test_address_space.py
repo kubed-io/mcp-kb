@@ -24,7 +24,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
-from kubed.mcp_kb.mcp.resources import CatalogueProvider
+from kubed.mcp_kb.mcp.resources import CatalogueProvider, SkillTemplate
 from tests.test_header_scope import _free_port
 
 pytestmark = pytest.mark.integration
@@ -813,9 +813,19 @@ async def test_a_refused_scope_refuses_the_template_listing(url):
         await _templates(url, library="nope")
 
 
-async def test_a_read_never_resolves_through_the_template(url):
+async def test_a_read_never_resolves_through_the_template(url, monkeypatch):
+    # Independent of FastMCP's regex: were the template to match every URI, the
+    # provider's own override is all that keeps a miss a miss.
+    monkeypatch.setattr(
+        SkillTemplate,
+        "matches",
+        lambda self, uri: {"library": "grafana", "path": "x"},
+    )
     error = await _read_error(url, "skill://grafana/nope/deep/x.md")
     assert "not found" in error and "_index.md" not in error
+    directory = await _read_error(url, "skill://grafana/grafana-lgtm")
+    assert "not found" in directory
+    assert "skill://grafana/grafana-lgtm/_index.md" in directory
     provider = CatalogueProvider(lambda: None)
     assert await provider._get_resource_template("skill://grafana/nope/x.md") is None
     assert await provider._get_resource_template(TEMPLATE[0]) is None
