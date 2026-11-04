@@ -236,9 +236,8 @@ heading.
 workflow of the same name in kubed-io/actions, where the jobs live. A PR from a
 `issue-<N>` branch with the `agent` label is the agents' work.
 
-- **They start only on `repository_dispatch`**, which n8n sends. The commented-out
-  `issues` / `issue_comment` / `pull_request_target` triggers are kept as a record;
-  don't ask for them back.
+- **They start only on `repository_dispatch`**, which n8n sends. Don't add `issues`,
+  `issue_comment` or `pull_request_target` triggers: the shared jobs run only on a dispatch.
 - **Every job gate names numeric ids**, not variables: a job's `if` is decided
   before any runner exists, so only GitHub's event data can vouch for the sender.
 - **`kubed-io/actions/*@main`** is first-party and has no tags; see
