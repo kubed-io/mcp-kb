@@ -1,0 +1,4 @@
+{
+  "name": "servers-file",
+  "mcpServers": "./config/servers.json"
+}

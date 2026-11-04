@@ -24,6 +24,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
+from kubed.mcp_kb.mcp.resources import CatalogueProvider, SkillTemplate
 from tests.test_header_scope import _free_port
 
 pytestmark = pytest.mark.integration
@@ -777,3 +778,64 @@ async def test_a_skill_nested_inside_a_skill_is_served_as_the_spec_says(tmp_path
     assert shared == "shared bytes\n"
     assert {"y/SKILL.md", "y/refs/a.md"} <= {f["path"] for f in json.loads(manifest)["files"]}
     assert "skipped" not in kb.snapshot.status["plugins"]["lib"]
+
+
+TEMPLATE = (
+    "skill://{library}/{+path}",
+    "skill",
+    "A skill, index or file this server serves: {library} is a library's name"
+    " and {path} a path below it. Start at skill://{library}/_index.md;"
+    " resources/list names the libraries.",
+    None,
+)
+
+
+async def _templates(url, library=None, tags=None):
+    async with _client(url, library=library, tags=tags) as client:
+        return [
+            (t.uri_template, t.name, t.description, t.mime_type)
+            for t in await client.list_resource_templates()
+        ]
+
+
+async def test_one_template_names_the_address_space(url):
+    assert await _templates(url) == [TEMPLATE]
+
+
+async def test_the_template_is_the_same_under_every_scope(url):
+    assert await _templates(url, library="other") == [TEMPLATE]
+    assert await _templates(url, library="handbook") == [TEMPLATE]
+    assert await _templates(url, tags="extra") == [TEMPLATE]
+
+
+async def test_a_refused_scope_refuses_the_template_listing(url):
+    with pytest.raises(Exception, match="no such library"):
+        await _templates(url, library="nope")
+
+
+async def test_a_read_never_resolves_through_the_template(url, monkeypatch):
+    # Independent of FastMCP's regex: were the template to match every URI, the
+    # provider's own override is all that keeps a miss a miss.
+    monkeypatch.setattr(
+        SkillTemplate,
+        "matches",
+        lambda self, uri: {"library": "grafana", "path": "x"},
+    )
+    error = await _read_error(url, "skill://grafana/nope/deep/x.md")
+    assert "not found" in error and "_index.md" not in error
+    directory = await _read_error(url, "skill://grafana/grafana-lgtm")
+    assert "not found" in directory
+    assert "skill://grafana/grafana-lgtm/_index.md" in directory
+    provider = CatalogueProvider(lambda: None)
+    assert await provider._get_resource_template("skill://grafana/nope/x.md") is None
+    assert await provider._get_resource_template(TEMPLATE[0]) is None
+
+
+async def test_the_template_adds_no_tool(url):
+    async with Client(
+        StreamableHttpTransport(url, headers={"X-MCP-Resources": "off"})
+    ) as client:
+        names = {t.name for t in await client.list_tools()}
+        templates = await client.list_resource_templates()
+    assert names == {"list_resources", "read_resource"}
+    assert [t.uri_template for t in templates] == [TEMPLATE[0]]

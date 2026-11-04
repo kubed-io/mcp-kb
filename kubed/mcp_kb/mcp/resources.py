@@ -22,24 +22,51 @@ which is the resource half of progressive disclosure. It would be cleaner still
 as a directory tree, but MCP's ``resources/directory/read`` has no
 implementation in FastMCP 4.0.3, so a dozen index URIs are the closest thing
 available.
+
+``resources/templates/list`` carries one fixed row, ``skill://{library}/{+path}``.
+It is how a client learns the space exists, and it is never matched: a read
+that misses stays a miss, whatever the template would have expanded to.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import NotFoundError
 from fastmcp.resources import TextResource
 from fastmcp.resources.base import Resource
+from fastmcp.resources.template import ResourceTemplate
 from fastmcp.server.middleware import Middleware
 from fastmcp.server.providers.base import Provider
 from fastmcp.utilities.versions import VersionSpec
 from mcp.shared.exceptions import MCPError
 from mcp_types import INVALID_PARAMS
+from mcp_types import ResourceTemplate as SDKResourceTemplate
 
 from ..catalogue.uris import Catalogue
 from .request import full_listing, requested_addressing, requested_scope
+
+TEMPLATE_URI = "skill://{library}/{+path}"
+
+TEMPLATE_DESCRIPTION = (
+    "A skill, index or file this server serves: {library} is a library's name"
+    " and {path} a path below it. Start at skill://{library}/_index.md;"
+    " resources/list names the libraries."
+)
+
+
+class SkillTemplate(ResourceTemplate):
+    """The template row, without a ``mimeType``.
+
+    MCP says to give one only when every match shares a type, and these do not
+    (markdown, a JSON ``_manifest``, a library file's guessed type). FastMCP
+    defaults an empty one to ``text/plain``, so the wire row drops it.
+    """
+
+    def to_mcp_template(self, **overrides: Any) -> SDKResourceTemplate:
+        return super().to_mcp_template(**{"mimeType": None, **overrides})
 
 
 class CatalogueProvider(Provider):
@@ -96,6 +123,37 @@ class CatalogueProvider(Provider):
             mime_type=catalogue.mime(canonical),
             text=a.text(body),
         )
+
+    async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
+        return [
+            SkillTemplate(
+                uri_template=TEMPLATE_URI,
+                name="skill",
+                description=requested_addressing().text(TEMPLATE_DESCRIPTION),
+                # ResourceTemplate requires it; never matched against, because
+                # _get_resource_template below returns None.
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "library": {"type": "string"},
+                        "path": {"type": "string"},
+                    },
+                    "required": ["library", "path"],
+                },
+            )
+        ]
+
+    async def _get_resource_template(
+        self, uri: str, version: VersionSpec | None = None
+    ) -> ResourceTemplate | None:
+        """Never match: the template is for discovery, not for reading.
+
+        FastMCP's ``read_resource`` falls back to this when ``_get_resource``
+        misses, and the default would match any listed template, turning every
+        miss into a template read and breaking ``NameTheFileToRead`` and the
+        rule that out-of-scope reads exactly as absent.
+        """
+        return None
 
 
 class NameTheFileToRead(Middleware):

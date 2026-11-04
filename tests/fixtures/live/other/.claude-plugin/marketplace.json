@@ -1,0 +1,12 @@
+{
+  "name": "live-other",
+  "owner": {
+    "name": "kubed-io"
+  },
+  "plugins": [
+    {
+      "name": "second",
+      "source": "./"
+    }
+  ]
+}

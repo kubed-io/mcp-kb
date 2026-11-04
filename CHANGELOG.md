@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A library can list `categories`, and `Kb-Category` (`?category=`) selects every library listing one.
 - A plugin's `commands` may be an object map, and commands in subfolders are served as `<library>_<folder>_<name>`.
 - **Discover the agents your plugins ship** through the experimental `agents/list` and `agents/get`, scoped like everything else.
+- A client can tell kb serves `skill://` addresses from `resources/templates/list`.
+- A `<plugin>:<skill>` name in a skill, prompt or agent reads as the skill's `skill://` address.
 
 ### Changed
 
@@ -47,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A command or skill citing a skill of its own plugin through `${CLAUDE_PLUGIN_ROOT}/skills/<skill>/…` now renders an address that reads.
 - Docker quick start works without a checkout; native setup documents explicit config and cache paths on Windows and POSIX systems.
+- `serverInfo` now reports kb's own version, not FastMCP's.
 
 ## [0.1.0] - 2026-09-18
 

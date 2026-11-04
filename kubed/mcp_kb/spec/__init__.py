@@ -8,6 +8,18 @@ is not this file.
 
 from __future__ import annotations
 
-from .builder import DIST_NAME, PLACEHOLDER_VERSION, TITLE, build_spec
+from .builder import (
+    DIST_NAME,
+    PLACEHOLDER_VERSION,
+    TITLE,
+    build_spec,
+    package_version,
+)
 
-__all__ = ["DIST_NAME", "PLACEHOLDER_VERSION", "TITLE", "build_spec"]
+__all__ = [
+    "DIST_NAME",
+    "PLACEHOLDER_VERSION",
+    "TITLE",
+    "build_spec",
+    "package_version",
+]

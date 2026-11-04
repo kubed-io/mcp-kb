@@ -1,0 +1,8 @@
+{
+  "name": "listed-agents",
+  "agents": [
+    "./agents/deep/picked.md",
+    "./agents/notes.txt",
+    "./agents/gone.md"
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "name": "commands-list",
+  "commands": ["./cmds/listed.md", "./commands/"]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "commands-map",
+  "commands": {
+    "deploy": {
+      "source": "./tasks/deploy.md",
+      "description": "Deploy the service."
+    },
+    "greet": {
+      "content": "Say hello to $ARGUMENTS.\n",
+      "description": "Greet someone."
+    },
+    "both": {
+      "source": "./tasks/deploy.md",
+      "content": "x"
+    }
+  }
+}

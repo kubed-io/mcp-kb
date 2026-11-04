@@ -140,6 +140,10 @@ names with a prefix, and these names are the agent's API.
   never indexed as skills. A citation that misses inside a skill is tried once
   against the plugin root, which is that fallback's ceiling — nothing is
   rewritten and a file the skill has always wins.
+- **A `<plugin>:<skill>` name in served text** → `catalogue/names.py`, resolved
+  through `Catalogue.qualified_names`. It is rewritten to an address, never to a
+  name, because a client picks its own names for kb's skills. Commands and bare
+  words are left alone.
 - **A new flag or env var** → `main.py`, which is the whole configuration
   surface. Nothing else in the package reads `os.environ`, except `{env: NAME}`
   resolution in `config.py`, which is the one other reader — and it resolves a
@@ -179,6 +183,15 @@ module docstring for the grammar in full.
 Reads return **only** what was asked for. A skill body may cite
 `references/FOO.md`; citing it does not fetch it. That laziness is the point —
 keep it when changing this code.
+
+`resources/templates/list` holds one fixed row, `skill://{library}/{+path}`, so a
+client with several servers can tell which one serves `skill://` addresses; it
+is for discovery and reads nothing. `CatalogueProvider._get_resource_template`
+returns None on purpose: FastMCP falls back to a matching template on every read
+miss, and a template that matched would turn a miss, and its hint, into a
+template read. The `uriTemplate` is never prefixed, because a gateway prefixes
+it itself and kb doing so as well would prefix it twice; the description is
+text, and is prefixed like any other.
 
 The **Skills extension** is a separate discovery surface in `mcp/skills.py`:
 `skills/list` and `skills/get` publish scoped entries from `Catalogue`, without

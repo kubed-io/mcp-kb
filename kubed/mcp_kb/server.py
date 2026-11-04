@@ -80,6 +80,7 @@ from .mcp.request import client_reads_resources, client_uses_prompts
 from .mcp.skills import AdvertiseLegacyExtensions, SkillsExtension
 from .plugins import Fetch, Plugin, declared_plugins, marketplace_fetches
 from .plugins.marketplace import find_marketplace, read_marketplace
+from .spec import package_version
 
 log = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ class KnowledgeBase:
         ttl = config.min_refresh_seconds
         self.mcp = FastMCP(
             "mcp-kb",
+            version=package_version(),
             lifespan=self._lifespan,
             # A client may hold a listing for as long as the shortest refresh
             # interval, which is the soonest it could possibly be wrong. That

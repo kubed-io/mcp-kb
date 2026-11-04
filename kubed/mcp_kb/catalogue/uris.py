@@ -60,6 +60,7 @@ from ..mcp.scope import EVERYTHING, Scope
 from . import placeholders
 from .agents import Agent, AgentRoster, ParsedAgent, parse_agent, routing_hint
 from .harvest import hidden, readable
+from .names import QualifiedNames, split_frontmatter
 from .skills import LibraryFiles, Skill, SkillIndex
 
 log = logging.getLogger(__name__)
@@ -276,6 +277,8 @@ class LibraryText:
     description: str = ""
     notes: str = ""
     list_skills: bool = True
+    # (plugin id, plugin name) in library order: what a qualified name matches.
+    plugins: tuple[tuple[str, str], ...] = ()
 
 
 class Catalogue:
@@ -525,6 +528,35 @@ class Catalogue:
             dirs["" if rel == "." else rel] = f"{SCHEME}{skill.address}"
         return dirs
 
+    def qualified_names(
+        self, library: str, plugin: str, scope: Scope = EVERYTHING
+    ) -> QualifiedNames:
+        """The names a text of ``plugin`` in ``library`` may cite (SKL-55).
+
+        ``plugin`` is an id. Its own name comes first, then the library's
+        plugins in library order, then any others by id; each maps a skill name
+        to its ``SKILL.md`` addresses, from what ``scope`` admits and nothing
+        else, so an out-of-scope skill is as absent as a missing one.
+        """
+        mine = next((t for t in self._libraries if t.name == library), None)
+        pairs = dict(mine.plugins) if mine is not None else {}
+        found: dict[str, dict[str, list[str]]] = {plugin: {}}
+        for skill in sorted(self._in_library(library, scope), key=lambda s: s.address):
+            found.setdefault(skill.plugin, {}).setdefault(skill.name, []).append(
+                uri_for(skill)
+            )
+        order = [plugin] + [pid for pid in pairs if pid != plugin]
+        order += sorted(pid for pid in found if pid not in order)
+        return QualifiedNames(
+            tuple(
+                (
+                    pairs.get(pid, pid),
+                    {name: tuple(uris) for name, uris in found.get(pid, {}).items()},
+                )
+                for pid in order
+            )
+        )
+
     # -- agents -------------------------------------------------------------
 
     def agent_cards(self, scope: Scope = EVERYTHING) -> list[dict]:
@@ -549,16 +581,20 @@ class Catalogue:
         layer's to add. ``instructions`` renders ``${CLAUDE_PLUGIN_ROOT}`` as a
         prompt body does, through the plugin's own skills in this library, and
         leaves every other placeholder -- ``${CLAUDE_SKILL_DIR}`` included, an
-        agent being no skill -- as written.
+        agent being no skill -- as written. Plugin-qualified skill names in
+        ``instructions`` become addresses first (SKL-54), and ``_meta`` carries
+        ``skills``: each ``skills:`` entry of the file that resolves, to its
+        unprefixed address (AGT-17).
         """
         agent = self._agents.get(name, scope)
         if agent is None:
             return None
         parsed = self._agent_parsed(agent)
+        names = self.qualified_names(agent.library, agent.plugin, scope)
         definition: dict = {"agent": agent.name}
         if parsed.body.strip():
             definition["instructions"] = placeholders.substitute(
-                parsed.body,
+                names.rewrite(parsed.body),
                 plugin_root=f"{SCHEME}{agent.library}",
                 skills=self.plugin_skill_dirs(agent.library, agent.plugin, scope),
             )
@@ -573,6 +609,7 @@ class Catalogue:
                 "path": _agent_path(agent),
                 "frontmatter": parsed.frontmatter,
                 "servers": list(agent.servers),
+                "skills": names.preload(parsed.frontmatter.get("skills")),
             }
         }
         return definition
@@ -842,8 +879,10 @@ class Catalogue:
         # as that skill's address: the literal path would be refused, because
         # the library-level read keeps out of a skill's own directory and a
         # skill's files have one address, which is the skill's.
+        head, body = split_frontmatter(text)
+        names = self.qualified_names(skill.library, skill.plugin, scope)
         return placeholders.substitute(
-            text,
+            head + names.rewrite(body),
             plugin_root=f"{SCHEME}{skill.library}",
             skill_dir=f"{SCHEME}{skill.address}",
             skills=self.plugin_skill_dirs(skill.library, skill.plugin, scope),

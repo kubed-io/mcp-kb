@@ -2,20 +2,45 @@
 
 import json
 import logging
+from importlib.metadata import version as dist_version
 
+import fastmcp
 import httpx
 import pytest
 from fastmcp import Client
+from mcp_types import SERVER_INFO_META_KEY
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
 from tests.conftest import key_of, make_config
+from tests.test_skills_extension import request
+
+KB_INFO = {"name": "mcp-kb", "version": dist_version("kubed-mcp-kb")}
 
 
 async def call(client, name, **args):
     """The tool's text, whether it is a result or an error result."""
     result = await client.call_tool(name, args, raise_on_error=False)
     return result.content[0].text
+
+
+@pytest.mark.unit
+# The handshake era does not stamp _meta on results; the initialize test covers it.
+@pytest.mark.parametrize("mode", ["auto"])
+async def test_every_result_names_kb_and_its_version(skills_dir, mode):
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    async with Client(server.mcp, mode=mode) as client:
+        listing = await request(client, "skills/list")
+    assert listing["_meta"][SERVER_INFO_META_KEY] == KB_INFO
+    assert KB_INFO["version"] != fastmcp.__version__
+
+
+@pytest.mark.unit
+async def test_initialize_names_kb_and_its_version(skills_dir):
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    async with Client(server.mcp, mode="legacy") as client:
+        info = client.initialize_result.server_info
+    assert {"name": info.name, "version": info.version} == KB_INFO
 
 
 # -- resources ----------------------------------------------------------------

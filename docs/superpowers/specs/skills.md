@@ -97,6 +97,14 @@ its tags are the library's name and `index`.
 SCP-3, any case), the listing adds one row per in-scope skill, by address: its `SKILL.md` URI, the
 name `<address>/SKILL.md`, the skill's description, and its library and plugin labels as tags.
 
+**SKL-53.** `resources/templates/list` returns one template under every scope a
+request is not refused for (SCP-29): `uriTemplate` `skill://{library}/{+path}`, `name` `skill`,
+no `mimeType`, and the description `A skill, index or file this server serves: {library} is a
+library's name and {path} a path below it. Start at skill://{library}/_index.md; resources/list
+names the libraries.` The description is text and carries the prefix (SKL-41); the `uriTemplate`
+never does. The template is for discovery only: a read resolves exactly as it would without it,
+and no tool lists it.
+
 ## Indexes
 
 **SKL-17.** An `_index.md` lists only what sits directly under it, one `<uri>: <text>` line each:
@@ -162,6 +170,35 @@ and `@` continue it, and so does a `.` followed by one of those or by another `.
 bare `${CLAUDE_PLUGIN_ROOT}`, a path in a skipped skill and a path in another plugin's skill read
 as SKL-25 says. `./`, `//` and `..` after the placeholder are not normalised. Nothing is served at
 an address that was not served before.
+
+**SKL-54.** A **qualified skill name** is `<plugin>:<skill>`, optionally preceded by
+`/`. `<plugin>` matches PLG-1's name pattern and `<skill>` is a lowercase letter or digit followed
+by lowercase letters, digits and `-`.
+
+- A name is recognised only where it is not part of a longer token. The character before it
+  (before its `/` when it has one) is not a letter, a digit, or any of `_ . / : @ + ~ % - { $ #`. The
+  character after it is not a letter, a digit, or any of `_ : / ~ % + @ -`, nor a `.` followed by
+  one of those.
+- So `drawio:drawio` and `/drawio:drawio` are names, and a sentence ending `drawio:drawio.` holds
+  one.
+- `https://drawio:drawio`, `a/drawio:drawio`, `kb+drawio:drawio`, `drawio:drawio.md`,
+  `drawio:drawio/x`, `drawio:drawio:x` and `${input:topic}` are not names.
+
+**SKL-55.** In a skill's `SKILL.md`, a qualified skill name (SKL-54) in the body
+reads as `skill://<address>/SKILL.md` when it resolves, without its `/`. The body is the text after
+the frontmatter block, and the frontmatter is served as written.
+
+- **Candidates.** These are the plugins serving in the same library whose name is `<plugin>`. The
+  skill's own plugin comes first, then the library's plugins in order (LIB-4). A plugin's name is a
+  marketplace entry's name, or a declared plugin's `name` in the config.
+- **Answer.** The name resolves to the first candidate's skill named `<skill>`, among those in the
+  caller's scope. When that plugin serves two such skills (SKL-11), the name is served as written.
+- **Unresolved names.** An out-of-scope skill, an absent one, and a command's name that no
+  in-scope skill shares, such as `/<plugin>:<command>` or `/<plugin>:a:b`, are served as
+  written. A skill and a command of one name read as the skill, as in Claude Code.
+- **Order.** The rewrite runs before SKL-25 and SKL-52, and the prefix (SKL-41) applies after
+  both. Every other file is served without it, and `_manifest` still describes the bytes on disk
+  (SKL-24).
 
 **SKL-26.** A read returns only the file addressed. Nothing a file cites is fetched with it.
 
@@ -241,9 +278,9 @@ stay as they are).
 
 | Where | Prefixed |
 |---|---|
-| resource bodies, listing descriptions, read hints, an extension entry's `frontmatter` | yes |
+| resource bodies, listing descriptions, read hints, an extension entry's `frontmatter`, the template's description | yes |
 | tool results ([http-and-tools.md](http-and-tools.md)), instructions (INS-16), rendered prompts | yes |
-| a listing row's `uri` and `name`, an extension entry's `uri` and each file `uri` | never |
+| a listing row's `uri` and `name`, an extension entry's `uri` and each file `uri`, the template's `uriTemplate`, an agent definition's `_meta…skills` values | never |
 
 **SKL-42.** An incoming address (`resources/read`, `read_resource`, `skills/get`) MAY be
 `skill://…` or `<prefix>skill://…` for the request's own prefix. Any other prefix resolves to

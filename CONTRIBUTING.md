@@ -32,7 +32,8 @@ clone without it works — the wiki tests skip and you have no wiki.
 The tests use a synthetic skills tree from `tests/conftest.py` and never clone an
 upstream repository, so the suite needs no network. `tests/webdav_server.py`
 stands up a real WebDAV server on loopback for the WebDAV backend; that is as far
-out as anything reaches.
+out as anything reaches; `tests/live/` reaches a running kb, and skips unless it
+is given `--kb-url`.
 
 ## Where things live
 
@@ -141,6 +142,45 @@ its reason** in `.github/zizmor.yml` or `.hadolint.yaml` — never a bare ignore
 
 There is no `Makefile`. Everything is `pyproject.toml` plus the scripts in
 `scripts/`.
+
+## Live checks
+
+The live checks in `tests/live/` need a running kb and are not part of CI: plain
+`pytest` skips every one. Locally, run this block, from the repository root:
+
+```bash
+LIVE=$(mktemp -d)
+sed "s#@ROOT@#$PWD#g" tests/fixtures/live/config.yaml > "$LIVE/config.yaml"
+cp -r tests/fixtures/live/dav "$LIVE/dav"
+python -m tests.webdav_server --root "$LIVE/dav" --port 8090 & DAV=$!
+for _ in $(seq 30); do curl -s -o /dev/null http://127.0.0.1:8090/kb/ && break; sleep 1; done
+LIVE_DAV_PASSWORD=s3cret-app-password mcp-kb --config "$LIVE/config.yaml" --cache-dir "$LIVE/cache" --host 127.0.0.1 --port 8000 & KB=$!
+for _ in $(seq 30); do curl -sf http://127.0.0.1:8000/health >/dev/null && break; sleep 1; done
+pytest -m live --kb-url http://127.0.0.1:8000 --kb-dav-dir="$LIVE/dav"
+kill "$KB" "$DAV"; rm -rf "$LIVE"
+```
+
+Ports 8000 and 8090 must be free before the block runs: a server already on one
+would answer the waits, and the run would test it instead of the new one.
+
+`--kb-dav-dir=` is written with `=` because, with a space, pytest takes the
+folder for a test path and never loads the options.
+
+Against a deployment:
+
+- add the libraries `live`, `live-other`, `clash` and `clash-appended` to the
+  deployment's config, with each `file://@ROOT@/tests/fixtures/live...` source
+  rewritten as `<its git source>://kubed-io/mcp-kb//tests/fixtures/live...?ref=<sha>`;
+  leave out the `dav` source, the `dav-kit` plugin and the `dav` library (a
+  deployment has no share the check can edit, and `dav` alone fails validation
+  because `dav-kit` is declared in `plugins:`), so the two re-read tests skip;
+- push the fixtures first, because a ref names a pushed commit;
+- run with `--kb-url <its URL>`.
+
+`--kb-url` must be kb's own URL, not a gateway's, since HTTP-41 checks the
+serverInfo kb itself answers with.
+
+The re-read check skips without `--kb-dav-dir`.
 
 ## The changelog
 

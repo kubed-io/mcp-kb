@@ -15,6 +15,7 @@ on the wire.
 
 from __future__ import annotations
 
+import argparse
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -135,3 +136,21 @@ def webdav(tmp_path_factory) -> Iterator[Webdav]:
         yield served
     finally:
         stop()
+
+
+def serve(root: Path, port: int) -> None:
+    """Serve ``root`` as the ``kb`` share on loopback, blocking until stopped."""
+    server = wsgi.Server(("127.0.0.1", port), _app(root, []))
+    server.safe_start()
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Serve a folder over WebDAV.")
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--port", type=int, default=8090)
+    args = parser.parse_args(argv)
+    serve(args.root, args.port)
+
+
+if __name__ == "__main__":
+    main()
