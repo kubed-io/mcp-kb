@@ -29,8 +29,21 @@ def test_the_first_plugin_of_that_name_that_serves_it_answers():
 def test_a_name_inside_a_longer_token_is_left_alone():
     for text in ("https://kit:writing", "a/kit:writing", "kb+kit:writing",
                  "kit:writing.md", "kit:writing/x", "kit:writing:x", "xkit:writing",
-                 "skill://kit:writing", "kit:writing-"):
+                 "skill://kit:writing", "kit:writing-", "kit:writing./x",
+                 "kit:writing.:x"):
         assert NAMES.rewrite(text) == text
+
+
+def test_a_placeholder_is_never_a_name():
+    names = QualifiedNames(
+        plugins=(
+            ("input", {"topic": ("skill://kit/topic/SKILL.md",)}),
+            ("tool", {"x": ("skill://kit/x/SKILL.md",)}),
+        )
+    )
+    for text in ("${input:topic}", "#tool:x", "{input:topic}"):
+        assert names.rewrite(text) == text
+    assert names.rewrite("see input:topic") == "see skill://kit/topic/SKILL.md"
 
 
 def test_what_does_not_resolve_is_served_as_written():
@@ -57,3 +70,9 @@ def test_split_frontmatter_keeps_the_block_whole():
     )
     assert split_frontmatter("no block\n") == ("", "no block\n")
     assert split_frontmatter("---\nunterminated\n") == ("", "---\nunterminated\n")
+    assert split_frontmatter("---\nname: a\n--- \nbody\n") == (
+        "---\nname: a\n--- \n", "body\n"
+    )
+    assert split_frontmatter("----\nname: a\n----\nbody\n") == (
+        "----\nname: a\n----\n", "body\n"
+    )

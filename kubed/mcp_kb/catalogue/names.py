@@ -9,10 +9,12 @@ rewrites each to the ``skill://`` address that does resolve.
 What a name is (SKL-54). ``<plugin>`` matches PLG-1's name pattern and
 ``<skill>`` is a lowercase letter or digit followed by lowercase letters,
 digits and ``-``. A name stands alone or it is not one: before it (before its
-``/`` when it has one) there is no letter, digit or any of ``_ . / : @ + ~ % -``,
-and after it there is no letter, digit or any of ``_ : / ~ % + @ -``, nor a
-``.`` followed by one of those. ``https://kit:writing``, ``a/kit:writing``,
-``kit:writing.md``, ``kit:writing/x`` and ``kit:writing:x`` are not names; a
+``/`` when it has one) there is no letter, digit or any of
+``_ . / : @ + ~ % - { $ #``, and after it there is no letter, digit or any of
+``_ : / ~ % + @ -``, nor a ``.`` followed by one of those.
+``https://kit:writing``, ``a/kit:writing``, ``kit:writing.md``,
+``kit:writing/x`` and ``kit:writing:x`` are not names, nor are the
+``${input:topic}`` and ``#tool:x`` placeholders of a client or a dialect; a
 sentence ending ``kit:writing.`` holds one.
 
 How it resolves (SKL-55). The candidates are the plugins of the text's own
@@ -47,13 +49,15 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+_DELIMITER = re.compile(r"-{3,}[ \t]*")
+
 QUALIFIED = re.compile(
-    r"(?<![\w./:@+~%-])"
+    r"(?<![\w./:@+~%{$#-])"
     r"(?P<slash>/)?"
     r"(?P<plugin>[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)"
     r":"
     r"(?P<skill>[a-z0-9][a-z0-9-]*)"
-    r"(?![\w~%+@:/-])(?!\.[\w~%+@-])"
+    r"(?![\w~%+@:/-])(?!\.[\w~%+@:/-])"
 )
 
 
@@ -111,14 +115,19 @@ class QualifiedNames:
 
 
 def split_frontmatter(text: str) -> tuple[str, str]:
-    """``(head, body)``: the block through its closing ``---`` line, then the rest."""
-    if not text.startswith("---\n"):
+    """``(head, body)``: the block through its closing delimiter line, then the rest.
+
+    A delimiter line is three or more ``-`` and trailing blanks, as
+    python-frontmatter reads one.
+    """
+    first_end = text.find("\n")
+    if first_end < 0 or not _DELIMITER.fullmatch(text[:first_end]):
         return "", text
-    pos = 4
+    pos = first_end + 1
     while pos <= len(text):
         end = text.find("\n", pos)
         line = text[pos:] if end < 0 else text[pos:end]
-        if line == "---":
+        if _DELIMITER.fullmatch(line):
             cut = len(text) if end < 0 else end + 1
             return text[:cut], text[cut:]
         if end < 0:

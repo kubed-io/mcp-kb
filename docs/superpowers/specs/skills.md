@@ -171,20 +171,20 @@ bare `${CLAUDE_PLUGIN_ROOT}`, a path in a skipped skill and a path in another pl
 as SKL-25 says. `./`, `//` and `..` after the placeholder are not normalised. Nothing is served at
 an address that was not served before.
 
-**SKL-54.** *(proposed)* A **qualified skill name** is `<plugin>:<skill>`, optionally preceded by
+**SKL-54.** A **qualified skill name** is `<plugin>:<skill>`, optionally preceded by
 `/`. `<plugin>` matches PLG-1's name pattern and `<skill>` is a lowercase letter or digit followed
 by lowercase letters, digits and `-`.
 
 - A name is recognised only where it is not part of a longer token. The character before it
-  (before its `/` when it has one) is not a letter, a digit, or any of `_ . / : @ + ~ % -`. The
+  (before its `/` when it has one) is not a letter, a digit, or any of `_ . / : @ + ~ % - { $ #`. The
   character after it is not a letter, a digit, or any of `_ : / ~ % + @ -`, nor a `.` followed by
   one of those.
 - So `drawio:drawio` and `/drawio:drawio` are names, and a sentence ending `drawio:drawio.` holds
   one.
 - `https://drawio:drawio`, `a/drawio:drawio`, `kb+drawio:drawio`, `drawio:drawio.md`,
-  `drawio:drawio/x` and `drawio:drawio:x` are not names.
+  `drawio:drawio/x`, `drawio:drawio:x` and `${input:topic}` are not names.
 
-**SKL-55.** *(proposed)* In a skill's `SKILL.md`, a qualified skill name (SKL-54) in the body
+**SKL-55.** In a skill's `SKILL.md`, a qualified skill name (SKL-54) in the body
 reads as `skill://<address>/SKILL.md` when it resolves, without its `/`. The body is the text after
 the frontmatter block, and the frontmatter is served as written.
 
@@ -279,7 +279,7 @@ stay as they are).
 |---|---|
 | resource bodies, listing descriptions, read hints, an extension entry's `frontmatter`, the template's description | yes |
 | tool results ([http-and-tools.md](http-and-tools.md)), instructions (INS-16), rendered prompts | yes |
-| a listing row's `uri` and `name`, an extension entry's `uri` and each file `uri`, the template's `uriTemplate` | never |
+| a listing row's `uri` and `name`, an extension entry's `uri` and each file `uri`, the template's `uriTemplate`, an agent definition's `_meta…skills` values | never |
 
 **SKL-42.** An incoming address (`resources/read`, `read_resource`, `skills/get`) MAY be
 `skill://…` or `<prefix>skill://…` for the request's own prefix. Any other prefix resolves to

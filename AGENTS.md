@@ -140,6 +140,10 @@ names with a prefix, and these names are the agent's API.
   never indexed as skills. A citation that misses inside a skill is tried once
   against the plugin root, which is that fallback's ceiling — nothing is
   rewritten and a file the skill has always wins.
+- **A `<plugin>:<skill>` name in served text** → `catalogue/names.py`, resolved
+  through `Catalogue.qualified_names`. It is rewritten to an address, never to a
+  name, because a client picks its own names for kb's skills. Commands and bare
+  words are left alone.
 - **A new flag or env var** → `main.py`, which is the whole configuration
   surface. Nothing else in the package reads `os.environ`, except `{env: NAME}`
   resolution in `config.py`, which is the one other reader — and it resolves a

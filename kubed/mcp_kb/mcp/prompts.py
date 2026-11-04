@@ -250,7 +250,7 @@ class PromptProvider(Provider):
         with its server here, on the way out.
 
         The maps of the plugin's skills -- their directories and their
-        qualified names -- are set here too. It is built from the
+        qualified names -- are set here too. They are built from the
         snapshot reference the revalidation used, so both work off one
         generation. The prompt was found by the lookup above, which takes its
         own reference. The maps are built only on a get, so the listing never
