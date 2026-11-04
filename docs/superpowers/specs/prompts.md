@@ -30,7 +30,9 @@ block (`---` then `---`) is valid.
 **PRM-6.** The body is the text after the frontmatter block exactly as written.
 
 **PRM-7.** A file that cannot be read, whose YAML does not parse, or whose frontmatter breaks a rule
-below is skipped with a reason. The plugin's other prompts, skills and files still serve.
+below is skipped with a reason. A frontmatter key that is not a string (`1:`, `true:`) is skipped
+with `frontmatter has a key that is not a string`, and so is an inline command's (PLG-21). The
+plugin's other prompts, skills and files still serve.
 
 **PRM-8.** A frontmatter field of the wrong type (a mapping or a list where text is expected, a
 non-list where a list is expected) skips the file with a reason naming the field. It MUST NOT stop
@@ -70,7 +72,8 @@ reference are text and render as written.
 | 11 | The body has `$ARGUMENTS`, `$ARGUMENTS[N]` or `$N` | `claude` |
 | 12 | Nothing above answered | `mcp-kb` |
 
-**PRM-15.** Rule 1 holds whatever the plugin declares and wherever the file sits.
+**PRM-15.** Rule 1 holds whatever the plugin declares and wherever the file sits. A `commands` map
+item that passes rule 1 is `claude`, whatever rules 2 and 3 say (PLG-12, PLG-21).
 
 **PRM-16.** A config's own `prompts:` glob is not a `commands` declaration. A file it selects gets
 no help from rule 5.
@@ -187,15 +190,17 @@ an `argument-hint`.
 
 ## Naming
 
-**PRM-41.** A prompt's name is `<library>_<file stem>`. A library name has no `_`, so the name
+**PRM-41.** A prompt's name is `<library>_<name>`, where the name is as PLG-25 says
+([plugins-and-libraries.md](plugins-and-libraries.md)). A library name has no `_`, so the name
 splits back unambiguously.
 
 **PRM-42.** The stem of `x.prompt.md` is `x`. The stem of any other file is its name without its
 last extension. `prompts/debug.md` in a plugin the `grafana` library serves is `grafana_debug`.
 
-**PRM-43.** The plugin is not part of the name. Two prompt files in one plugin with the same stem
-(`prompts/debug.md`, `prompts/sub/debug.md`, `debug.prompt.md`) serve the first by path order. Each
-later one is skipped with the reason `prompt <stem> is already served by <path>`.
+**PRM-43.** The plugin is not part of the name. Two prompts in one plugin with the same name
+(`prompts/debug.md`, `prompts/sub/debug.md`, `debug.prompt.md`) serve the first, in the order
+PLG-25 gives. Each later one is skipped with the reason `prompt <name> is already served by
+<path>`.
 
 **PRM-44.** Two plugins of one library that yield the same prompt name are a conflict between
 plugins, handled as in [plugins-and-libraries.md](plugins-and-libraries.md).

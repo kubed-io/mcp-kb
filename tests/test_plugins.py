@@ -16,7 +16,12 @@ from kubed.mcp_kb.plugins import (
     plugin_from_config,
 )
 from kubed.mcp_kb.plugins.address import parse_address
-from kubed.mcp_kb.plugins.manifest import Manifest, read_manifest
+from kubed.mcp_kb.plugins.manifest import (
+    CommandEntry,
+    Components,
+    Manifest,
+    read_manifest,
+)
 from kubed.mcp_kb.plugins.select import matches, parse_groups, select
 
 CONFIG = {
@@ -301,8 +306,10 @@ def test_penpots_manifest_shape_is_read_as_published(tmp_path):
         description="Design with Penpot from Claude.",
         version="0.1.0",
         keywords=("penpot", "design"),
-        skills=None,
-        commands=("prompts/design-brief.md", "prompts/deck-brief.md"),
+        components=Components(
+            commands=("prompts/design-brief.md", "prompts/deck-brief.md"),
+            named=frozenset({"commands"}),
+        ),
     )
 
 
@@ -319,7 +326,7 @@ def test_superpowers_manifest_shape_carries_keywords_and_nothing_else(tmp_path):
     read = read_manifest(root)
 
     assert read.keywords == ("skills", "tdd", "workflow")
-    assert read.skills is None and read.commands is None
+    assert read.components == Components()
 
 
 def test_keys_this_server_has_no_use_for_are_ignored_not_refused(tmp_path):
@@ -335,15 +342,124 @@ def test_a_single_string_is_as_good_as_a_list(tmp_path):
     root = manifest(tmp_path, {"skills": "./skills/one", "commands": "./prompts"})
     read = read_manifest(root)
 
-    assert read.skills == ("skills/one",)
-    assert read.commands == ("prompts/*.md",)
+    assert read.components.skills == ("skills/one",)
+    assert read.components.commands == ("prompts/**/*.md",)
 
 
-def test_a_command_directory_becomes_a_markdown_glob(tmp_path):
-    """Claude takes a directory of commands; a harvest takes patterns."""
+@pytest.mark.unit
+def test_a_command_directory_is_read_recursively(tmp_path):
+    root = manifest(tmp_path, {"commands": "./cmds"})
+    read = read_manifest(root).components
+
+    assert read.commands == ("cmds/**/*.md",)
+    assert read.command_dirs == ("cmds",)
+
+
+@pytest.mark.unit
+def test_a_file_among_command_directories_stays_a_file(tmp_path):
     root = manifest(tmp_path, {"commands": ["commands", "./one.md", "sub/*.md"]})
+    read = read_manifest(root).components
 
-    assert read_manifest(root).commands == ("commands/*.md", "one.md", "sub/*.md")
+    assert read.commands == ("commands/**/*.md", "one.md", "sub/*.md")
+    assert read.command_dirs == ("commands",)
+
+
+@pytest.mark.unit
+def test_an_object_map_of_commands_loads(tmp_path):
+    commands = {
+        "brief": {
+            "source": "./cmds/brief.md",
+            "description": "Write a brief.",
+            "argumentHint": "<topic>",
+        },
+        "about": {"content": "Say what this plugin does."},
+        "bad": {"source": "./x.md", "content": "y"},
+    }
+    read = read_manifest(manifest(tmp_path, {"commands": commands})).components
+
+    assert read.command_map == (
+        CommandEntry(
+            name="brief",
+            source="cmds/brief.md",
+            content=None,
+            description="Write a brief.",
+            argument_hint="<topic>",
+        ),
+        CommandEntry(
+            name="about",
+            source=None,
+            content="Say what this plugin does.",
+            description=None,
+            argument_hint=None,
+        ),
+    )
+    assert read.commands == ()
+    assert len(read.notes) == 1
+    assert "bad" in read.notes[0]
+    assert "exactly one of source and content" in read.notes[0]
+
+
+@pytest.mark.unit
+def test_a_map_item_that_is_not_an_object_is_a_note(tmp_path):
+    read = read_manifest(manifest(tmp_path, {"commands": {"x": "y"}})).components
+
+    assert read.command_map == ()
+    assert len(read.notes) == 1
+    assert "'x'" in read.notes[0]
+
+
+@pytest.mark.unit
+def test_dot_names_the_plugin_root(tmp_path):
+    root = manifest(tmp_path, {"skills": ["./", "."]})
+
+    assert read_manifest(root).components.skills == (".",)
+
+
+@pytest.mark.unit
+def test_agents_keep_md_files_and_note_the_rest(tmp_path):
+    root = manifest(tmp_path, {"agents": ["./agents/a.md", "./agents", "./x.txt"]})
+    read = read_manifest(root).components
+
+    assert read.agents == ("agents/a.md",)
+    assert len(read.notes) == 2
+    assert "'agents'" in read.notes[0]
+    assert "'x.txt'" in read.notes[1]
+
+
+@pytest.mark.unit
+def test_a_path_without_dot_slash_is_kept_and_noted(tmp_path):
+    read = read_manifest(manifest(tmp_path, {"skills": ["skills/a"]})).components
+
+    assert read.skills == ("skills/a",)
+    assert len(read.notes) == 1
+    assert "skills/a" in read.notes[0]
+
+
+@pytest.mark.unit
+def test_mcp_servers_are_names_or_a_file(tmp_path):
+    named = manifest(tmp_path / "a", {"mcpServers": {"a": {}, "b": {}}})
+    assert read_manifest(named).components.mcp_servers == ("a", "b")
+
+    filed = manifest(tmp_path / "b", {"mcpServers": "./servers.json"})
+    assert read_manifest(filed).components.mcp_files == ("servers.json",)
+
+    wrong = manifest(tmp_path / "c", {"mcpServers": 3})
+    notes = read_manifest(wrong).components.notes
+    assert len(notes) == 1
+    assert "mcpServers" in notes[0]
+
+
+@pytest.mark.unit
+def test_named_lists_every_component_key_present(tmp_path):
+    root = manifest(tmp_path, {"hooks": "./h.json", "commands": []})
+
+    assert read_manifest(root).components.named == {"hooks", "commands"}
+
+
+@pytest.mark.unit
+def test_a_wrong_typed_agents_fails_the_manifest(tmp_path):
+    with pytest.raises(ValueError, match="agents"):
+        read_manifest(manifest(tmp_path, {"agents": 3}))
 
 
 def test_a_component_list_of_the_wrong_type_names_the_field(tmp_path):
@@ -356,7 +472,7 @@ def test_a_path_escaping_the_plugin_root_is_dropped_not_raised(tmp_path):
     """One bad path in a published manifest must not cost the whole plugin."""
     root = manifest(tmp_path, {"skills": ["../elsewhere", "/etc", "skills/ok"]})
 
-    assert read_manifest(root).skills == ("skills/ok",)
+    assert read_manifest(root).components.skills == ("skills/ok",)
 
 
 def test_an_unparsable_manifest_is_an_error(tmp_path):
@@ -436,3 +552,58 @@ def test_select_keeps_the_plugins_a_selector_admits_in_order():
     selector = Selector(categories=["engineering", "design"], tags=["runbooks,oncall"])
 
     assert [p.id for p in select(declared_plugins(here), selector)] == ["a", "c"]
+
+
+@pytest.mark.unit
+def test_every_escape_has_one_note_saying_so(tmp_path):
+    root = manifest(tmp_path, {"skills": ["../x", "/etc", "./ok"]})
+    read = read_manifest(root).components
+
+    assert read.skills == ("ok",)
+    assert read.notes == (
+        "skills path '../x' leaves the plugin root",
+        "skills path '/etc' leaves the plugin root",
+    )
+
+
+@pytest.mark.unit
+def test_a_root_skills_path_is_the_plugin_root(tmp_path):
+    """`"."` is kept in the components, and harvested as the plugin root --
+    a directory hit -- rather than handed to `Path.glob`, which raises."""
+    from kubed.mcp_kb.catalogue.harvest import DEFAULTS
+    from kubed.mcp_kb.catalogue.snapshot import build_plugin, with_manifest
+
+    root = manifest(tmp_path, {"skills": "./"})
+    skill = root / "a"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("---\nname: a\ndescription: d\n---\nbody\n")
+
+    assert read_manifest(root).components.skills == (".",)
+    completed, globs = with_manifest(plugin(), root)
+    record = build_plugin(completed, root, globs=globs)
+
+    assert globs.skills == (*DEFAULTS["skills"], ".")
+    assert record.status == "ok"
+    assert [row.name for row in record.skills] == ["a"]
+
+
+@pytest.mark.unit
+def test_a_root_entry_skills_path_builds_without_raising(tmp_path):
+    """`"."` is the plugin root for a root entry's skills as for a manifest's."""
+    from dataclasses import replace
+
+    from kubed.mcp_kb.catalogue.snapshot import build_plugin, with_manifest
+    from kubed.mcp_kb.plugins.manifest import read_components
+
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "SKILL.md").write_text("---\nname: a\ndescription: d\n---\nb\n")
+    root_entry = replace(
+        plugin(), entry=read_components({"skills": ["./"]}), root_entry=True
+    )
+
+    completed, globs = with_manifest(root_entry, tmp_path)
+    record = build_plugin(completed, tmp_path, globs=globs)
+
+    assert globs.skills == (".",)
+    assert record.status == "ok"
+    assert [row.name for row in record.skills] == ["a"]

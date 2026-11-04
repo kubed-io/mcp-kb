@@ -59,6 +59,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `harvest.py` | a plugin's globs, and what counts as a skill, a prompt or a library file |
 | ⤷ `skills.py` | the domain — `Skill`, `SkillIndex`, and the scoping rules. Imports no FastMCP |
 | ⤷ `uris.py` | the `skill://` address space — `Catalogue`, the grammar |
+| ⤷ `agents.py` | a plugin's agent file, parsed — `parse_agent`, `routing_hint`, `Agent`, `AgentRoster`. Imports no FastMCP |
 | ⤷ `prompts/` | `FilePrompt`, the dialect seam, rendering — no FastMCP |
 | ⤷⤷ `detect.py` | which dialect a file is, strongest signal first |
 | ⤷⤷ `mcpkb.py`, `claude.py`, `copilot.py` | one module per dialect: `parse` into `Parsed`, `substitute` back out |
@@ -75,6 +76,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `instructions.py` | `ScopedInstructions` — sets the `instructions` on each `initialize` and `server/discover` answer |
 | ⤷ `announce.py` | `AnnounceChanges` — telling a session its listing moved |
 | ⤷ `pins.py` | `RefuseEmptyScope` — a scope that names nothing fails every request, saying what there is |
+| ⤷ `agents.py` | `AgentsExtension` — `agents/list` and `agents/get`, the envelope and the errors over `Catalogue` |
 | `kubed/mcp_kb/spec/` | `builder.py`, the OpenAPI document for the HTTP surface |
 | `scripts/` | `generate_openapi.py`, `generate_wiki.py`, and `requirements.py` for the image build |
 | `examples/config.yaml` | the worked config the image ships — four marketplace libraries, and one plugin of our own beside penpot's |
@@ -111,6 +113,10 @@ names with a prefix, and these names are the agent's API.
   introduce a host, because a host is where a credential and a refresh interval
   are configured. An entry this server cannot install is skipped with a reason,
   never guessed at.
+- **`plugin.json` parity** → `plugins/manifest.py`'s `Components` for what a
+  manifest or an entry says a plugin ships, and `snapshot.with_manifest` for
+  how the two merge, per kind. The rule is Claude Code's: a plugin means here
+  what it means there.
 - **A new backend** → a module in `sources/` taking a `Fetch`, its scheme in
   `config.BACKENDS`, and `sources/__init__.py`'s dispatch. Everything above it
   sees a directory and nothing else, so nothing in `catalogue/` or `plugins/`
@@ -121,7 +127,10 @@ names with a prefix, and these names are the agent's API.
   a handler that reimplements that filter is how a pinned client ends up seeing
   another library.
 - **Adding a prompt** → a file matching a plugin's `prompts:` globs, its
-  manifest's `commands`, or the convention; exposed as `<library>_<file stem>`.
+  manifest's `commands`, or the convention; exposed as `<library>_<name>`
+  (PLG-25): the folders below a commands directory then the stem
+  (`commands/db/migrate.md` is `<library>_db_migrate`), a `commands` map's key,
+  or else the file stem.
   No code. In this server's own dialect every placeholder must be a declared
   argument and a required argument cannot have a default; the server skips a
   file that breaks either rule, and `tests/test_prompts.py` loads a broken one
@@ -180,6 +189,17 @@ normalization; the legacy `_manifest` continues to describe disk bytes. Both
 the snapshot getter, preserve raw frontmatter, and leave invalid skill metadata
 readable as ordinary resources without advertising an invalid extension entry.
 
+The **Agents extension** is another, in `mcp/agents.py`: `agents/list` and
+`agents/get` serve the subagents Claude-format plugins ship, from `Catalogue`'s
+`AgentRoster`, and add no listing row, no tool and no line of instructions. An
+agent's name is its library's, claimed in library order — a later plugin's
+clash is `<name>@<plugin>` — and no owner is stored anywhere, so a plugin
+appended to a library renames nothing. Agent files never go through the
+plugin-root fallback: one reads at a `skill://` address only when an
+operator's `files:` glob names it. No method takes a scope param; the
+connection's scope is the only filter, and out of scope is `Agent not found`,
+as absent is.
+
 A client declares it cannot read resources with `?resources=off` or
 `X-MCP-Resources: off`, and only then is the resource mirror listed; prompts
 work the same way with `?prompts=off`. There is no protocol signal for either —
@@ -207,15 +227,15 @@ They compose: the header narrows within whatever the config loads. Header
 scoping only exists inside an HTTP request, so it is inert over stdio — which is
 why `tests/test_header_scope.py` runs a real uvicorn server.
 
-`GET /health` reports the skill and prompt counts, the catalogue's generation
-and when it was built, and three maps: `libraries` (what each serves and what it
-could not resolve), `plugins` (keyed by id — `<entry>@<library>` for a
-marketplace entry — with its fetch, category, tags and what it yielded) and
-`fetches` (one per materialised tree, with its status and fingerprint).
-`POST /reindex` returns the same payload plus `rebuilt`, the fetch keys. Between
-them they answer the three questions worth asking of a running instance: did
-everything configured load, which generation is being served, and has a refresh
-picked up an edit yet.
+`GET /health` reports the skill, prompt and agent counts, the catalogue's
+generation and when it was built, and three maps: `libraries` (what each serves,
+what it could not resolve, and the agents it `renamed` or left `unserved`),
+`plugins` (keyed by id — `<entry>@<library>` for a marketplace entry — with its
+fetch, category, tags and what it yielded) and `fetches` (one per materialised
+tree, with its status and fingerprint). `POST /reindex` returns the same
+payload plus `rebuilt`, the fetch keys. Between them they answer the three
+questions worth asking of a running instance: did everything configured load,
+which generation is being served, and has a refresh picked up an edit yet.
 
 ## Things that already cost someone an afternoon
 
@@ -273,7 +293,8 @@ picked up an edit yet.
   read and `COOLDOWN_SECONDS` stops a wedged server costing anything after the
   first. **Making the read path async — a thread for the blocking call, or an
   async WebDAV client — is the outstanding follow-up**, and it is a change to
-  `mcp/resources.py`, `catalogue/uris.py` (the skill and library-file read) and
+  `mcp/resources.py`, `catalogue/uris.py` (the skill and library-file read, and
+  `Catalogue._agent_parsed`, the live agent read under `agents/get`) and
   `catalogue/prompts/` (`FilePrompt.body()`, the live prompt read), not to
   `sources/live.py`.
 - **An export is named by its version, so a rebuild of a version that has not

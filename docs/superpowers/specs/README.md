@@ -13,7 +13,7 @@ to be is in [the plans](../plans/), and how to install and use the server is in
 | [Prompts](prompts.md) | PRM | The three dialects, arguments, naming, placeholders, elicitation |
 | [Scoping and instructions](scoping-and-instructions.md) | SCP, INS | Library, category and tag selection, refusals, the server instructions a scope gets |
 | [HTTP and tools](http-and-tools.md) | HTTP, TOOL | `/mcp`, `/health`, `/reindex`, the OpenAPI document, protocol eras, the container, the tool mirrors |
-| [Agents](agents.md) | AGT | Plugin agents through the draft agents extension *(all proposed)* |
+| [Agents](agents.md) | AGT | Plugin agents through the experimental agents extension: `agents/list`, `agents/get`, names, scope and health |
 
 ## Rules for this folder
 

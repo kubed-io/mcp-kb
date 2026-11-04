@@ -38,9 +38,10 @@ from pathlib import Path
 from typing import Literal
 
 from ..config import Config
+from .prompts import PromptSource
 from .skills import Skill
 
-INDEX_VERSION = 5
+INDEX_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -92,16 +93,46 @@ class SkillRow:
 
 @dataclass(frozen=True)
 class PromptRow:
-    """A harvested prompt file: where it is and which dialect it is written in.
+    """A harvested prompt: where it is, its dialect, and what it is called.
 
     The dialect is recorded because deciding it may have been the config's
     doing (``dialect:`` on the plugin), the harvest's (a ``commands/`` tree)
     or the file's own; the snapshot re-parses the file in the dialect the
-    row records, so every rebuild and restart reads it the same way.
+    row records, so every rebuild and restart reads it the same way. The
+    name is recorded for the same reason: it was decided by where the file
+    was found (PLG-25), which the path alone no longer says.
+
+    ``content``, ``description`` and ``argument_hint`` are an object-map
+    command's (PLG-21). An inline body has no file to re-parse, so it rides in
+    the row, and ``path`` is the manifest it came from.
     """
 
     path: str
     dialect: str
+    name: str
+    content: str | None = None
+    description: str | None = None
+    argument_hint: str | None = None
+
+    @classmethod
+    def from_source(cls, source: PromptSource, dialect: str) -> PromptRow:
+        return cls(
+            path=str(source.path),
+            dialect=dialect,
+            name=source.name,
+            content=source.content,
+            description=source.description,
+            argument_hint=source.argument_hint,
+        )
+
+    def to_source(self) -> PromptSource:
+        return PromptSource(
+            path=Path(self.path),
+            name=self.name,
+            content=self.content,
+            description=self.description,
+            argument_hint=self.argument_hint,
+        )
 
 
 @dataclass(frozen=True)
@@ -124,6 +155,14 @@ class FetchRecord:
     fingerprint: dict
     built: str
     error: str | None
+
+
+@dataclass(frozen=True)
+class AgentRow:
+    """One agent file: where it is (relative to its plugin root) and its name."""
+
+    path: str
+    name: str
 
 
 @dataclass(frozen=True)
@@ -151,6 +190,9 @@ class PluginRecord:
     # parse -- as ``{"path", "reason"}`` rows. Kept on the record because the
     # harvest is the only pass that sees such a file: its rows never name it.
     skipped: tuple[dict[str, str], ...] = ()
+    # Agents and the paths a fallback must refuse, relative to the plugin root.
+    agents: tuple[AgentRow, ...] = ()
+    agent_paths: tuple[str, ...] = ()
 
 
 def _fetch_record_from_dict(raw: dict) -> FetchRecord:
@@ -177,6 +219,8 @@ def _plugin_record_from_dict(raw: dict) -> PluginRecord:
         files=tuple(raw["files"]),
         skill_dirs=tuple(raw["skill_dirs"]),
         skipped=tuple(_skipped_row(row) for row in raw["skipped"]),
+        agents=tuple(AgentRow(**a) for a in raw["agents"]),
+        agent_paths=tuple(raw["agent_paths"]),
     )
 
 

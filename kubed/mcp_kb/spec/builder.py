@@ -59,7 +59,9 @@ SKIPPED = {
         "frontmatter `name` breaks the Agent Skills naming rule or differs "
         "from its directory, or that a skill before it already serves at that "
         "address; a prompt whose name a prompt before it already has, or whose "
-        "file does not parse or cannot be read. A clash with another plugin is "
+        "file does not parse or cannot be read; an agent file with no usable "
+        "name or description, or whose name this plugin already serves. A "
+        "clash with another plugin is "
         "not listed here: it fails the later plugin in that library instead, "
         "under the library's `conflicts`."
     ),
@@ -140,7 +142,7 @@ PLUGIN_STATUS = {
     "description": (
         "One plugin, keyed under `plugins` by its id: its config name, or "
         "`<entry>@<library>` for a marketplace entry. `skills`, `prompts`, "
-        "`files` and `built` are the plugin's own harvest, independent of "
+        "`agents`, `files` and `built` are the plugin's own harvest, independent of "
         "which libraries serve it, and are absent when `status` is `failed`."
     ),
     "required": [
@@ -168,6 +170,7 @@ PLUGIN_STATUS = {
         "skills": _field("integer", "Skills this plugin yields."),
         "prompts": _field("integer", "Prompts this plugin yields."),
         "files": _field("integer", "Library-level files this plugin yields."),
+        "agents": _field("integer", "Agents this plugin yields."),
         "built": _field("string", "When this plugin was last harvested."),
         "error": _field(
             "string",
@@ -175,6 +178,18 @@ PLUGIN_STATUS = {
             "the tree, or its manifest does not parse.",
         ),
         "skipped": SKIPPED,
+        "notes": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Present when not empty: what the server noticed in the "
+                "plugin's own files without failing it -- its manifest's or "
+                "marketplace entry's defects, such as a path without its `./` "
+                "or a `commands` item that names no file, a default folder a "
+                "replacing key leaves unread, and an `.mcp.json` or "
+                "`mcpServers` file that does not parse."
+            ),
+        },
     },
 }
 
@@ -191,6 +206,7 @@ LIBRARY_STATUS = {
         "plugins",
         "skills",
         "prompts",
+        "agents",
         "files",
     ],
     "properties": {
@@ -214,6 +230,7 @@ LIBRARY_STATUS = {
         "skills": _field("integer", "Skills served in this library."),
         "prompts": _field("integer", "Prompts served in this library."),
         "files": _field("integer", "Library-level files served in this library."),
+        "agents": _field("integer", "Agents served in this library."),
         "error": _field(
             "string",
             "Present when part of the library could not be resolved -- its "
@@ -225,8 +242,7 @@ LIBRARY_STATUS = {
             "description": (
                 "Present when the library's marketplace lists entries this "
                 "server does not install: `npm`, `archive` and `command` "
-                "sources, `strict: false` entries, and entries that are "
-                "malformed."
+                "sources, and entries that are malformed."
             ),
             "items": {
                 "type": "object",
@@ -247,6 +263,33 @@ LIBRARY_STATUS = {
                 "serves normally in any other."
             ),
         },
+        "renamed": {
+            "type": "object",
+            "additionalProperties": {"type": "string"},
+            "description": (
+                "Present when a later plugin's agent took "
+                "`<name>@<plugin>`: keyed by the served name, the value says "
+                "who has the short one"
+            ),
+        },
+        "unserved": {
+            "type": "array",
+            "description": (
+                "Present when not empty: agents this library does not serve, "
+                "because their renamed name is taken too."
+            ),
+            "items": {
+                "type": "object",
+                "required": ["plugin", "path", "reason"],
+                "properties": {
+                    "plugin": _field("string", "The plugin id."),
+                    "path": _field(
+                        "string", "The agent file, relative to the plugin root."
+                    ),
+                    "reason": _field("string", "Why it is not served."),
+                },
+            },
+        },
     },
 }
 
@@ -257,7 +300,7 @@ HEALTH = {
         "inside `fetches` and `plugins`, never raised as a failed request."
     ),
     "required": [
-        "status", "generation", "built", "skills", "prompts",
+        "status", "generation", "built", "skills", "prompts", "agents",
         "libraries", "plugins", "fetches",
     ],
     "properties": {
@@ -268,6 +311,7 @@ HEALTH = {
         "built": _field("string", "When the current snapshot was assembled."),
         "skills": _field("integer", "Skills in the current index."),
         "prompts": _field("integer", "Prompts currently served."),
+        "agents": _field("integer", "Agents currently served, across libraries."),
         "libraries": {
             "type": "object",
             "additionalProperties": {"$ref": "#/components/schemas/LibraryStatus"},

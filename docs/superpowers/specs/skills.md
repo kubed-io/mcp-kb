@@ -11,7 +11,9 @@ globs is in [plugins-and-libraries.md](plugins-and-libraries.md); who may see wh
 
 **SKL-1.** A skill is a directory inside its plugin root that holds a regular file named
 `SKILL.md` and that the plugin's `skills` patterns select (PLG-9). With no patterns from the
-config or the manifest, these conventions apply. A `SKILL.md` at the plugin root is not one of them.
+config, these conventions apply, and a manifest's or entry's `skills` add to them (PLG-20, LIB-30);
+an entry at the marketplace root that lists `skills` is the exception (LIB-32). A `SKILL.md` at the
+plugin root is not one of the conventions.
 
 | Pattern | Reaches |
 |---|---|
@@ -29,7 +31,7 @@ path the pattern matched, not by its symlink target.
 
 **SKL-5.** A skill's name is its frontmatter `name`, else its directory's name. Its description is
 the frontmatter `description` with each run of whitespace collapsed to one space, else empty.
-Frontmatter that does not parse counts as absent.
+Frontmatter that does not parse, or has a key that is not a string, counts as absent.
 
 **SKL-6.** A skill's name MUST keep the Agent Skills naming rule: 1 to 64 lowercase letters,
 digits and single hyphens, no hyphen first or last. It MUST equal its directory's name, unless the
@@ -180,11 +182,12 @@ path and is in scope.
 
 **SKL-30.** When a path under a skill names no file of the skill, it reads the file at the same
 path below the root of the skill's own plugin: `skill://penpot/penpot-router/shared/api.md` reads
-that plugin's `shared/api.md`. It never reaches another plugin's root.
+that plugin's `shared/api.md`. It never reaches another plugin's root. Neither serves an agent file
+(AGT-3).
 
 **SKL-31.** When a library-level path names no library file, it reads the file at that path from
 the first in-scope plugin root of the library, in the library's order, that has one. It does not
-apply to a path inside any skill's address, under any scope.
+apply to a path inside any skill's address, under any scope. Neither serves an agent file (AGT-3).
 
 **SKL-32.** Both fallbacks refuse a hidden path, a file named `_index.md` or `_files.md`, a target
 resolving outside the plugin root, and a target inside any skill directory of the library, served

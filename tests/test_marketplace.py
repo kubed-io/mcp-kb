@@ -169,13 +169,12 @@ def test_a_grafana_entry_carries_its_metadata_and_its_skill_paths(tmp_path):
     assert plugin.tags == ("loki", "tempo", "mimir", "pyroscope")
     assert plugin.version == "0.1.0"
     assert plugin.description == "Query Loki, Tempo, Mimir and Pyroscope."
-    assert plugin.globs == Globs(
-        skills=(
-            "skills/grafana-lgtm/loki",
-            "skills/grafana-lgtm/tempo",
-            "skills/grafana-lgtm/mimir",
-        )
+    assert plugin.entry.skills == (
+        "skills/grafana-lgtm/loki",
+        "skills/grafana-lgtm/tempo",
+        "skills/grafana-lgtm/mimir",
     )
+    assert plugin.globs == Globs()
     assert plugin.subdir == ""
 
 
@@ -184,7 +183,9 @@ def test_penpots_entry_leaves_its_components_to_its_manifest(tmp_path):
     plugin's own `plugin.json` is what decides."""
     plugin = only(read(tmp_path, PENPOT))
 
-    assert plugin.globs == Globs(skills=None, prompts=None, files=None)
+    assert plugin.entry.skills is None
+    assert plugin.entry.commands is None
+    assert plugin.globs == Globs()
     assert plugin.category == "design"
     assert plugin.tags == ("design", "penpot", "mcp")
 
@@ -194,8 +195,10 @@ def test_an_entrys_commands_become_prompt_patterns(tmp_path):
     not it sits in a `commands/` tree."""
     plugin = only(read(tmp_path, entry(commands=["./prompts/brief.md", "commands"])))
 
-    patterns = ("prompts/brief.md", "commands/*.md")
-    assert plugin.globs == Globs(prompts=patterns, commands=patterns)
+    patterns = ("prompts/brief.md", "commands/**/*.md")
+    assert plugin.entry.commands == patterns
+    assert plugin.entry.command_dirs == ("commands",)
+    assert plugin.globs == Globs()
 
 
 def test_a_field_this_server_has_no_use_for_is_ignored(tmp_path):
@@ -206,6 +209,7 @@ def test_a_field_this_server_has_no_use_for_is_ignored(tmp_path):
     installable here."""
     catalog = read(tmp_path, entry(files=["shared/**/*"], author={"name": "x"}))
 
+    assert only(catalog).entry.skills is None
     assert only(catalog).globs == Globs()
     assert catalog.skipped == ()
 
@@ -430,10 +434,60 @@ def test_an_entry_with_no_source_is_skipped(tmp_path):
 # -- the other skips -----------------------------------------------------------
 
 
-def test_a_non_strict_entry_is_skipped(tmp_path):
-    catalog = read(tmp_path, entry(strict=False))
+@pytest.mark.unit
+def test_a_non_strict_entry_is_a_plugin(tmp_path):
+    plugin = only(read(tmp_path, entry(strict=False)))
 
-    assert skip_reason(catalog) == "strict: false entries are not supported"
+    assert plugin.strict is False
+    assert only(read(tmp_path, entry())).strict is True
+
+
+@pytest.mark.unit
+def test_a_grafana_entry_is_a_root_entry_listing_skills(tmp_path):
+    plugin = read(tmp_path, GRAFANA).plugins[0]
+
+    assert plugin.root_entry is True
+    assert plugin.entry.skills == (
+        "skills/grafana-lgtm/loki",
+        "skills/grafana-lgtm/tempo",
+        "skills/grafana-lgtm/mimir",
+    )
+    sub = {"plugins": [{"name": "p", "source": "./plugins/x"}]}
+    elsewhere = only(read(tmp_path, sub))
+    assert elsewhere.root_entry is False
+    for spelled in (".", "./"):
+        dot = {"plugins": [{"name": "p", "source": spelled}]}
+        assert only(read(tmp_path, dot)).root_entry is True
+    github = {"plugins": [{"name": "p", "source": {"source": "github", "repo": "o/r"}}]}
+    assert only(read(tmp_path, github)).root_entry is False
+
+
+@pytest.mark.unit
+def test_a_root_entry_is_relative_to_the_marketplaces_own_subdir(tmp_path):
+    source = "github://grafana/skills//pack?ref=abc"
+    here = only(read(tmp_path, entry(), source=source))
+    sub = {"plugins": [{"name": "p", "source": "./x"}]}
+    below = only(read(tmp_path, sub, source=source))
+
+    slash = {"plugins": [{"name": "p", "source": "./pack/"}]}
+    same = only(read(tmp_path, slash, source=source))
+
+    assert here.root_entry is True
+    assert below.root_entry is False
+    assert same.root_entry is False
+
+
+@pytest.mark.unit
+def test_an_entrys_agents_and_object_commands_are_read(tmp_path):
+    commands = {"ship": {"source": "./commands/ship.md", "description": "Ship it"}}
+    plugin = only(read(tmp_path, entry(agents=["./agents/a.md"], commands=commands)))
+
+    assert plugin.entry.agents == ("agents/a.md",)
+    assert [c.name for c in plugin.entry.command_map] == ["ship"]
+    assert plugin.entry.commands == ()
+
+    catalog = read(tmp_path, entry(agents=3))
+    assert skip_reason(catalog) == "agents must be a string or a list of strings"
 
 
 def test_a_strict_true_entry_is_ordinary(tmp_path):

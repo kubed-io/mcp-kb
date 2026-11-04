@@ -144,10 +144,16 @@ def _up(snapshot: Snapshot, library: str) -> bool:
 
 
 def _serving(snapshot: Snapshot, scope: Scope) -> bool:
-    """Whether ``scope`` would be shown anything at all: a row, or a prompt."""
+    """Whether ``scope`` would be shown anything at all: a row, a prompt or an agent.
+
+    An agent counts (SCP-31 row 9): a plugin that ships only agents is a thing
+    a scope can name, and refusing it would leave agents/list unreachable.
+    """
     if snapshot.catalogue.entries(scope):
         return True
-    return bool(PromptProvider(lambda: snapshot).visible(scope))
+    if PromptProvider(lambda: snapshot).visible(scope):
+        return True
+    return bool(snapshot.catalogue.agent_cards(scope))
 
 
 class RefuseEmptyScope(Middleware):

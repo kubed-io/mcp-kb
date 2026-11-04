@@ -17,9 +17,38 @@ import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from ..catalogue.harvest import readable
+from ..catalogue.harvest import readable, usable_name
 
 MANIFEST_FILES = (".claude-plugin/plugin.json", "plugin.json")
+
+
+COMPONENT_KEYS = ("skills", "commands", "agents", "hooks", "outputStyles", "themes")
+
+
+@dataclass(frozen=True)
+class CommandEntry:
+    """One item of an object-map ``commands``: a name, and a file or a body."""
+
+    name: str
+    source: str | None
+    content: str | None
+    description: str | None
+    argument_hint: str | None
+
+
+@dataclass(frozen=True)
+class Components:
+    """What a manifest, or a marketplace entry, says the plugin ships."""
+
+    skills: tuple[str, ...] | None = None  # "." is the plugin root
+    commands: tuple[str, ...] | None = None  # patterns; () when only a map is set
+    command_dirs: tuple[str, ...] = ()  # the directories among them
+    command_map: tuple[CommandEntry, ...] = ()
+    agents: tuple[str, ...] | None = None  # .md files only
+    mcp_servers: tuple[str, ...] = ()  # names from an inline object
+    mcp_files: tuple[str, ...] = ()  # paths a string mcpServers names
+    named: frozenset[str] = frozenset()  # which of COMPONENT_KEYS are present
+    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -28,8 +57,16 @@ class Manifest:
     description: str | None
     version: str | None
     keywords: tuple[str, ...]
-    skills: tuple[str, ...] | None
-    commands: tuple[str, ...] | None
+    components: Components
+
+
+def manifest_file(root: Path) -> str | None:
+    """Which of ``MANIFEST_FILES`` the plugin ships, root-relative: the one read.
+
+    Also what an inline object-map command is named by in ``/health``, since
+    the manifest is the only file it has.
+    """
+    return next((name for name in MANIFEST_FILES if readable(root, name)), None)
 
 
 def read_manifest(root: Path) -> Manifest | None:
@@ -41,17 +78,21 @@ def read_manifest(root: Path) -> Manifest | None:
     and keywords into the catalogue. A link inside the root still resolves,
     which is the ConfigMap case.
     """
-    for name in MANIFEST_FILES:
-        path = readable(root, name)
-        if path is not None:
-            break
-    else:
+    name = manifest_file(root)
+    if name is None:
+        return None
+    path = readable(root, name)
+    if path is None:
         return None
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"{name} is not readable JSON: {exc}") from exc
+    except RecursionError:
+        # Fetched content nested past the parser's stack: the plugin's failure,
+        # not the server's, and nothing of the file is quoted back.
+        raise ValueError(f"{name} is nested too deeply to read") from None
     if not isinstance(data, dict):
         raise ValueError(f"{name} must be a JSON object")
 
@@ -60,30 +101,124 @@ def read_manifest(root: Path) -> Manifest | None:
         description=_text(data.get("description")),
         version=_text(data.get("version")),
         keywords=_strings(data.get("keywords"), "keywords") or (),
-        skills=paths(data.get("skills"), "skills"),
-        commands=command_patterns(data.get("commands")),
+        components=read_components(data),
     )
 
 
-def paths(value: object, field: str) -> tuple[str, ...] | None:
-    """A manifest's component paths as harvest patterns, escapes dropped.
+def read_components(data: dict) -> Components:
+    """Every component key of a manifest or a marketplace entry, read.
 
-    Shared with ``marketplace.py``, whose entries carry the same two fields in
-    the same spelling -- ``["./skills/loki"]`` -- and must read identically.
+    A wrong-typed field raises ``ValueError`` naming it; any other defect in
+    what a publisher wrote is a note, so one bad item costs only itself.
     """
+    notes: list[str] = []
+    skills = _paths(data.get("skills"), "skills", notes)
+    commands, command_dirs, command_map = _commands(data.get("commands"), notes)
+    agents = _agents(data.get("agents"), notes)
+    servers, files = _mcp(data.get("mcpServers"), notes)
+    return Components(
+        skills=skills,
+        commands=commands,
+        command_dirs=command_dirs,
+        command_map=command_map,
+        agents=agents,
+        mcp_servers=servers,
+        mcp_files=files,
+        named=frozenset(key for key in COMPONENT_KEYS if key in data),
+        notes=tuple(notes),
+    )
+
+
+def _paths(value: object, field: str, notes: list[str]) -> tuple[str, ...] | None:
     found = _strings(value, field)
     if found is None:
         return None
-    return tuple(cleaned for item in found if (cleaned := _inside(item)))
+    kept = (_inside(item, field, notes) for item in found)
+    return tuple(dict.fromkeys(cleaned for cleaned in kept if cleaned))
 
 
-def command_patterns(value: object) -> tuple[str, ...] | None:
-    """``paths`` for commands: a file is itself, a directory is every markdown
-    file in it -- which is what Claude reads a directory of commands as."""
-    found = paths(value, "commands")
+def _commands(
+    value: object, notes: list[str]
+) -> tuple[tuple[str, ...] | None, tuple[str, ...], tuple[CommandEntry, ...]]:
+    if isinstance(value, dict):
+        return (), (), _command_map(value, notes)
+    found = _paths(value, "commands", notes)
+    if found is None:
+        return None, (), ()
+    patterns: list[str] = []
+    dirs: list[str] = []
+    for path in found:
+        if path.endswith(".md"):
+            patterns.append(path)
+            continue
+        dirs.append(path)
+        patterns.append("**/*.md" if path == "." else f"{path}/**/*.md")
+    return tuple(patterns), tuple(dirs), ()
+
+
+def _command_map(value: dict, notes: list[str]) -> tuple[CommandEntry, ...]:
+    entries = []
+    for name, item in value.items():
+        # The key is the served prompt's name and a log line: quoted by repr,
+        # which escapes a newline, and every note below quotes a good one.
+        if not usable_name(name):
+            notes.append(f"commands entry {name!r} is not a usable name")
+            continue
+        if not isinstance(item, dict):
+            notes.append(f"commands entry '{name}' is not an object")
+            continue
+        source, content = item.get("source"), item.get("content")
+        if (source is None) == (content is None):
+            notes.append(
+                f"commands entry '{name}' needs exactly one of source and content"
+            )
+            continue
+        if source is not None:
+            if isinstance(source, str):
+                source = _inside(source, "commands", notes)
+            else:
+                source = ""
+            if not source:
+                notes.append(f"commands entry '{name}' has no usable source")
+                continue
+        elif not isinstance(content, str):
+            notes.append(f"commands entry '{name}' content is not text")
+            continue
+        entries.append(
+            CommandEntry(
+                name=str(name),
+                source=source,
+                content=content,
+                description=_text(item.get("description")),
+                argument_hint=_text(item.get("argumentHint")),
+            )
+        )
+    return tuple(entries)
+
+
+def _agents(value: object, notes: list[str]) -> tuple[str, ...] | None:
+    found = _paths(value, "agents", notes)
     if found is None:
         return None
-    return tuple(p if p.endswith(".md") else f"{p}/*.md" for p in found)
+    kept = []
+    for path in found:
+        if path.endswith(".md"):
+            kept.append(path)
+        else:
+            notes.append(f"agents entry '{path}' is not a .md file")
+    return tuple(kept)
+
+
+def _mcp(value: object, notes: list[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    if value is None:
+        return (), ()
+    if isinstance(value, dict):
+        return tuple(str(name) for name in value), ()
+    if isinstance(value, str):
+        path = _inside(value, "mcpServers", notes)
+        return (), ((path,) if path else ())
+    notes.append("mcpServers must be an object or a path")
+    return (), ()
 
 
 def _text(value: object) -> str | None:
@@ -101,9 +236,20 @@ def _strings(value: object, field: str) -> tuple[str, ...] | None:
     raise ValueError(f"{field} must be a string or a list of strings")
 
 
-def _inside(text: str) -> str:
-    """``text`` as a root-relative path, or ``""`` when it leaves the root."""
-    path = text.strip().removeprefix("./")
-    if not path or path.startswith("/") or ".." in PurePosixPath(path).parts:
+def _inside(text: str, field: str, notes: list[str]) -> str:
+    """``text`` as a root-relative path, or ``""`` when it leaves the root.
+
+    ``"."`` names the plugin root itself. A path that does not start ``./`` is
+    kept, and noted: Claude requires the prefix, and a publisher who left it
+    off should hear that.
+    """
+    path = text.strip()
+    if path in (".", "./"):
+        return "."
+    relative = path.removeprefix("./")
+    if not relative or path.startswith("/") or ".." in PurePosixPath(relative).parts:
+        notes.append(f"{field} path '{path}' leaves the plugin root")
         return ""
-    return path
+    if relative == path:
+        notes.append(f"{field} path '{path}' does not start with ./")
+    return relative

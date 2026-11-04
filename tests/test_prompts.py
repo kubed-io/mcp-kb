@@ -9,7 +9,13 @@ from fastmcp import Client
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import harvest
-from kubed.mcp_kb.catalogue.prompts import FilePrompt, load_prompt, load_prompts
+from kubed.mcp_kb.catalogue.prompts import (
+    FilePrompt,
+    PromptSource,
+    load_prompt,
+    load_prompts,
+    prompt_name,
+)
 from kubed.mcp_kb.catalogue.skills import SkillIndex
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.prompts import PromptProvider
@@ -73,6 +79,72 @@ def test_a_prompt_carries_its_plugins_labels_and_nothing_implicit(tmp_path):
     assert labelled.tags == {"ops", "lgtm"}
     assert labelled.category == "obs"
     assert labelled.plugin == "p"
+
+
+@pytest.mark.parametrize(
+    ("rel", "dirs", "name"),
+    [
+        ("commands/db/migrate.md", (), "db_migrate"),
+        ("commands/top.md", (), "top"),
+        (".claude/commands/a/b.md", (), "a_b"),
+        ("cmds/a/b.md", ("cmds",), "a_b"),
+        ("cmds/a/b.md", ("./cmds/",), "a_b"),
+        ("cmds/deep/a/b.md", ("cmds", "cmds/deep"), "a_b"),
+        ("a/b.md", (".",), "a_b"),
+        ("prompts/sub/debug.md", (), "debug"),
+        ("prompts/sub/x.prompt.md", (), "x"),
+        ("commandsx/a.md", (), "a"),
+    ],
+)
+def test_a_prompts_name_is_decided_where_it_was_found(tmp_path, rel, dirs, name):
+    assert prompt_name(tmp_path / rel, tmp_path, dirs) == name
+
+
+def test_a_resolved_path_under_an_unresolved_root_is_still_below_it(tmp_path):
+    real = tmp_path / "real"
+    (real / "commands" / "db").mkdir(parents=True)
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    path = (link / "commands" / "db" / "x.md").resolve()
+    assert prompt_name(path, link, ()) == "db_x"
+
+
+def test_an_inline_source_is_a_body_with_optional_frontmatter(tmp_path):
+    manifest = tmp_path / "plugin.json"
+    bare = load_prompt(
+        PromptSource(path=manifest, name="about", content="Say !`ls` $ARGUMENTS."),
+        "lib",
+        dialect="claude",
+        live=True,
+    )
+    assert bare.name == "lib_about"
+    assert bare.path == manifest
+    assert not bare.live
+    assert bare.render({"arguments": "it"}) == "Say !`ls` it."
+
+    fronted = load_prompt(
+        PromptSource(
+            path=manifest,
+            name="brief",
+            content="---\ndescription: Own.\nargument-hint: own\n---\nDo it.\n",
+            description="Mapped.",
+            argument_hint="<topic>",
+        ),
+        "lib",
+        dialect="claude",
+    )
+    assert fronted.description == "Mapped."
+    assert [a.description for a in fronted.arguments] == ["<topic>"]
+    assert fronted.template == "Do it.\n"
+
+
+def test_a_sources_description_replaces_the_files_own(tmp_path):
+    path = tmp_path / "brief.md"
+    path.write_text("---\ndescription: Own.\n---\nDo $ARGUMENTS.\n")
+    prompt = load_prompt(
+        PromptSource(path=path, name="x", description="Mapped."), "lib"
+    )
+    assert (prompt.name, prompt.description) == ("lib_x", "Mapped.")
 
 
 def test_a_missing_directory_is_no_prompts(tmp_path):

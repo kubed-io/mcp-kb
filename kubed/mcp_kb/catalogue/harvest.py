@@ -20,14 +20,19 @@ running it.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterable, Iterator, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..plugins import Globs
 
 MAIN_FILE = "SKILL.md"
+
+AGENTS_DIR = "agents"
+
+PLUGIN_ROOT = PurePosixPath(".")
 
 DEFAULTS: dict[str, tuple[str, ...]] = {
     "skills": (
@@ -36,9 +41,15 @@ DEFAULTS: dict[str, tuple[str, ...]] = {
         ".claude/skills/*/SKILL.md",
         ".agents/skills/*/SKILL.md",
     ),
-    "prompts": ("prompts/**/*.md", ".github/prompts/*.prompt.md", "commands/*.md"),
+    "prompts": ("prompts/**/*.md", ".github/prompts/*.prompt.md", "commands/**/*.md"),
     "files": (),
 }
+
+# The directories whose markdown files are Claude Code commands by convention.
+# A file there is read in Claude's dialect unless the plugin says otherwise, and
+# named by the folders below the directory as well as its stem (PLG-25);
+# detect.py cannot see paths, so the caller says it (§C1.34).
+COMMAND_DIRS: tuple[str, ...] = ("commands", ".claude/commands")
 
 # The directories that hold skills by convention. A skill's folder is its path
 # below the deepest of these that contains it, so a skill directly in one has none.
@@ -65,6 +76,23 @@ METADATA_DOTDIRS: frozenset[str] = frozenset({".claude-plugin"})
 # What a fingerprint descends into: everything a harvest reads, plus the
 # directories holding the files that decide what a harvest reads.
 FINGERPRINTED_DOTDIRS: frozenset[str] = CONVENTIONAL_DOTDIRS | METADATA_DOTDIRS
+
+
+def usable_name(text: object) -> bool:
+    """Whether a fetched name can be served: a command map's key, an agent's name.
+
+    It becomes a served prompt or agent name, a ``/health`` reason and a log
+    line, so it is one non-empty token: no whitespace, no control or other
+    invisible character, no ``/`` (a path) and no ``@`` (AGT-8's rename).
+    """
+    return (
+        isinstance(text, str)
+        and bool(text)
+        and not any(
+            c.isspace() or c in "/@" or unicodedata.category(c).startswith("C")
+            for c in text
+        )
+    )
 
 
 def patterns(kind: str, globs: Globs) -> tuple[str, ...]:
@@ -111,8 +139,23 @@ def _matches(base: Path, pattern: str) -> Iterator[Path]:
     is the path the config asked for: a ConfigMap key ``shared/foo.md`` resolves
     to ``..<timestamp>/shared/foo.md``, a name no client asked for and a
     directory Kubernetes deletes on the next update.
+
+    ``"."`` is the plugin root itself, a directory hit: a manifest says
+    ``"skills": ["./"]`` for a plugin whose skills sit at its root, and
+    ``Path.glob(".")`` raises rather than answer it.
+
+    A pattern ``Path.glob`` refuses matches nothing: before Python 3.13 a
+    ``**`` inside a component (``"x**.md"``) raises ``ValueError``, and the
+    pattern can be a fetched manifest's, which must not fail a build.
     """
-    for hit in base.glob(pattern):
+    if PurePosixPath(pattern) == PLUGIN_ROOT:
+        hits: Iterable[Path] = [base]
+    else:
+        try:
+            hits = list(base.glob(pattern))
+        except ValueError:
+            return
+    for hit in hits:
         # A pattern like "../**" can walk out of base and straight back in
         # -- resolve() then quietly collapses the ".." and the hit looks
         # like a plain interior file. Reject the escape before resolving.
@@ -160,6 +203,18 @@ def readable(base: Path, rel: str | Path) -> Path | None:
     return target if target is not None and target.is_file() else None
 
 
+def listed(root: Path, rels: Iterable[str]) -> list[Path]:
+    """Each of ``rels`` that is a regular file inside ``root``, sorted.
+
+    A path, not a glob, as Claude Code reads a manifest's ``agents``:
+    ``agents/[draft].md`` is that file, not a character class. What is
+    returned is the spelling asked for, as ``_matches`` keeps it, so a
+    ConfigMap key is not swapped for the ``..<timestamp>`` it resolves to.
+    """
+    base = root.resolve()
+    return sorted({base / rel for rel in rels if readable(base, rel) is not None})
+
+
 def matching(root: Path, globs: Iterable[str]) -> set[Path]:
     """Every regular file inside ``root`` that one of ``globs`` selects.
 
@@ -179,6 +234,37 @@ def matching(root: Path, globs: Iterable[str]) -> set[Path]:
 def files(root: Path, kind: str, globs: Globs) -> list[Path]:
     """Every regular file matching the kind's globs, inside root, sorted."""
     return sorted(matching(root, patterns(kind, globs)))
+
+
+def agent_files(root: Path, globs: Globs) -> list[tuple[Path, tuple[str, ...]]]:
+    """Each agent file, sorted, with the folders that name it.
+
+    The default scan (``agents/**/*.md``) names an agent by the folders between
+    ``agents/`` and the file; a file the plugin listed has none (AGT-5).
+    """
+    if globs.agents == ():
+        return []
+    base = root.resolve()
+    if globs.agents is not None:
+        return [(f, ()) for f in listed(root, globs.agents)]
+    return [
+        (f, f.relative_to(base / AGENTS_DIR).parts[:-1])
+        for f in sorted(matching(root, (f"{AGENTS_DIR}/**/*.md",)))
+    ]
+
+
+def agent_paths(root: Path, globs: Globs) -> tuple[Path, ...]:
+    """The ``agents/`` directory and every listed file: what a fallback refuses."""
+    if globs.agents == ():
+        return ()
+    base = root.resolve()
+    found: list[Path] = []
+    folder = inside(base / AGENTS_DIR, base)
+    if folder is not None and folder.is_dir():
+        found.append(base / AGENTS_DIR)
+    if globs.agents is not None:
+        found += listed(root, globs.agents)
+    return tuple(found)
 
 
 def skill_dirs(root: Path, globs: Globs) -> list[Path]:

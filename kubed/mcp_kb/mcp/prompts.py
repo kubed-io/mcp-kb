@@ -254,7 +254,10 @@ class PromptProvider(Provider):
         if not isinstance(prompt, MCPFilePrompt):
             return prompt
         snapshot = self._snapshot()
-        snapshot.revalidate(prompt.file.path)
+        # An inline map command is never live: its path is the manifest it
+        # came from, and revalidating that would be a round trip for nothing.
+        if prompt.file.live:
+            snapshot.revalidate(prompt.file.path)
         dirs = snapshot.catalogue.plugin_skill_dirs(
             prompt.file.library, prompt.file.plugin, requested_scope()
         )

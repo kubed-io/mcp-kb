@@ -72,11 +72,12 @@ from .catalogue.snapshot import (
 from .catalogue.uris import Catalogue
 from .config import Config
 from .mcp import prompts, resources, tools
+from .mcp.agents import AgentsExtension
 from .mcp.announce import AnnounceChanges
 from .mcp.instructions import ScopedInstructions
 from .mcp.pins import RefuseEmptyScope, what_is_wrong
 from .mcp.request import client_reads_resources, client_uses_prompts
-from .mcp.skills import AdvertiseLegacySkills, SkillsExtension
+from .mcp.skills import AdvertiseLegacyExtensions, SkillsExtension
 from .plugins import Fetch, Plugin, declared_plugins, marketplace_fetches
 from .plugins.marketplace import find_marketplace, read_marketplace
 
@@ -132,13 +133,20 @@ class KnowledgeBase:
         )
 
         resources.register(self.mcp, lambda: self.snapshot.catalogue)
-        self.mcp.add_extension(
-            SkillsExtension(
+        extensions = [
+            extension(
                 lambda: self.snapshot.catalogue,
                 lambda scope: what_is_wrong(scope, config, self.snapshot),
             )
+            for extension in (SkillsExtension, AgentsExtension)
+        ]
+        for extension in extensions:
+            self.mcp.add_extension(extension)
+        # initialize carries what server/discover does: the skills id with {},
+        # the agents id with {"listChanged": False}.
+        self.mcp.add_middleware(
+            AdvertiseLegacyExtensions({e.identifier: e.settings() for e in extensions})
         )
-        self.mcp.add_middleware(AdvertiseLegacySkills())
         self.mcp.add_middleware(ScopedInstructions(lambda: self.snapshot.catalogue))
         resource_tools = tools.register(self.mcp, lambda: self.snapshot.catalogue)
         prompt_tools = prompts.register(self.mcp, lambda: self.snapshot)

@@ -47,6 +47,7 @@ plugin or library that failed is reported inside the body, never as a failed req
 | `built` | when the current snapshot was assembled |
 | `skills` | skills in the current index |
 | `prompts` | prompts currently served |
+| `agents` | agents currently served, across libraries |
 | `libraries` | one entry per configured library, keyed by name |
 | `plugins` | one entry per plugin, declared or from a marketplace, keyed by plugin id |
 | `fetches` | one entry per materialised tree, keyed by fetch key |
@@ -115,8 +116,9 @@ clients, which open with `initialize` and may hold a session (`mcp-session-id`),
 **HTTP-26.** Both `initialize` and `server/discover` answers carry the server `instructions` built
 for the caller, as in [scoping-and-instructions.md](scoping-and-instructions.md).
 
-**HTTP-27.** Both answers advertise the `io.modelcontextprotocol/skills` extension. The extension's
-methods are in [skills.md](skills.md).
+**HTTP-27.** Both answers advertise the `io.modelcontextprotocol/skills` and
+`io.modelcontextprotocol/agents` extensions. Their methods are in [skills.md](skills.md) and
+[agents.md](agents.md).
 
 **HTTP-28.** Asking for a missing prompt argument by elicitation happens only on a modern
 connection whose client declared form elicitation, as in [prompts.md](prompts.md).
@@ -124,7 +126,8 @@ connection whose client declared form elicitation, as in [prompts.md](prompts.md
 **HTTP-29.** Every cacheable result (`tools/list`, `prompts/list`, `resources/list`,
 `resources/templates/list`, `resources/read`, `server/discover`) carries `ttlMs` equal to the
 shortest `refresh` interval in the config and `cacheScope: "private"`. A config with no `refresh`
-sets neither. The Skills extension's own results are in [skills.md](skills.md).
+sets neither. The Skills and Agents extensions' own results are in [skills.md](skills.md) and
+[agents.md](agents.md).
 
 **HTTP-30.** An HTTP request that carries an `mcp-session-id` is told once that the catalogue moved:
 on its first request after the generation changes, the server sends

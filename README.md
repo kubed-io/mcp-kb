@@ -42,7 +42,9 @@ A library, a folder or a skill's own directory is not a file — reading one is 
 
 Skills-aware clients can also use `skills/list` and `skills/get`. The server advertises `io.modelcontextprotocol/skills` and returns each skill's frontmatter and complete file manifest, with SHA-256 digests of the bytes served by `resources/read`. The same library, category and tag scopes apply; ordinary resource listings stay small. Connect to `/mcp` and enable Skills in your client — no `?listing=full` is needed for this extension.
 
-📖 [Skills](https://github.com/kubed-io/mcp-kb/wiki/Skills)
+Agent-aware clients can call `agents/list` and `agents/get` for the subagents your plugins ship. This is **experimental**: it follows the MCP Agent Discovery draft (agents-wg proposal 0000 at `137d88b`), and the same library, category and tag scopes apply.
+
+📖 [Skills](https://github.com/kubed-io/mcp-kb/wiki/Skills) · [Agents](https://github.com/kubed-io/mcp-kb/wiki/Plugins#agents-experimental)
 
 ---
 

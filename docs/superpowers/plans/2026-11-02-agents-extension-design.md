@@ -1,11 +1,31 @@
 # Agents over MCP, and plugin.json parity — design
 
-> **History.** Not built yet. What it asked for now lives in the
-> living spec: [agents](../specs/agents.md) (AGT-1–14), [plugins-and-libraries](../specs/plugins-and-libraries.md) (PLG-20–24, LIB-30–33).
+> **History.** Both parts were planned in [2026-11-03-agents-extension](2026-11-03-agents-extension.md)
+> (issue #33) and shipped in PR #35: parity first, then the extension built on it, in one pull
+> request. What it asked for now lives in the
+> living spec: [agents](../specs/agents.md) (AGT-1–16), [plugins-and-libraries](../specs/plugins-and-libraries.md) (PLG-20–27, LIB-30–33).
 > **Overtaken:**
 > - *Background* (parity gaps, marketplace row): "the entry is never merged with the manifest" — the manifest already completes an entry: description, version, keywords, and whichever of `skills`/`commands` the entry leaves out (PLG-17, LIB-14).
+> - *Part 1, the details*: `${CLAUDE_PLUGIN_ROOT}` does not render as plain `skill://<library>`.
+>   It follows PRM-48 and PRM-61, so a citation into one of the plugin's own skills renders that
+>   skill's address (AGT-9).
+> - *Part 1, the card*: "where Claude Code adds a subfolder segment" is settled. The default scan
+>   adds one `_` segment per folder below `agents/`, and a manifest- or entry-listed file adds none
+>   (AGT-7). A clash is no longer "the same claim rule as prompts". Both agents are served, and the
+>   later one is `<name>@<plugin name>` (AGT-8).
+> - *Part 1, scope*: scope is the connection's alone (SCP-9, AGT-15). Caching is `ttlMs: 0`, not
+>   the source's `refresh` (AGT-12).
+> - *Part 1, the details*: `modelRoutingHint` maps a full model id by its family too
+>   (`claude-opus-5-5` → `large`), not only the three aliases (AGT-9).
+> - *Part 2, the parity table*: "`strict: false` with any of them: conflict" holds only beside a
+>   `plugin.json`. Without one, the entry is the manifest whatever `strict` says. The conflicting
+>   keys include `hooks`, `outputStyles` and `themes`, and the plugin fails rather than being
+>   skipped (LIB-31).
+> - *Part 2, commands*: a `commands/` tree is read recursively, and each subfolder adds a `_`
+>   segment to the prompt name (PLG-25).
+> - *Left to the builder*: parity lands **before** the extension, in the same pull request.
 
-**Date:** 2026-11-02 · **Branch:** `agents-extension` · **Status:** proposed, not built
+**Date:** 2026-11-02 · **Branch:** `agents-extension` · **Status:** historical
 
 ## Intent
 

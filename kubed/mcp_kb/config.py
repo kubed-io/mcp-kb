@@ -258,8 +258,8 @@ class PluginConfig(Strict):
     The metadata fields are Claude's marketplace-entry fields, so a plugin
     declared here and one read out of a ``marketplace.json`` carry the same
     shape and a selector cannot tell them apart. The glob lists are this
-    server's own: omitted, a kind falls to the plugin's manifest and then to
-    the conventions.
+    server's own: omitted, a kind is the conventions and the plugin's own
+    ``plugin.json`` and entry, merged per kind as Claude Code merges them.
     """
 
     name: str = Field(pattern=NAME)

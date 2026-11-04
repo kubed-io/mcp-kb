@@ -136,18 +136,19 @@ def test_each_status_documents_every_field_report_can_produce():
     }
     assert set(schemas["PluginStatus"]["properties"]) == {
         "status", "fetch", "root", "category", "tags", "keywords", "version",
-        "libraries", "skills", "prompts", "files", "built", "error", "skipped",
+        "libraries", "skills", "prompts", "files", "agents", "built", "error",
+        "skipped", "notes",
     }
     assert set(schemas["LibraryStatus"]["properties"]) == {
-        "description", "categories", "plugins", "skills", "prompts", "files", "error",
-        "skipped", "conflicts",
+        "description", "categories", "plugins", "skills", "prompts", "files",
+        "agents", "error", "skipped", "conflicts", "renamed", "unserved",
     }
 
 
 def test_health_documents_every_top_level_field():
     props = set(build_spec()["components"]["schemas"]["Health"]["properties"])
     assert props == {
-        "status", "generation", "built", "skills", "prompts",
+        "status", "generation", "built", "skills", "prompts", "agents",
         "libraries", "plugins", "fetches",
     }
 
@@ -228,6 +229,32 @@ async def test_a_real_health_response_matches_the_documented_fields(every_status
             assert set(info) <= set(schemas[schema]["properties"]), (part, info)
 
 
+async def test_a_health_response_with_plugin_notes_validates(tmp_path):
+    """A plugin's `notes` (PLG-26) is present only when there is one to make,
+    so the healthy body above never carries it: a manifest path without its
+    `./` is the smallest tree that does."""
+    root = tmp_path / "kit"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text('{"skills": ["extra"]}')
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "kit", "source": f"file://{root}"}],
+            "libraries": [{"name": "kit", "plugins": ["kit"]}],
+        }
+    )
+    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
+    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
+        body = (await http.get("/health")).json()
+
+    assert body["plugins"]["kit"]["notes"] == [
+        "skills path 'extra' does not start with ./"
+    ]
+    validate("Health", body)
+    documented = build_spec()["components"]["schemas"]["PluginStatus"]["properties"]
+    assert set(body["plugins"]["kit"]) <= set(documented)
+
+
 async def test_a_failed_fetch_carries_only_its_status_and_error(every_status):
     """`built` and `fingerprint` describe the tree being served, which a fetch
     that never materialised one has not got -- and the document says they are
@@ -256,3 +283,33 @@ async def test_a_real_reindex_response_matches_the_documented_fields(knowledge_b
         schemas["Reindex"]["allOf"][1]["properties"]
     )
     assert set(body) == documented
+
+
+async def test_health_counts_the_agents_and_validates(tmp_path):
+    """Over the Part B tree: 4 + 1 + 0 agents served, `renamed` and
+    `unserved` present, and the body is held to the published schema."""
+    from tests.test_agents import agents_tree
+
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
+        health = (await http.get("/health")).json()
+        reindex = (await http.post("/reindex")).json()
+
+    assert health["agents"] == 5
+    assert reindex["agents"] == 5
+    assert health["libraries"]["drawio"]["renamed"]
+    validate("Health", health)
+    validate("Reindex", reindex)
+
+
+def test_an_unserved_agent_validates_against_the_library_schema():
+    row = {"plugin": "extra@drawio", "path": "agents/a.md", "reason": "taken"}
+    library = {
+        "description": "d", "categories": [], "plugins": [], "skills": 0,
+        "prompts": 0, "agents": 0, "files": 0, "unserved": [row],
+        "renamed": {"diagrammer@extra": "drawio has diagrammer"},
+    }
+    validate("LibraryStatus", library)
+    with pytest.raises(jsonschema.ValidationError):
+        validate("LibraryStatus", {**library, "unserved": [{"plugin": "x"}]})
