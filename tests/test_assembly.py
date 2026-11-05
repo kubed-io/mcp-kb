@@ -422,8 +422,9 @@ def manifested(tmp_path):
 async def test_a_manifests_keywords_join_the_plugins_labels(manifested, tmp_path):
     """Tagged nowhere but in its plugin.json, the plugin is still selectable:
     a `pluginSelector` on the keyword picks it, `?tag=` on a real request
-    admits it, and /health shows the merged labels. The entry's version beats
-    the manifest's; the description it left empty is the manifest's."""
+    admits it, and /health shows the merged labels. The manifest's version
+    beats the entry's, as in Claude Code; the description the entry left empty
+    is the manifest's."""
     import threading
 
     import uvicorn
@@ -443,7 +444,7 @@ async def test_a_manifests_keywords_join_the_plugins_labels(manifested, tmp_path
 
     entry = health["plugins"]["sp@obs"]
     assert entry["keywords"] == ["tdd", "testing"] and entry["tags"] == []
-    assert entry["version"] == "1.0", "the marketplace entry is never overridden"
+    assert entry["version"] == "9.9", "plugin.json's version beats the entry's"
     assert health["libraries"]["tests"]["plugins"] == ["sp@obs"]
     assert kb._plugins[0].description == "From the manifest."
 
@@ -496,6 +497,42 @@ async def test_a_declared_plugin_keeps_its_own_words_over_the_manifests(
     assert mine.description == "Mine."
     assert health["plugins"]["mine"]["keywords"] == ["own", "tdd", "testing"]
     assert health["plugins"]["mine"]["version"] == "9.9", "left empty, so filled"
+
+
+async def test_a_declared_plugins_own_version_beats_the_manifests(manifested, tmp_path):
+    """PLG-17: a declared plugin's `version:` is the operator's override, so
+    it wins over plugin.json's, as its lists do (LIB-33)."""
+    config = _config(
+        tmp_path,
+        plugins=[{"name": "mine", "source": "lab://market//sp", "version": "2.0"}],
+        libraries=[{"name": "own", "plugins": ["mine"]}],
+    )
+    health = await _health(KnowledgeBase(config, tmp_path / "cache"))
+    assert health["plugins"]["mine"]["version"] == "2.0"
+
+
+async def test_an_entry_without_a_version_takes_the_manifests(tmp_path):
+    """PLG-17: a marketplace entry that names no version is the manifest's."""
+    root = tmp_path / "market"
+    _skill(root, "sp/skills/tdd", "tdd")
+    _write(root, "sp/.claude-plugin/plugin.json", json.dumps({"version": "9.9"}))
+    _catalog(root, {"name": "sp", "source": "./sp"})
+    _commit(root)
+    config = _config(tmp_path, libraries=[{"name": "obs", "source": "lab://market"}])
+    health = await _health(KnowledgeBase(config, tmp_path / "cache"))
+    assert health["plugins"]["sp@obs"]["version"] == "9.9"
+
+
+async def test_an_entrys_version_stands_beside_a_manifest_without_one(tmp_path):
+    """PLG-17: plugin.json wins only with a version of its own to give."""
+    root = tmp_path / "market"
+    _skill(root, "sp/skills/tdd", "tdd")
+    _write(root, "sp/.claude-plugin/plugin.json", json.dumps({"keywords": ["tdd"]}))
+    _catalog(root, {"name": "sp", "source": "./sp", "version": "1.0"})
+    _commit(root)
+    config = _config(tmp_path, libraries=[{"name": "obs", "source": "lab://market"}])
+    health = await _health(KnowledgeBase(config, tmp_path / "cache"))
+    assert health["plugins"]["sp@obs"]["version"] == "1.0"
 
 
 async def test_a_cold_start_reuses_the_index_and_re_reads_the_marketplace(

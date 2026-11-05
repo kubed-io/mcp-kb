@@ -164,9 +164,9 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
 
     A ``plugin.json`` is the publisher's word on the plugin, read once here.
     Its ``keywords`` join the plugin's labels -- obra/superpowers is tagged
-    nowhere but there -- and its ``description`` and ``version`` fill in only
-    what the entry or the config left empty: a declared value always wins,
-    and a marketplace entry is completed, never overridden.
+    nowhere but there -- and its ``description`` fills in only what the entry
+    or the config left empty. Its ``version`` beats a marketplace entry's, as
+    in Claude Code, while a declared plugin's own ``version:`` beats it (PLG-17).
 
     The components merge as Claude Code merges them, per kind:
 
@@ -248,7 +248,11 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
         completed = replace(
             completed,
             description=plugin.description or manifest.description or "",
-            version=plugin.version or manifest.version,
+            # Claude Code's calculatePluginVersion: plugin.json beats an entry;
+            # a declared plugin's own `version:` is the operator's override.
+            version=(manifest.version or plugin.version)
+            if plugin.marketplace
+            else (plugin.version or manifest.version),
             keywords=tuple(dict.fromkeys((*plugin.keywords, *manifest.keywords))),
         )
     globs = Globs(
