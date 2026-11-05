@@ -79,7 +79,7 @@ FINGERPRINTED_DOTDIRS: frozenset[str] = CONVENTIONAL_DOTDIRS | METADATA_DOTDIRS
 
 
 def usable_name(text: object) -> bool:
-    """Whether a fetched name can be served: a command map's key, an agent's name.
+    """Whether a fetched name can be served: a map key, an agent's, one a path built.
 
     It becomes a served prompt or agent name, a ``/health`` reason and a log
     line, so it is one non-empty token: no whitespace, no control or other

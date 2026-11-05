@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `serverInfo` now reports kb's own version, not FastMCP's.
 - A skill or prompt whose frontmatter is nested too deeply no longer stops the server; the prompt is skipped and the skill is named by its folder.
 - A `plugin.json` or marketplace entry's listed `commands` are read as paths, not globs, as Claude Code reads them.
+- A command, prompt or agent whose folder or file name makes an unusable name (a space, a newline, an `@`) is now skipped and reported in `/health`.
 
 ## [0.1.0] - 2026-09-18
 
