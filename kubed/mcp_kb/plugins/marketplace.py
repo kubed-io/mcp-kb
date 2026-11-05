@@ -1,8 +1,9 @@
 """A ``marketplace.json``: somebody else's catalog, read as plugins of ours.
 
 A library whose ``source`` is a marketplace takes its shape from the catalog:
-every entry becomes a plugin, with the entry's own category, tags and version,
-and an id of ``<entry>@<library>`` so two catalogs may publish the same name.
+every entry becomes a plugin, with the entry's own category, tags and version
+(though a ``plugin.json``'s version beats the entry's, PLG-17), and an id of
+``<entry>@<library>`` so two catalogs may publish the same name.
 Nothing about an entry is editable here -- to change one you declare your own
 plugin against the same repository, which costs no second clone because a
 fetch is keyed by URL and ref.

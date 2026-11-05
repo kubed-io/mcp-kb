@@ -67,10 +67,8 @@ async def test_a_key_naming_its_folder_earns_no_note(kb_url):
 
 
 async def test_version_precedence_as_kb_specifies(kb_url):
-    """PLG-17, LIB-13: the entry's version wins; else the manifest's.
-
-    This is kb's rule. Whether Claude Code agrees is one of #35's follow-ups.
-    """
+    """PLG-17, LIB-13: plugin.json's version wins over the entry's, and a
+    manifest alone gives its own, as Claude Code's calculatePluginVersion does."""
     plugins = health(kb_url)["plugins"]
-    assert plugins["versioned@live"]["version"] == "2.0.0"
+    assert plugins["versioned@live"]["version"] == "1.0.0"
     assert plugins["manifest-versioned@live"]["version"] == "1.5.0"

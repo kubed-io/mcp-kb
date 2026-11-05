@@ -93,9 +93,11 @@ any other names a directory, read recursively for `*.md` (PLG-25). Either is a p
 (PLG-21).
 
 **PLG-17.** The manifest and the marketplace entry complete the plugin, for declared plugins and
-marketplace entries alike. The manifest's `description` and `version` are used only when the
-plugin's own is empty, and its `keywords` are appended to the plugin's, duplicates dropped. Each
-kind of component is decided by the first rule that applies:
+marketplace entries alike. The manifest's `description` is used only when the plugin's own is
+empty. Its `version` overrides a marketplace entry's, as in Claude Code, while a declared plugin's
+own `version:` overrides the manifest's; either side fills in when the other has none. Its
+`keywords` are appended to the plugin's, duplicates dropped. Each kind of component is decided by
+the first rule that applies:
 
 | Kind | Rule |
 |---|---|
@@ -197,8 +199,9 @@ that is a symlink resolving outside the root is not read.
 
 **LIB-13.** Each entry becomes a plugin with id `<entry name>@<library>`, and with the entry's
 `name`, `description` (`""` unless a string), `category` (a string or none), `tags` and `keywords`
-(lists; non-string items dropped, any other type read as empty) and `version`. Other entry fields
-are ignored, except as LIB-14 and LIB-31 say.
+(lists; non-string items dropped, any other type read as empty) and `version`, which the plugin's
+own `plugin.json` overrides when it sets one (PLG-17). Other entry fields are ignored, except as
+LIB-14 and LIB-31 say.
 
 **LIB-14.** An entry's `skills`, `commands`, `agents` and `mcpServers` are read as a manifest's are
 (PLG-15, PLG-16), except that a wrong type skips the entry (LIB-19) rather than failing it, and its
