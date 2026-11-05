@@ -358,8 +358,18 @@ class KnowledgeBase:
             # An OSError behind the read quotes the cache path; /health is
             # published, so the root comes back out of it here as everywhere.
             return plugin, failed_plugin(plugin, unrooted(str(exc), root))
+        # A harvest is a tree, the root inside it and the lists that chose from
+        # it. An entry's lists and its subdirectory are its marketplace's:
+        # another fetch, which can move alone, and the subdirectory is no part
+        # of the fetch key.
         kept = reusable.get(plugin.id)
-        if kept is not None and kept.fetch == fetch.key and _serving(kept):
+        if (
+            kept is not None
+            and kept.fetch == fetch.key
+            and kept.root == str(root)
+            and kept.globs == globs
+            and _serving(kept)
+        ):
             return plugin, kept
         return plugin, build_plugin(plugin, root, globs=globs)
 
@@ -406,7 +416,9 @@ class KnowledgeBase:
 
         A rebuilt fetch re-harvests every plugin that reads it, and every
         marketplace on it is re-read, so an entry it gained is served; the
-        plugins of untouched fetches keep their records.
+        plugins of untouched fetches keep their records, unless the lists or
+        the root they were harvested with changed -- an entry on another
+        repository's.
 
         Synchronous and serialised: this walks trees, hashes files and writes
         ``index.json``, and two of them at once would race for the index's

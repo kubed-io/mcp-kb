@@ -1,11 +1,13 @@
 """Cold start, the background refresh, and what a client is told when it moves."""
 
 import asyncio
+import json
 import logging
 import os
 import time
 
 import httpx
+import pygit2
 import pytest
 from fastmcp import Client
 from fastmcp.server.context import Context
@@ -207,6 +209,161 @@ def test_a_cold_start_reuses_a_plugin_record_only_with_its_fetch(
     assert harvested == []
     assert third.status["plugins"]["flatsource"]["status"] == "failed"
     assert third._records["deepsource"] == first._records["deepsource"]
+
+
+SIGNATURE = pygit2.Signature("Test", "test@example.com", 1700000000, 0)
+
+
+def _commit(root):
+    """Commit everything under ``root``, initialising the repository if need be."""
+    try:
+        repo = pygit2.Repository(str(root))
+        parents = [repo.head.target]
+    except pygit2.GitError:
+        repo = pygit2.init_repository(str(root), bare=False, initial_head="main")
+        parents = []
+    repo.index.add_all()
+    repo.index.write()
+    repo.create_commit(
+        "refs/heads/main", SIGNATURE, SIGNATURE, "edit", repo.index.write_tree(), parents
+    )
+
+
+def _publish(market, source=None, **entry):
+    """Commit a marketplace whose one entry, ``tools``, is the ``other`` repo."""
+    url = f"file://{market.parent}/other"
+    source = {"source": "url", "url": url, **(source or {})}
+    tools = {"name": "tools", "source": source, **entry}
+    path = market / ".claude-plugin" / "marketplace.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"name": "m", "plugins": [tools]}))
+    _commit(market)
+
+
+@pytest.fixture
+def cross_repo(tmp_path):
+    """A marketplace in one repository whose entry is a plugin in another.
+
+    The two are two fetches, so a marketplace commit moves only its own, and
+    the entry's plugin keeps a fetch that did not move.
+    """
+    other = tmp_path / "other"
+    for name in ("alpha", "beta"):
+        _add_skill(other / "extra" / name, name, f"The {name} skill.")
+    _commit(other)
+    market = tmp_path / "market"
+    _publish(market, skills=["./extra/alpha"])
+    config = Config.model_validate(
+        {
+            "sources": [{"name": "lab", "url": f"git+file://{tmp_path}"}],
+            "plugins": [{"name": "own", "source": f"file://{tmp_path / 'own'}"}],
+            "libraries": [
+                {"name": "up", "source": "lab://market"},
+                {"name": "own", "plugins": ["own"]},
+            ],
+        }
+    )
+    _add_skill(tmp_path / "own" / "skills" / "mine", "mine", "Untouched.")
+    return market, config
+
+
+def _served(knowledge_base, plugin):
+    return [s.name for s in knowledge_base.index.visible() if s.plugin == plugin]
+
+
+def _harvests(monkeypatch):
+    """Every plugin id ``build_plugin`` harvests from here on."""
+    from kubed.mcp_kb import server
+
+    real = server.build_plugin
+    harvested = []
+
+    def spy(plugin, root, *, globs):
+        harvested.append(plugin.id)
+        return real(plugin, root, globs=globs)
+
+    # server.py imports the name, so it is patched where it is called from.
+    monkeypatch.setattr(server, "build_plugin", spy)
+    return harvested
+
+
+@pytest.mark.unit
+def test_a_cross_repository_entry_whose_lists_changed_is_harvested_again(
+    cross_repo, tmp_path, monkeypatch
+):
+    """The entry's lists are the marketplace's and its tree is another fetch's,
+    so a marketplace commit that edits only the lists moves no fetch the plugin
+    reads -- and the harvest those lists chose must still be redone (SRC-48)."""
+    market, config = cross_repo
+    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
+    assert _served(knowledge_base, "tools@up") == ["alpha"]
+
+    harvested = _harvests(monkeypatch)
+    _publish(market, skills=["./extra/beta"])
+    knowledge_base.refresh()
+
+    assert _served(knowledge_base, "tools@up") == ["beta"]
+    assert harvested == ["tools@up"], "the untouched plugin is not harvested again"
+
+
+@pytest.mark.unit
+def test_a_cold_start_reuses_a_marketplace_entrys_records(
+    cross_repo, tmp_path, monkeypatch
+):
+    """The lists a marketplace entry yields survive the index round trip, so a
+    restart over the same cache harvests nothing."""
+    market, config = cross_repo
+    _publish(
+        market,
+        skills=["./extra/alpha"],
+        commands={"about": {"content": "Hello."}},
+        agents=[],
+    )
+    cache = tmp_path / "cache"
+    KnowledgeBase(config, cache)
+
+    harvested = _harvests(monkeypatch)
+    again = KnowledgeBase(config, cache)
+
+    assert harvested == []
+    assert _served(again, "tools@up") == ["alpha"]
+
+
+@pytest.mark.unit
+def test_a_cross_repository_entry_whose_subdir_changed_is_harvested_again(
+    cross_repo, tmp_path
+):
+    """A git-subdir entry's ``path`` is the plugin root and is no part of the
+    fetch key, so a commit that moves only it must not keep the old harvest."""
+    market, config = cross_repo
+    _add_skill(tmp_path / "other" / "a" / "skills" / "alpha", "alpha", "The alpha skill.")
+    _add_skill(tmp_path / "other" / "b" / "skills" / "beta", "beta", "The beta skill.")
+    _commit(tmp_path / "other")
+    subdir = {"source": "git-subdir", "path": "a"}
+    _publish(market, subdir)
+    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
+    assert _served(knowledge_base, "tools@up") == ["alpha"]
+
+    _publish(market, {**subdir, "path": "b"})
+    knowledge_base.refresh()
+
+    assert _served(knowledge_base, "tools@up") == ["beta"]
+
+
+@pytest.mark.unit
+def test_a_cross_repository_entrys_changed_inline_command_is_served(
+    cross_repo, tmp_path
+):
+    """An object-map command's body rides in the entry, not in either tree."""
+    market, config = cross_repo
+    _publish(market, commands={"about": {"content": "Before."}})
+    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
+
+    _publish(market, commands={"about": {"content": "After."}})
+    knowledge_base.refresh()
+
+    (prompt,) = [p for p in knowledge_base.prompts if p.name == "up_about"]
+    assert "After." in prompt.body()
 
 
 # -- refresh ------------------------------------------------------------------
