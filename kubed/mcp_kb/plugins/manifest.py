@@ -13,6 +13,7 @@ the root may be served whatever a manifest asks for.
 
 from __future__ import annotations
 
+import glob
 import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -41,8 +42,11 @@ class Components:
     """What a manifest, or a marketplace entry, says the plugin ships."""
 
     skills: tuple[str, ...] | None = None  # "." is the plugin root
-    commands: tuple[str, ...] | None = None  # patterns; () when only a map is set
-    command_dirs: tuple[str, ...] = ()  # the directories among them
+    # The listed folders' patterns: None when the key is not set, and () when it
+    # names only files or a map, which still replaces the conventions (PLG-21).
+    commands: tuple[str, ...] | None = None
+    command_files: tuple[str, ...] = ()  # listed .md files: paths, not globs
+    command_dirs: tuple[str, ...] = ()  # the listed folders, as written
     command_map: tuple[CommandEntry, ...] = ()
     agents: tuple[str, ...] | None = None  # .md files only
     mcp_servers: tuple[str, ...] = ()  # names from an inline object
@@ -113,12 +117,15 @@ def read_components(data: dict) -> Components:
     """
     notes: list[str] = []
     skills = _paths(data.get("skills"), "skills", notes)
-    commands, command_dirs, command_map = _commands(data.get("commands"), notes)
+    commands, command_files, command_dirs, command_map = _commands(
+        data.get("commands"), notes
+    )
     agents = _agents(data.get("agents"), notes)
     servers, files = _mcp(data.get("mcpServers"), notes)
     return Components(
         skills=skills,
         commands=commands,
+        command_files=command_files,
         command_dirs=command_dirs,
         command_map=command_map,
         agents=agents,
@@ -139,21 +146,31 @@ def _paths(value: object, field: str, notes: list[str]) -> tuple[str, ...] | Non
 
 def _commands(
     value: object, notes: list[str]
-) -> tuple[tuple[str, ...] | None, tuple[str, ...], tuple[CommandEntry, ...]]:
+) -> tuple[
+    tuple[str, ...] | None, tuple[str, ...], tuple[str, ...], tuple[CommandEntry, ...]
+]:
+    """A ``commands`` key: folder patterns, listed files, the folders, the map.
+
+    Every listed path is a path, as Claude Code reads it: a ``.md`` path names
+    that one file (``cmds/[draft].md`` is that file, not a character class),
+    and a folder is escaped before it becomes the pattern that reads it
+    recursively, so ``v[1]`` is that folder and not ``v1/``.
+    """
     if isinstance(value, dict):
-        return (), (), _command_map(value, notes)
+        return (), (), (), _command_map(value, notes)
     found = _paths(value, "commands", notes)
     if found is None:
-        return None, (), ()
+        return None, (), (), ()
     patterns: list[str] = []
+    files: list[str] = []
     dirs: list[str] = []
     for path in found:
         if path.endswith(".md"):
-            patterns.append(path)
+            files.append(path)
             continue
         dirs.append(path)
-        patterns.append("**/*.md" if path == "." else f"{path}/**/*.md")
-    return tuple(patterns), tuple(dirs), ()
+        patterns.append("**/*.md" if path == "." else f"{glob.escape(path)}/**/*.md")
+    return tuple(patterns), tuple(files), tuple(dirs), ()
 
 
 def _command_map(value: dict, notes: list[str]) -> tuple[CommandEntry, ...]:

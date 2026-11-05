@@ -232,6 +232,17 @@ def test_no_note_when_the_replaced_folder_is_not_there(tmp_path):
     assert "notes" not in knowledge_base.status["plugins"]["kit"]
 
 
+def test_the_plugin_root_as_commands_reads_the_folder_and_earns_no_note(tmp_path):
+    root = tmp_path / "kit"
+    _command(root, "commands/two.md")
+    _manifest(root, name="kit", commands=["./"])
+
+    knowledge_base = _declared(tmp_path, root, library="lib")
+
+    assert _names(knowledge_base) == ["lib_two"]
+    assert "notes" not in knowledge_base.status["plugins"]["kit"]
+
+
 def test_commands_in_subfolders_carry_their_folders(tmp_path):
     root = tmp_path / "kit"
     _command(root, "commands/db/migrate.md")
@@ -633,6 +644,108 @@ def test_a_listed_agent_in_a_dot_folder_is_served_and_one_outside_is_not(tmp_pat
     assert [card["name"] for card in cards] == ["kit_wip"]
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [
         "agents entry 'agents/out.md' is not in the plugin"
+    ]
+
+
+LISTED_COMMANDS = [
+    "./cmds/[draft].md",
+    "./stars/*.md",
+    "./.private/secret.md",
+    "./more",
+    "./v[1]",
+]
+
+
+def listed_commands_root(root: Path) -> Path:
+    """The tree Dr K checked Claude Code 2.1.317 against, for #56."""
+    for rel in (
+        "cmds/[draft].md",
+        "cmds/d.md",
+        "stars/a.md",
+        ".private/secret.md",
+        "more/m.md",
+        "more/.h/hid.md",
+        "v[1]/go.md",
+        "v1/no.md",
+    ):
+        _command(root, rel)
+    _skill(root, "skills/s")
+    return root
+
+
+def test_a_listed_command_is_a_path_not_a_glob(tmp_path):
+    root = listed_commands_root(tmp_path / "kit")
+    _manifest(root, name="kit", commands=LISTED_COMMANDS)
+
+    knowledge_base = _declared(tmp_path, root)
+
+    assert sorted(_names(knowledge_base)) == [
+        "kit_[draft]",
+        "kit_go",
+        "kit_m",
+        "kit_secret",
+    ]
+    assert {p.dialect for p in knowledge_base.prompts} == {"claude"}
+    assert knowledge_base.status["plugins"]["kit"]["notes"] == [
+        "commands entry 'stars/*.md' is not in the plugin"
+    ]
+
+
+def test_an_entrys_listed_command_is_a_path_not_a_glob(tmp_path):
+    root = listed_commands_root(tmp_path / "market")
+    _catalog(root, {"name": "kit", "source": "./", "commands": LISTED_COMMANDS})
+
+    knowledge_base = _marketplace(tmp_path, root)
+
+    assert sorted(_names(knowledge_base)) == [
+        "lib_[draft]",
+        "lib_go",
+        "lib_m",
+        "lib_secret",
+    ]
+    assert {p.dialect for p in knowledge_base.prompts} == {"claude"}
+    assert knowledge_base.status["plugins"]["kit@lib"]["notes"] == [
+        "commands entry 'stars/*.md' is not in the plugin"
+    ]
+
+
+def test_a_config_prompts_glob_is_still_a_glob(tmp_path):
+    root = listed_commands_root(tmp_path / "kit")
+    _manifest(root, name="kit", commands=LISTED_COMMANDS)
+
+    knowledge_base = _declared(tmp_path, root, prompts=["cmds/*.md"])
+
+    assert sorted(_names(knowledge_base)) == ["kit_[draft]", "kit_d"]
+
+
+def test_a_listed_command_python_refuses_as_a_glob_is_served(tmp_path, monkeypatch):
+    _glob_as_on_3_11(monkeypatch)
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _command(root, "cmds/a**b.md")
+    _manifest(root, name="kit", commands=["./cmds/a**b.md"])
+
+    knowledge_base = _declared(tmp_path, root)
+
+    assert _names(knowledge_base) == ["kit_a**b"]
+    assert "notes" not in knowledge_base.status["plugins"]["kit"]
+
+
+def test_a_listed_command_outside_the_plugin_or_a_folder_is_noted(tmp_path):
+    outside = tmp_path / "elsewhere.md"
+    outside.write_text("---\ndescription: Out.\n---\nGo.\n")
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    (root / "out.md").symlink_to(outside)
+    (root / "dir.md").mkdir()
+    _manifest(root, name="kit", commands=["./out.md", "./dir.md"])
+
+    knowledge_base = _declared(tmp_path, root)
+
+    assert _names(knowledge_base) == []
+    assert knowledge_base.status["plugins"]["kit"]["notes"] == [
+        "commands entry 'out.md' is not in the plugin",
+        "commands entry 'dir.md' is not in the plugin",
     ]
 
 
