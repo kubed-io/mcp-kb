@@ -232,6 +232,17 @@ def test_no_note_when_the_replaced_folder_is_not_there(tmp_path):
     assert "notes" not in knowledge_base.status["plugins"]["kit"]
 
 
+def test_the_plugin_root_as_commands_reads_the_folder_and_earns_no_note(tmp_path):
+    root = tmp_path / "kit"
+    _command(root, "commands/two.md")
+    _manifest(root, name="kit", commands=["./"])
+
+    knowledge_base = _declared(tmp_path, root, library="lib")
+
+    assert _names(knowledge_base) == ["lib_two"]
+    assert "notes" not in knowledge_base.status["plugins"]["kit"]
+
+
 def test_commands_in_subfolders_carry_their_folders(tmp_path):
     root = tmp_path / "kit"
     _command(root, "commands/db/migrate.md")
