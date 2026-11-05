@@ -239,7 +239,8 @@ fingerprints like a plain tree.
 hash equals that of the parsed config, so formatting and comments do not count.
 
 **SRC-37.** From a reused index, boot keeps each `ok` or `stale` fetch record whose tree is on
-disk, and the plugin records of those fetches. It builds the rest.
+disk, and the plugin records of those fetches while their lists and root still match (SRC-48). It
+builds the rest.
 
 **SRC-38.** Boot takes no fingerprints. The first background pass, started with the server,
 fingerprints every fetch.
@@ -281,8 +282,12 @@ and a pass with no change leaves the generation where it is.
 
 **SRC-48.** On a change, the plugins of every rebuilt fetch are harvested again, every marketplace
 is re-read from disk, any fetch a marketplace starts needing is built, and a snapshot with the
-next generation replaces the served one in one assignment. A request in flight finishes on the
-snapshot it started with.
+next generation replaces the served one in one assignment. A plugin whose effective lists or root
+changed is harvested again too, though its own fetch did not move: a marketplace entry on another
+repository takes its `skills`, `commands` and `agents` from the marketplace's fetch, and a
+`git-subdir` entry's `path` is its root and no part of the fetch key. Each plugin record keeps the
+lists and root it was harvested with, and is reused only while they match. A request in flight
+finishes on the snapshot it started with.
 
 **SRC-49.** Refreshes are serialised. A background pass that raises is logged and the loop goes on.
 

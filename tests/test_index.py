@@ -20,6 +20,8 @@ from kubed.mcp_kb.catalogue.index import (
 )
 from kubed.mcp_kb.catalogue.skills import Skill
 from kubed.mcp_kb.config import load_config
+from kubed.mcp_kb.plugins import Globs
+from kubed.mcp_kb.plugins.manifest import CommandEntry
 
 FETCH = "file:///skills/flatsource"
 
@@ -105,14 +107,15 @@ def test_a_missing_or_corrupt_index_reads_as_none(tmp_path):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("version", [INDEX_VERSION + 1, 5, 4, 3, 2, 1])
+@pytest.mark.parametrize("version", [INDEX_VERSION + 1, 6, 5, 4, 3, 2, 1])
 def test_a_different_version_reads_as_none(tmp_path, version):
     """Older as well as newer, by literal and not only by offset.
 
     An index written by an earlier release is the one a real upgrade meets, and
     the literals are the shapes before this one (1 on main, 2 part-way through
     the address-space work, 3 before a record carried `skipped`, 4 the
-    per-source shape before plugins, 5 before a prompt row carried its name):
+    per-source shape before plugins, 5 before a prompt row carried its name, 6
+    before a plugin record carried the globs it was harvested with):
     lowering `INDEX_VERSION` back to any of them must fail here, which an
     offset from the current value alone never would.
     """
@@ -325,3 +328,38 @@ def test_a_record_with_agents_round_trips(tmp_path):
 
     assert read == written
     assert read.plugins["flatsource"].agents[0].name == "db_migrator"
+
+
+@pytest.mark.unit
+def test_a_record_keeps_the_globs_it_was_harvested_with(tmp_path):
+    """Read back equal, or a cold start would harvest every plugin again.
+
+    ``None`` and ``()`` mean different things in a ``Globs`` -- the conventions,
+    and none of that kind -- so JSON's null and its empty list must not blur.
+    """
+    path = tmp_path / "index.json"
+    globs = Globs(
+        skills=None,
+        prompts=(),
+        files=("docs/**/*",),
+        commands=("commands/*.md",),
+        agents=None,
+        command_dirs=("commands",),
+        command_files=("extra/run.md",),
+        command_map=(
+            CommandEntry(
+                name="about",
+                source=None,
+                content="Say what this plugin does.",
+                description=None,
+                argument_hint=None,
+            ),
+        ),
+    )
+    written = _index(plugins={"flatsource": _plugin_record(globs=globs)})
+    written.write(path)
+
+    read = Index.read(path)
+
+    assert read == written
+    assert read.plugins["flatsource"].globs == globs

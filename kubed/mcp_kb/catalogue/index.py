@@ -38,10 +38,12 @@ from pathlib import Path
 from typing import Literal
 
 from ..config import Config
+from ..plugins import Globs
+from ..plugins.manifest import CommandEntry
 from .prompts import PromptSource
 from .skills import Skill
 
-INDEX_VERSION = 6
+INDEX_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -172,6 +174,11 @@ class PluginRecord:
     ``root`` is the plugin root -- the fetch root joined with the plugin's
     subdirectory -- and ``fetch`` the key of the record it was harvested from,
     which is what decides whether this record can be reused when that one is.
+    ``globs`` are what chose the files out of that tree, and with ``root``
+    decide it too: a marketplace entry's lists and subdirectory are the
+    marketplace's, which may be another fetch, so the tree can stand still
+    while what it serves changes (SRC-48).
+    ``None`` is a record with no harvest behind it, which nothing reuses.
     A plugin fails on its own when its root is not a directory, its manifest
     does not parse, or its fetch failed; the error says which.
     """
@@ -193,6 +200,7 @@ class PluginRecord:
     # Agents and the paths a fallback must refuse, relative to the plugin root.
     agents: tuple[AgentRow, ...] = ()
     agent_paths: tuple[str, ...] = ()
+    globs: Globs | None = None
 
 
 def _fetch_record_from_dict(raw: dict) -> FetchRecord:
@@ -221,6 +229,33 @@ def _plugin_record_from_dict(raw: dict) -> PluginRecord:
         skipped=tuple(_skipped_row(row) for row in raw["skipped"]),
         agents=tuple(AgentRow(**a) for a in raw["agents"]),
         agent_paths=tuple(raw["agent_paths"]),
+        globs=_globs_from_dict(raw["globs"]),
+    )
+
+
+def _globs_from_dict(raw: dict | None) -> Globs | None:
+    """A ``Globs`` back from JSON, tuples and all, so it compares equal.
+
+    A kind's null stays ``None`` and its empty list becomes ``()``: the two are
+    the conventions and none of that kind, and blurring them would re-harvest
+    every plugin on every cold start, or worse, reuse the wrong harvest.
+    """
+    if raw is None:
+        return None
+
+    def kind(key: str) -> tuple[str, ...] | None:
+        value = raw[key]
+        return None if value is None else tuple(value)
+
+    return Globs(
+        skills=kind("skills"),
+        prompts=kind("prompts"),
+        files=kind("files"),
+        commands=tuple(raw["commands"]),
+        agents=kind("agents"),
+        command_dirs=tuple(raw["command_dirs"]),
+        command_files=tuple(raw["command_files"]),
+        command_map=tuple(CommandEntry(**entry) for entry in raw["command_map"]),
     )
 
 

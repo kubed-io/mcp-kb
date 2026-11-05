@@ -400,6 +400,7 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
         ),
         agents=tuple(agents),
         agent_paths=agent_paths,
+        globs=globs,
     )
 
 
