@@ -128,6 +128,28 @@ jobs:
         # credential has nowhere to leak to — see .github/zizmor.yml.
         persist-credentials: true
 
+    # A merged branch's pin is on that branch's own wiki branch: kubed-io/actions git/commit
+    # pushes a branch's wiki commits there and never to master, which is the public wiki and
+    # this job's alone. So the pin is usually beside master, not ahead of it. Master is
+    # merged in, the pin's side taking a file both changed (the pages are regenerated from
+    # this commit's code next), and `unpublished` says the result is ahead of master, so it
+    # is pushed even when regenerating changes nothing.
+    - name: Bring the Wiki's Master In
+      id: master
+      if: env.PUSH == 'true'
+      working-directory: wiki
+      run: |
+        git fetch --quiet --unshallow origin 2>/dev/null || git fetch --quiet origin
+        git fetch --quiet origin master
+        if ! git merge-base --is-ancestor FETCH_HEAD HEAD; then
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            merge --no-edit -X ours -m "Merge the wiki's master into ${GITHUB_SHA:0:8}'s pin" FETCH_HEAD
+        fi
+        if [ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]; then
+          echo "unpublished=true" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
@@ -167,14 +189,17 @@ jobs:
     # The wiki's default branch is master, not main — GitHub creates it that way
     # and does not follow the repository's own default.
     - name: Push
-      if: env.PUSH == 'true' && steps.diff.outputs.changed == 'true'
+      if: env.PUSH == 'true' && (steps.diff.outputs.changed == 'true' || steps.master.outputs.unpublished == 'true')
       working-directory: wiki
       env:
         SHA: ${{ github.sha }}
+        CHANGED: ${{ steps.diff.outputs.changed }}
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git commit -m "Regenerate from ${SHA:0:8}"
+        if [ "$CHANGED" = "true" ]; then
+          git commit -m "Regenerate from ${SHA:0:8}"
+        fi
         git push origin HEAD:master
 
     # The submodule now points at a commit that exists only on the wiki remote.
@@ -194,7 +219,7 @@ jobs:
     # top of either could never fast-forward. Only wiki/'s own HEAD has to
     # survive the switch, and it does — the outer commit is rebuilt on the tip.
     - name: Record the Submodule Pointer
-      if: env.PUSH == 'true' && steps.diff.outputs.changed == 'true'
+      if: env.PUSH == 'true' && (steps.diff.outputs.changed == 'true' || steps.master.outputs.unpublished == 'true')
       env:
         TOKEN: ${{ steps.app-token.outputs.token }}
       run: |
