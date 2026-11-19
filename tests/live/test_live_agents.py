@@ -6,6 +6,7 @@ import pytest
 
 from tests.live.kb import (
     META,
+    SHARED_META,
     agent_names,
     definition,
     health,
@@ -100,7 +101,8 @@ def test_a_listed_agent_list_replaces_the_scan(kb_url):
 async def test_deep_frontmatter_is_served_verbatim(kb_url):
     """AGT-6, AGT-9: nested frontmatter reaches the definition untouched."""
     got = await definition(kb_url, "live_hooked", "live")
-    assert got["_meta"][META]["frontmatter"] == HOOKED
+    assert got["_meta"][SHARED_META]["frontmatter"] == HOOKED
+    assert "frontmatter" not in got["_meta"][META]
 
 
 async def test_declared_servers_are_names(kb_url):
@@ -122,11 +124,12 @@ async def test_qualified_names_become_addresses(kb_url):
     assert finder["instructions"] == (
         "Load skill://live/lookup/SKILL.md first, then run /names:lookup-cmd.\n"
     )
-    assert finder["_meta"][META]["skills"] == {
+    assert finder["_meta"][SHARED_META]["skills"] == {
         "lookup": "skill://live/lookup/SKILL.md",
         "names:lookup": "skill://live/lookup/SKILL.md",
     }
-    assert finder["_meta"][META]["frontmatter"]["skills"] == [
+    assert "skills" not in finder["_meta"][META]
+    assert finder["_meta"][SHARED_META]["frontmatter"]["skills"] == [
         "lookup",
         "names:lookup",
         "nowhere",

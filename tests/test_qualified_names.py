@@ -217,7 +217,7 @@ async def test_the_manifest_still_describes_disk_bytes(url):
 async def test_an_agent_reads_names_as_addresses_and_preloads_its_skills(url):
     definition = await _agent(url, "kit_helper")
     assert definition["instructions"] == RESOLVED
-    meta = definition["_meta"]["io.kubed.mcp-kb/agent"]
+    meta = definition["_meta"]["io.kubed/agent"]
     assert meta["skills"] == {
         "kit:writing": "skill://kit/writing/SKILL.md",
         "writing": "skill://kit/writing/SKILL.md",
@@ -226,18 +226,19 @@ async def test_an_agent_reads_names_as_addresses_and_preloads_its_skills(url):
     assert meta["frontmatter"]["skills"] == [
         "kit:writing", "writing", "kit-extra:ops", "nope"
     ]
+    assert definition["_meta"]["io.kubed.mcp-kb/agent"].keys() == {
+        "plugin", "library", "path", "servers"
+    }
 
 
 async def test_a_scoped_agent_preloads_only_what_it_can_see(url):
-    meta = (await _agent(url, "kit_helper", tags="core"))["_meta"][
-        "io.kubed.mcp-kb/agent"
-    ]
+    meta = (await _agent(url, "kit_helper", tags="core"))["_meta"]["io.kubed/agent"]
     assert "kit-extra:ops" not in meta["skills"]
 
 
 async def test_the_preload_map_is_never_prefixed(url):
     meta = (await _agent(url, "kit_helper", prefix="kb+"))["_meta"][
-        "io.kubed.mcp-kb/agent"
+        "io.kubed/agent"
     ]
     assert meta["skills"]["writing"] == "skill://kit/writing/SKILL.md"
 

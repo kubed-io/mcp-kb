@@ -107,19 +107,21 @@ async def test_get_returns_the_definition(tmp_path, mode):
         "modelRoutingHint": {"role": "medium", "vision": False},
         "tools": [],
         "_meta": {
-            "io.kubed.mcp-kb/agent": {
-                "plugin": "drawio@drawio",
-                "library": "drawio",
-                "path": "agents/diagrammer.md",
+            "io.kubed/agent": {
                 "frontmatter": {
                     "name": "diagrammer",
                     "description": "Draws diagrams.",
                     "model": "sonnet",
                     "color": "cyan",
                 },
-                "servers": ["drawio"],
                 "skills": {},
-            }
+            },
+            "io.kubed.mcp-kb/agent": {
+                "plugin": "drawio@drawio",
+                "library": "drawio",
+                "path": "agents/diagrammer.md",
+                "servers": ["drawio"],
+            },
         },
     }
 
@@ -329,7 +331,7 @@ async def test_a_prefix_reaches_instructions_only(url):
     assert got["instructions"] == (
         "Read kb+skill://drawio/drawio/SKILL.md in ${CLAUDE_PROJECT_DIR}.\n"
     )
-    meta = got["_meta"]["io.kubed.mcp-kb/agent"]
+    meta = got["_meta"]["io.kubed/agent"]
     assert meta["frontmatter"] == {
         "name": "diagrammer",
         "description": "Draws diagrams.",
