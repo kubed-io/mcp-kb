@@ -59,11 +59,8 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
 
     # Built at boot, not on first use: a refused credential has to stop the
     # process before it serves (see KnowledgeBase._cold_start), so the
-    # container is handed the one main built.
-    def built() -> KnowledgeBase:
-        return knowledge_base
-
-    mcp.singleton(KnowledgeBase, built)
+    # container is handed the one main built, and main owns it.
+    mcp.singleton(KnowledgeBase, instance=knowledge_base)
     mcp.transient(Catalogue, current_catalogue)
 
     def catalogue() -> Catalogue:

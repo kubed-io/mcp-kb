@@ -61,7 +61,7 @@ def register(mcp: QuickMCP, knowledge_base: KnowledgeBase) -> None:
             },
         }
 
-    @mcp.server.custom_route("/openapi.yaml", methods=["GET"])
+    @mcp.custom_route("/openapi.yaml", methods=["GET"])
     async def openapi_yaml(_request: Request) -> Response:
         """This HTTP surface as OpenAPI 3.1.
 
@@ -70,7 +70,7 @@ def register(mcp: QuickMCP, knowledge_base: KnowledgeBase) -> None:
         """
         return Response(spec_yaml, media_type="text/yaml")
 
-    @mcp.server.custom_route("/health", methods=["GET"])
+    @mcp.custom_route("/health", methods=["GET"])
     async def health(_request: Request) -> JSONResponse:
         """Readiness probe, and the fastest way to tell which fetches loaded.
 
@@ -86,7 +86,7 @@ def register(mcp: QuickMCP, knowledge_base: KnowledgeBase) -> None:
         """
         return JSONResponse(report())
 
-    @mcp.server.custom_route("/reindex", methods=["POST"])
+    @mcp.custom_route("/reindex", methods=["POST"])
     async def reindex(_request: Request) -> JSONResponse:
         """Rebuild every fetch now, and report the catalogue that results.
 

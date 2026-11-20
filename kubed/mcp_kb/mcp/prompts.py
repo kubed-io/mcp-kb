@@ -350,6 +350,6 @@ def register(mcp: QuickMCP, snapshot: Callable[[], Snapshot]) -> set[str]:
     flatten to text.
     """
     mcp.add_provider(PromptProvider(snapshot))
-    # A transform is FastMCP's, reached through the server QuickMCP wraps.
-    mcp.server.add_transform(ReadOnlyPromptsAsTools(mcp.server))
+    # PromptsAsTools reads prompts back through the FastMCP server it is given.
+    mcp.add_transform(ReadOnlyPromptsAsTools(mcp.server))
     return set(PROMPT_TOOLS)
