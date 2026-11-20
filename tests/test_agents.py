@@ -653,19 +653,21 @@ def test_the_definition(tmp_path):
         "modelRoutingHint": {"role": "medium", "vision": False},
         "tools": [],
         "_meta": {
-            "io.kubed.mcp-kb/agent": {
-                "plugin": "drawio@drawio",
-                "library": "drawio",
-                "path": "agents/diagrammer.md",
+            "io.kubed/agent": {
                 "frontmatter": {
                     "name": "diagrammer",
                     "description": "Draws diagrams.",
                     "model": "sonnet",
                     "color": "cyan",
                 },
-                "servers": ["drawio"],
                 "skills": {},
-            }
+            },
+            "io.kubed.mcp-kb/agent": {
+                "plugin": "drawio@drawio",
+                "library": "drawio",
+                "path": "agents/diagrammer.md",
+                "servers": ["drawio"],
+            },
         },
     }
 

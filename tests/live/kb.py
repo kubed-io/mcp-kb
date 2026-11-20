@@ -9,6 +9,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 from tests.test_skills_extension import request
 
 META = "io.kubed.mcp-kb/agent"
+SHARED_META = "io.kubed/agent"
 
 
 def connect(kb_url: str, library: str | None = None, mode: str = "auto") -> Client:

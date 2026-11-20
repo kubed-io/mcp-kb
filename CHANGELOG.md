@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A plugin's `plugin.json` reads as Claude Code reads it: its `skills` add to the usual skill folders, and a marketplace entry's lists append to it.
 - Marketplace entries marked `strict: false` now load, unless they conflict with the plugin's own `plugin.json`.
 - The issue and pull request agents run from kubed-io/actions' shared workflows.
+- `agents/get` puts an agent's `frontmatter` and `skills` under `_meta["io.kubed/agent"]`, the shape every kubed server shares; kb's own key keeps `plugin`, `library`, `path` and `servers`.
 
 ### Fixed
 

@@ -100,7 +100,8 @@ exists elsewhere in the library.
 | `instructions` | The body, rendered as a prompt body is: qualified skill names by AGT-17, `${CLAUDE_PLUGIN_ROOT}` by PRM-48 and PRM-61, every client-only placeholder left as written (PRM-50, `${CLAUDE_SKILL_DIR}` included), then the gateway prefix (SKL-41). Omitted when the body is blank |
 | `modelRoutingHint` | From `model`, by family: `opus` → `{"role": "large", "vision": false}`, `sonnet` → `medium`, `haiku` → `small`, whether `model` is an alias or a full id (`claude-opus-5-5`). The value is lowercased and split into words, a word being a run of letters, and the family is the first word by position that is one of the three (`opus-then-sonnet` is `large`). Omitted for `inherit`, a missing or non-string `model`, or a value naming none of the three |
 | `tools` | `[]` |
-| `_meta["io.kubed.mcp-kb/agent"]` | `plugin` (its id), `library`, `path` (the file, relative to its plugin root), `frontmatter` (verbatim, as JSON), `servers`: the names of the MCP servers the plugin declares (PLG-27), and `skills` (AGT-17) |
+| `_meta["io.kubed/agent"]` | The agent shape every kubed server shares: `frontmatter` (verbatim, as JSON) and `skills` (AGT-17) |
+| `_meta["io.kubed.mcp-kb/agent"]` | kb's own extras, and nothing the shared key holds: `plugin` (its id), `library`, `path` (the file, relative to its plugin root) and `servers`: the names of the MCP servers the plugin declares (PLG-27) |
 
 **AGT-10.** `tools` is always empty. The extension allows only tools from kb's own
 `tools/list`, and an agent's tools belong to other servers. `_meta` carries what a host or a
@@ -116,7 +117,7 @@ its frontmatter `name`, until the next refresh. `agents/list` answers from the s
 
 **AGT-17.** `instructions` rewrites qualified skill names (SKL-54) as SKL-55 says.
 The agent's plugin is the own plugin and its library is the library, and the rewrite runs before
-PRM-48. `_meta["io.kubed.mcp-kb/agent"]` adds `skills`, an object that maps entries of the
+PRM-48. `_meta["io.kubed/agent"]` carries `skills`, an object that maps entries of the
 frontmatter `skills` to the `SKILL.md` addresses they resolve to.
 
 - **Entries.** The frontmatter `skills` is a list, whose string items are the entries, or one

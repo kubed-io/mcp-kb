@@ -76,7 +76,9 @@ LIBRARY_FILES = "_files.md"
 RESERVED_NAMES = frozenset({INDEX, LIBRARY_FILES})
 # Distinct scopes a catalogue remembers listings for before starting over.
 MEMO_LIMIT = 64
-# Where an agent definition says what kb knows of it (AGT-9).
+# The agent shape every kubed server shares: frontmatter and skills (AGT-9).
+SHARED_AGENT_META = "io.kubed/agent"
+# kb's own extras for an agent definition (AGT-9).
 AGENT_META = "io.kubed.mcp-kb/agent"
 
 
@@ -582,9 +584,9 @@ class Catalogue:
         prompt body does, through the plugin's own skills in this library, and
         leaves every other placeholder -- ``${CLAUDE_SKILL_DIR}`` included, an
         agent being no skill -- as written. Plugin-qualified skill names in
-        ``instructions`` become addresses first (SKL-54), and ``_meta`` carries
-        ``skills``: each ``skills:`` entry of the file that resolves, to its
-        unprefixed address (AGT-17).
+        ``instructions`` become addresses first (SKL-54), and the shared
+        ``_meta`` key carries ``skills``: each ``skills:`` entry of the file
+        that resolves, to its unprefixed address (AGT-17).
         """
         agent = self._agents.get(name, scope)
         if agent is None:
@@ -603,14 +605,16 @@ class Catalogue:
             definition["modelRoutingHint"] = hint
         definition["tools"] = []
         definition["_meta"] = {
+            SHARED_AGENT_META: {
+                "frontmatter": parsed.frontmatter,
+                "skills": names.preload(parsed.frontmatter.get("skills")),
+            },
             AGENT_META: {
                 "plugin": agent.plugin,
                 "library": agent.library,
                 "path": _agent_path(agent),
-                "frontmatter": parsed.frontmatter,
                 "servers": list(agent.servers),
-                "skills": names.preload(parsed.frontmatter.get("skills")),
-            }
+            },
         }
         return definition
 
