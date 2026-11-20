@@ -258,6 +258,19 @@ def test_kubed_is_a_namespace_package(built_wheel):
         assert "kubed/__init__.py" not in archive.namelist()
 
 
+def test_the_shared_platform_imports_from_the_installed_environment():
+    """`kubed.mcp` is the sibling distribution `kubed-mcp`, beside `kubed.mcp_kb`.
+
+    Imported from whatever is installed rather than this checkout, so a
+    dependency that resolved but did not land (or landed as something that is
+    not the namespace package) fails CI instead of the first release to use it.
+    """
+    import kubed.mcp
+
+    assert isinstance(kubed.mcp.__version__, str)
+    assert kubed.mcp.__version__
+
+
 def _run(command, cwd, env):
     done = subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True)
     assert done.returncode == 0, f"{command[2:]} failed:\n{done.stdout}\n{done.stderr}"
