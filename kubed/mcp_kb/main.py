@@ -18,6 +18,7 @@ import sys
 import time
 from pathlib import Path
 
+from .app import create_app
 from .config import ConfigError, load_config, schema
 from .server import KnowledgeBase
 from .sources import AccessRefused
@@ -147,12 +148,15 @@ def main(argv: list[str] | None = None) -> None:
         print(f"mcp-kb: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
     try:
-        server = KnowledgeBase(config, args.cache_dir)
+        knowledge_base = KnowledgeBase(config, args.cache_dir)
     except AccessRefused as exc:
         # Exit rather than serve without it: see KnowledgeBase._cold_start.
         print(f"mcp-kb: {exc}", file=sys.stderr)
         raise SystemExit(3) from exc
-    server.run(transport=args.transport, host=args.host, port=args.port)
+    # The parsed flags are the Serving run() reads: transport, host and port.
+    # uvicorn is given no log config of its own, so its lines go through the
+    # handler configure_logging installed and read like the rest.
+    create_app(knowledge_base).run(args, uvicorn_config={"log_config": None})
 
 
 if __name__ == "__main__":

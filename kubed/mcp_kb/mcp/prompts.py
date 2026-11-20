@@ -21,18 +21,25 @@ from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
-import mcp_types
-from fastmcp import FastMCP
-from fastmcp.exceptions import NotFoundError, ToolError, ValidationError
-from fastmcp.prompts import Prompt, PromptArgument
-from fastmcp.prompts.base import InputRequiredPromptResult
-from fastmcp.server.dependencies import get_context
-from fastmcp.server.providers.base import Provider
-from fastmcp.server.transforms import PromptsAsTools
-from fastmcp.tools.base import Tool
-from fastmcp.utilities.versions import VersionSpec
-from mcp_types import ToolAnnotations
-from mcp_types.version import MODERN_PROTOCOL_VERSIONS
+from kubed.mcp import (
+    NotFoundError,
+    Prompt,
+    PromptArgument,
+    QuickMCP,
+    ToolError,
+    ValidationError,
+)
+from kubed.mcp.protocol import (
+    MODERN_PROTOCOL_VERSIONS,
+    InputRequiredPromptResult,
+    PromptsAsTools,
+    Provider,
+    Tool,
+    ToolAnnotations,
+    VersionSpec,
+    types,
+)
+from kubed.mcp.request import get_context
 from pydantic import ConfigDict, Field
 
 from ..catalogue.names import QualifiedNames
@@ -43,7 +50,7 @@ from .scope import EVERYTHING, Scope
 from .tools import READ_ONLY
 
 if TYPE_CHECKING:
-    from fastmcp.server.context import Context
+    from kubed.mcp import Context
 
     from ..catalogue.snapshot import Snapshot
 
@@ -130,7 +137,7 @@ class MCPFilePrompt(Prompt):
         if _mirrored.get() or not _can_ask():
             return None
         described = {a.name: a.description or "" for a in self.file.arguments}
-        form = mcp_types.ElicitRequestFormParams(
+        form = types.ElicitRequestFormParams(
             message=f"The {self.name} prompt needs {', '.join(exc.names)}.",
             requested_schema={
                 "type": "object",
@@ -142,8 +149,8 @@ class MCPFilePrompt(Prompt):
             },
         )
         return InputRequiredPromptResult(
-            mcp_types.InputRequiredResult(
-                input_requests={ARGUMENTS: mcp_types.ElicitRequest(params=form)}
+            types.InputRequiredResult(
+                input_requests={ARGUMENTS: types.ElicitRequest(params=form)}
             )
         )
 
@@ -183,13 +190,13 @@ def _can_ask() -> bool:
     return elicitation is not None and elicitation.form is not None
 
 
-def _answered() -> mcp_types.ElicitResult | None:
+def _answered() -> types.ElicitResult | None:
     """This round's answer to the form asked for on the last one, if any."""
     ctx = _context()
     if ctx is None:
         return None
     answered = (ctx.input_responses or {}).get(ARGUMENTS)
-    return answered if isinstance(answered, mcp_types.ElicitResult) else None
+    return answered if isinstance(answered, types.ElicitResult) else None
 
 
 def _adapt(file: FilePrompt) -> MCPFilePrompt:
@@ -334,7 +341,7 @@ def _annotate(tool: Tool, title: str) -> Tool:
 PROMPT_TOOLS = frozenset({"list_prompts", "get_prompt"})
 
 
-def register(mcp: FastMCP, snapshot: Callable[[], Snapshot]) -> set[str]:
+def register(mcp: QuickMCP, snapshot: Callable[[], Snapshot]) -> set[str]:
     """Publish the prompts, and their tool mirror; return the mirror's names.
 
     The mirror is FastMCP's own ``PromptsAsTools`` rather than one written here:
@@ -343,5 +350,6 @@ def register(mcp: FastMCP, snapshot: Callable[[], Snapshot]) -> set[str]:
     flatten to text.
     """
     mcp.add_provider(PromptProvider(snapshot))
-    mcp.add_transform(ReadOnlyPromptsAsTools(mcp))
+    # A transform is FastMCP's, reached through the server QuickMCP wraps.
+    mcp.server.add_transform(ReadOnlyPromptsAsTools(mcp.server))
     return set(PROMPT_TOOLS)

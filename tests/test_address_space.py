@@ -25,6 +25,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.resources import CatalogueProvider, SkillTemplate
+from tests.conftest import server_of
 from tests.test_header_scope import _free_port
 
 pytestmark = pytest.mark.integration
@@ -130,7 +131,7 @@ def _build(base):
 def url(tmp_path_factory):
     base = tmp_path_factory.mktemp("address-space")
     config = _build(base)
-    app = KnowledgeBase(config, base / "_cache").mcp.http_app()
+    app = server_of(KnowledgeBase(config, base / "_cache")).http_app()
     port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
@@ -299,7 +300,7 @@ async def test_a_prompt_body_names_the_plugin_root_in_every_dialect(tmp_path):
     knowledge_base = KnowledgeBase(config, tmp_path / "cache")
     expected = "Read skill://kit/shared/x.md, not ${CLAUDE_SKILL_DIR}.\n"
 
-    async with Client(knowledge_base.mcp) as client:
+    async with Client(server_of(knowledge_base)) as client:
         rendered = {
             name: (await client.get_prompt(name)).messages[0].content.text
             for name in ("kit_own", "kit_theirs", "kit_vscode")
@@ -460,17 +461,17 @@ async def test_an_out_of_scope_directory_reads_as_a_missing_one(
 
 async def test_only_a_not_found_read_becomes_a_directory_hint(tmp_path):
     """A directory address that fails some other way keeps its own error."""
-    from fastmcp.server.middleware import Middleware
+    from kubed.mcp import Middleware
 
     class Explodes(Middleware):
         async def on_read_resource(self, context, call_next):
-            from fastmcp.exceptions import ResourceError
+            from kubed.mcp import ResourceError
 
             raise ResourceError("the backend exploded")
 
     knowledge_base = KnowledgeBase(_build(tmp_path), tmp_path / "_cache")
-    knowledge_base.mcp.add_middleware(Explodes())
-    async with Client(knowledge_base.mcp) as client:
+    server_of(knowledge_base).add_middleware(Explodes())
+    async with Client(server_of(knowledge_base)) as client:
         with pytest.raises(Exception) as caught:
             await client.read_resource("skill://grafana")
     assert "the backend exploded" in str(caught.value)
@@ -723,7 +724,7 @@ async def test_a_library_file_named_manifest_is_not_labelled_json(tmp_path):
     )
     kb = KnowledgeBase(config, tmp_path / "cache")
 
-    async with Client(kb.mcp) as client:
+    async with Client(server_of(kb)) as client:
         library_file = (await client.read_resource("skill://lib/notes/_manifest"))[0]
         manifest = (await client.read_resource("skill://lib/a/_manifest"))[0]
 
@@ -764,7 +765,7 @@ async def test_a_skill_nested_inside_a_skill_is_served_as_the_spec_says(tmp_path
     )
     kb = KnowledgeBase(config, tmp_path / "cache")
 
-    async with Client(kb.mcp) as client:
+    async with Client(server_of(kb)) as client:
         index = (await client.read_resource("skill://lib/_index.md"))[0].text
         folder = (await client.read_resource("skill://lib/x/_index.md"))[0].text
         inner = (await client.read_resource("skill://lib/x/y/SKILL.md"))[0].text

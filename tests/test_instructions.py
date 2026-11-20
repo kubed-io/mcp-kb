@@ -21,7 +21,7 @@ from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.instructions import ScopedInstructions
 from kubed.mcp_kb.mcp.request import declared_on_initialize
 from kubed.mcp_kb.mcp.scope import EVERYTHING, Scope
-from tests.conftest import SKILLS_GLOBS, fake_plugin, make_config
+from tests.conftest import SKILLS_GLOBS, fake_plugin, make_config, server_of
 from tests.test_header_scope import server_url  # noqa: F401 - shared HTTP fixture
 
 RES_FOOTER = (
@@ -158,7 +158,7 @@ def served(knowledge_base):
     """``knowledge_base`` on a loopback port: the headers only exist over HTTP."""
     port = _free_port()
     config = uvicorn.Config(
-        knowledge_base.mcp.http_app(), host="127.0.0.1", port=port, log_level="error"
+        server_of(knowledge_base).http_app(), host="127.0.0.1", port=port, log_level="error"
     )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)

@@ -18,10 +18,15 @@ from collections.abc import Callable, Mapping, Sequence
 
 import frontmatter
 import yaml
-from fastmcp.server.extensions import MethodBinding, ServerExtension
-from fastmcp.server.middleware import Middleware
-from mcp.shared.exceptions import MCPError
-from mcp_types import INVALID_PARAMS, PaginatedRequestParams, RequestParams
+from kubed.mcp import Middleware
+from kubed.mcp.protocol import (
+    INVALID_PARAMS,
+    MCPError,
+    MethodBinding,
+    PaginatedRequestParams,
+    RequestParams,
+    ServerExtension,
+)
 from pydantic import Field
 
 from ..catalogue.addressing import DEFAULT, Addressing

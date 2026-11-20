@@ -16,11 +16,11 @@ import logging
 import pytest
 from fastmcp import Client
 from fastmcp.client.elicitation import ElicitResult
-from mcp.shared.exceptions import MCPError
-from mcp_types import INVALID_PARAMS
+from kubed.mcp.protocol import INVALID_PARAMS, MCPError
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
+from tests.conftest import server_of
 
 pytestmark = pytest.mark.integration
 
@@ -69,7 +69,7 @@ def text(result):
 async def test_a_missing_argument_is_asked_for_and_then_rendered(server):
     asked = []
     handler = _answers({"app": "nextcloud"}, asked)
-    async with Client(server.mcp, elicitation_handler=handler) as client:
+    async with Client(server_of(server), elicitation_handler=handler) as client:
         rendered = await client.get_prompt("kit_debug", {})
 
     assert text(rendered) == "Look at nextcloud since 1h.\n"
@@ -87,7 +87,7 @@ async def test_an_answer_joins_the_arguments_already_given(server):
     sent, which is the only thing that round is still good for."""
     asked = []
     handler = _answers({"app": "penpot"}, asked)
-    async with Client(server.mcp, elicitation_handler=handler) as client:
+    async with Client(server_of(server), elicitation_handler=handler) as client:
         rendered = await client.get_prompt("kit_debug", {"since": "24h"})
     assert text(rendered) == "Look at penpot since 24h.\n"
     assert len(asked) == 1
@@ -101,7 +101,7 @@ async def test_a_declined_or_cancelled_answer_is_the_refusal_it_started_as(
     handler = _answers(ElicitResult(action=action, content={"app": "sneaky"}), [])
     caplog.clear()
     with caplog.at_level(logging.INFO):
-        async with Client(server.mcp, elicitation_handler=handler) as client:
+        async with Client(server_of(server), elicitation_handler=handler) as client:
             with pytest.raises(MCPError) as caught:
                 await client.get_prompt("kit_debug", {})
     assert caught.value.error.code == INVALID_PARAMS
@@ -111,7 +111,7 @@ async def test_a_declined_or_cancelled_answer_is_the_refusal_it_started_as(
 
 async def test_a_client_that_declares_no_elicitation_is_refused_as_before(server):
     """No handler, no capability: the -32602 that names the argument."""
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         with pytest.raises(MCPError) as caught:
             await client.get_prompt("kit_debug", {})
     assert caught.value.error.code == INVALID_PARAMS
@@ -123,7 +123,7 @@ async def test_an_older_protocol_is_refused_however_capable_the_client_is(server
     that can elicit over the initialize handshake still gets the error."""
     asked = []
     handler = _answers({"app": "nextcloud"}, asked)
-    async with Client(server.mcp, elicitation_handler=handler, mode="legacy") as client:
+    async with Client(server_of(server), elicitation_handler=handler, mode="legacy") as client:
         assert client.protocol_version not in ("2026-07-28",)
         with pytest.raises(MCPError) as caught:
             await client.get_prompt("kit_debug", {})
@@ -138,7 +138,7 @@ async def test_the_tool_mirror_still_answers_with_the_error_that_says_what_to_do
     ask has none of -- so the mirror asks nobody and keeps the error result."""
     asked = []
     handler = _answers({"app": "nextcloud"}, asked)
-    async with Client(server.mcp, elicitation_handler=handler) as client:
+    async with Client(server_of(server), elicitation_handler=handler) as client:
         result = await client.call_tool(
             "get_prompt", {"name": "kit_debug"}, raise_on_error=False
         )

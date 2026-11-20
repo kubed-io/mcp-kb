@@ -13,7 +13,8 @@ is what stdio is: no headers, no query string, nothing to narrow by.
 
 from __future__ import annotations
 
-from fastmcp.server.low_level import client_supports_extension
+from kubed.mcp.protocol import client_supports_extension
+from kubed.mcp.request import request_values
 
 from ..catalogue.addressing import Addressing
 from .scope import Scope
@@ -61,39 +62,6 @@ LISTING_PARAM_ALIAS = "skills"
 _FULL = "full"
 
 
-def http_request() -> tuple[dict[str, list[str]], dict[str, list[str]]] | None:
-    """(query params, headers) for the current request, or None off HTTP.
-
-    Both are looked up through FastMCP's dependency helpers, which read the
-    request from a context variable set by the ASGI stack. Every value is a
-    *list*, because repeating a parameter or a header is how a client says
-    "any of these" -- and a reader that took `dict(query_params)` would keep
-    the last one and silently narrow the scope it was handed.
-    """
-    try:
-        from fastmcp.server.dependencies import get_http_headers, get_http_request
-    except ImportError:  # pragma: no cover - fastmcp is a hard dependency
-        return None
-    try:
-        request = get_http_request()
-    except Exception:  # noqa: BLE001 - outside an HTTP request this raises
-        request = None
-    if request is None:
-        # Headers may still be reachable when the request object is not.
-        try:
-            headers = get_http_headers()
-        except Exception:  # noqa: BLE001
-            return None
-        if not headers:
-            return None
-        # A plain mapping: one value per name, which is a one-item list here.
-        return {}, {k.lower(): [v] for k, v in headers.items()}
-    return (
-        {k: request.query_params.getlist(k) for k in request.query_params},
-        {k.lower(): request.headers.getlist(k) for k in request.headers},
-    )
-
-
 def _read(
     header: str,
     param: str,
@@ -107,7 +75,7 @@ def _read(
     on a URL somebody may paste without it. Off HTTP there is neither, and an
     empty list is what every caller reads as "not narrowed, not declared".
     """
-    http = http_request()
+    http = request_values()
     if http is None:
         return []
     params, headers = http

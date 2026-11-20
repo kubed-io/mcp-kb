@@ -22,7 +22,7 @@ from kubed.mcp_kb.catalogue.snapshot import Library, assemble_libraries, build_s
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.pins import what_is_wrong
 from kubed.mcp_kb.mcp.scope import Scope
-from tests.conftest import fake_plugin
+from tests.conftest import fake_plugin, server_of
 
 pytestmark = pytest.mark.unit
 
@@ -94,7 +94,7 @@ def _config(tmp_path, **extra):
 
 
 async def _health(knowledge_base):
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
         return (await http.get("/health")).json()
 
@@ -106,7 +106,7 @@ async def _skills(knowledge_base):
 
 
 async def _read(knowledge_base, uri):
-    async with Client(knowledge_base.mcp) as client:
+    async with Client(server_of(knowledge_base)) as client:
         return (await client.read_resource(uri))[0].text
 
 
@@ -131,7 +131,7 @@ async def test_a_marketplace_library_lists_its_entries_as_plugins(market, tmp_pa
     assert health["plugins"]["k6@obs"]["keywords"] == ["load"]
     assert "loki." in await _read(kb, "skill://obs/loki/SKILL.md")
     assert "load." in await _read(kb, "skill://obs/load/SKILL.md")
-    async with Client(kb.mcp) as client:
+    async with Client(server_of(kb)) as client:
         rendered = await client.get_prompt("obs_run", {"arguments": "fast"})
     assert rendered.messages[0].content.text == "Run fast.\n"
 
@@ -361,7 +361,7 @@ async def test_a_refresh_of_a_marketplace_fetch_serves_an_entry_it_gained(
 
 
 async def _reindex(knowledge_base):
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
         return (await http.post("/reindex")).json()
 
@@ -450,7 +450,7 @@ async def test_a_manifests_keywords_join_the_plugins_labels(manifested, tmp_path
 
     port = _free_port()
     server = uvicorn.Server(
-        uvicorn.Config(kb.mcp.http_app(), host="127.0.0.1", port=port, log_level="error")
+        uvicorn.Config(server_of(kb).http_app(), host="127.0.0.1", port=port, log_level="error")
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()

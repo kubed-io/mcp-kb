@@ -29,7 +29,7 @@ from kubed.mcp_kb.config import BasicAuth, Config, EnvRef
 from kubed.mcp_kb.mcp.prompts import PromptProvider
 from kubed.mcp_kb.plugins import Fetch
 from kubed.mcp_kb.sources import live
-from tests.conftest import DEEP_YAML
+from tests.conftest import DEEP_YAML, server_of
 from tests.webdav_server import FOLDER, PASSWORD, USERNAME
 
 pytestmark = pytest.mark.unit
@@ -318,7 +318,7 @@ async def test_health_says_a_live_source_is_cooling_after_a_failure(
     monkeypatch.setattr(live, "fetch_file", _wedged)
     knowledge_base.catalogue.read(URI)
 
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
         body = (await http.get("/health")).json()
 
@@ -414,7 +414,7 @@ async def test_health_reports_what_a_live_source_revalidated(webdav, tmp_path):
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
     knowledge_base.catalogue.read(URI)
 
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
         body = (await http.get("/health")).json()
 
@@ -431,7 +431,7 @@ async def test_health_says_nothing_about_the_backend_or_the_credentials(
     knowledge_base = _knowledge_base(webdav, tmp_path)
     knowledge_base.catalogue.read(URI)
 
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
         body = (await http.get("/health")).text
 

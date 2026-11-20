@@ -25,6 +25,7 @@ from fastmcp import Client
 
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.server import KnowledgeBase
+from tests.conftest import server_of
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_CONFIG = ROOT / "examples" / "config.yaml"
@@ -284,6 +285,6 @@ async def test_a_skill_per_library_reads_back_at_its_real_uri(tmp_path, library,
     folder segment.
     """
     knowledge_base = KnowledgeBase(_rewritten_config(tmp_path), tmp_path / "cache")
-    async with Client(knowledge_base.mcp) as client:
+    async with Client(server_of(knowledge_base)) as client:
         text = (await client.read_resource(uri))[0].text
     assert text == "---\nname: s\ndescription: d\n---\nBody.\n", library

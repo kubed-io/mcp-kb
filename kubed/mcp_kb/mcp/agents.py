@@ -16,9 +16,14 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from fastmcp.server.extensions import MethodBinding, ServerExtension
-from mcp.shared.exceptions import MCPError
-from mcp_types import INVALID_PARAMS, PaginatedRequestParams, RequestParams
+from kubed.mcp.protocol import (
+    INVALID_PARAMS,
+    MCPError,
+    MethodBinding,
+    PaginatedRequestParams,
+    RequestParams,
+    ServerExtension,
+)
 from pydantic import Field
 
 from ..catalogue.uris import Catalogue

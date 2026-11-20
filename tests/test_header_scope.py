@@ -15,10 +15,9 @@ import pytest
 import uvicorn
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
-from fastmcp.utilities.skills import download_skill, get_skill_manifest, list_skills
 
 from kubed.mcp_kb import KnowledgeBase
-from tests.conftest import fetch_key, make_config
+from tests.conftest import fetch_key, make_config, server_of
 
 
 def _free_port() -> int:
@@ -32,7 +31,7 @@ def server_url(skills_dir_module, prompts_dir_module):
     """Serve the skills app on a loopback port for the duration of the module."""
     port = _free_port()
     config = make_config(skills_dir_module, prompts_dir_module)
-    app = KnowledgeBase(config, skills_dir_module / "_cache").mcp.http_app()
+    app = server_of(KnowledgeBase(config, skills_dir_module / "_cache")).http_app()
     uvicorn_config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(uvicorn_config)
     thread = threading.Thread(target=server.run, daemon=True)
@@ -266,30 +265,32 @@ async def test_a_tag_pin_sees_only_the_prompts_of_the_plugins_carrying_it(server
 
 
 @pytest.mark.integration
-async def test_fastmcp_syncs_skills_from_the_full_listing(
-    server_url, skills_dir_module, tmp_path
-):
-    """The promise ?listing=full exists to keep, checked with FastMCP's own helpers."""
+async def test_fastmcp_syncs_skills_from_the_full_listing(server_url, skills_dir_module):
+    """The promise ?listing=full exists to keep, checked with FastMCP's own client:
+    it finds a skill by its /SKILL.md row, then reads every file its manifest
+    names and checks each against the digest there."""
+    alpha = "skill://flatsource/alpha/SKILL.md"
     async with _client(f"{server_url}?listing=full") as client:
-        found = {s.name for s in await list_skills(client)}
-        manifest = await get_skill_manifest(client, "flatsource/alpha")
-        downloaded = await download_skill(client, "flatsource/alpha", tmp_path)
+        found = {str(r.uri) for r in await client.list_skill_resources()}
+        skill = await client.read_skill(alpha)
+        [read] = await client.read_resource(alpha)
     assert found == {
-        "flatsource/alpha",
-        "flatsource/beta",
-        "deepsource/plugin-a/gamma",
-        "deepsource/plugin-b/delta",
+        alpha,
+        "skill://flatsource/beta/SKILL.md",
+        "skill://deepsource/plugin-a/gamma/SKILL.md",
+        "skill://deepsource/plugin-b/delta/SKILL.md",
     }
-    assert "SKILL.md" in [f.path for f in manifest.files]
     source = skills_dir_module / "flatsource" / "alpha" / "SKILL.md"
-    assert (downloaded / "SKILL.md").read_text() == source.read_text()
+    assert skill.name == "alpha"
+    assert skill.files["SKILL.md"] == source.read_bytes()
+    assert read.text == source.read_text()
 
 
 @pytest.mark.integration
 async def test_the_default_listing_gives_sync_helpers_nothing(server_url):
     """Why the flag exists: the cheap listing has no /SKILL.md rows to find."""
     async with _client(server_url) as client:
-        assert await list_skills(client) == []
+        assert await client.list_skill_resources() == []
 
 
 # -- /health --------------------------------------------------------------------

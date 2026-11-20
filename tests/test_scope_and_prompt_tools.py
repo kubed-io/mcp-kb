@@ -19,12 +19,13 @@ import pytest
 import uvicorn
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
-from fastmcp.exceptions import ToolError
+from kubed.mcp import ToolError
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.pins import COMMA_IN_CATEGORY, FOLDER_IN_LIBRARY
 from kubed.mcp_kb.mcp.scope import Scope
+from tests.conftest import server_of
 from tests.test_header_scope import _free_port
 
 pytestmark = pytest.mark.unit
@@ -97,7 +98,7 @@ def url(tmp_path_factory):
         }
     )
     port = _free_port()
-    app = KnowledgeBase(config, tmp_path_factory.mktemp("cache")).mcp.http_app()
+    app = server_of(KnowledgeBase(config, tmp_path_factory.mktemp("cache"))).http_app()
     server = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
     )
@@ -317,8 +318,7 @@ async def test_a_scope_that_names_nothing_is_refused_saying_what_there_is(
     url, query, says
 ):
     """A typo in a client's config is an error at connect, not an empty server."""
-    from mcp.shared.exceptions import MCPError
-    from mcp_types import INVALID_PARAMS
+    from kubed.mcp.protocol import INVALID_PARAMS, MCPError
 
     with pytest.raises(MCPError) as caught:
         await _seen(url, query)

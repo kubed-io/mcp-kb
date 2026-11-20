@@ -14,7 +14,7 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
 from kubed.mcp_kb import KnowledgeBase
-from tests.conftest import make_config
+from tests.conftest import make_config, server_of
 
 PIN = {"Kb-Library": "flatsource"}
 PREFIX = {"Kb-Resource-Prefix": "kb+"}
@@ -49,7 +49,7 @@ def server_url(skills_dir_module, prompts_dir_module):
         "Read ${CLAUDE_PLUGIN_ROOT}/shared/x.md.\n"
     )
     config = make_config(skills_dir_module, prompts_dir_module)
-    app = KnowledgeBase(config, skills_dir_module / "_cache").mcp.http_app()
+    app = server_of(KnowledgeBase(config, skills_dir_module / "_cache")).http_app()
     server = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
     )
@@ -203,7 +203,7 @@ async def test_tools_mode_with_the_prefix(server_url):
 
 
 async def skills_request(url, method, headers, **params):
-    from mcp_types import Request, RequestParams
+    from kubed.mcp.protocol import RequestParams, types
     from pydantic import ConfigDict, TypeAdapter
 
     class Params(RequestParams):
@@ -211,7 +211,7 @@ async def skills_request(url, method, headers, **params):
 
     async with _client(url, headers) as client:
         return await client.session.send_request(
-            Request(method=method, params=Params(**params)), TypeAdapter(dict)
+            types.Request(method=method, params=Params(**params)), TypeAdapter(dict)
         )
 
 
@@ -272,7 +272,7 @@ def _served(knowledge_base):
     port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(
-            knowledge_base.mcp.http_app(), host="127.0.0.1", port=port, log_level="error"
+            server_of(knowledge_base).http_app(), host="127.0.0.1", port=port, log_level="error"
         )
     )
     thread = threading.Thread(target=server.run, daemon=True)

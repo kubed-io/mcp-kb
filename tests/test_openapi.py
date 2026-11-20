@@ -17,7 +17,7 @@ from kubed.mcp_kb.catalogue import snapshot
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.sources import SourceError
 from kubed.mcp_kb.spec import build_spec
-from tests.conftest import key_of, make_config
+from tests.conftest import key_of, make_config, server_of
 
 pytestmark = pytest.mark.unit
 
@@ -114,12 +114,12 @@ def test_every_registered_route_except_openapi_yaml_is_documented(knowledge_base
     temporarily (`@mcp.custom_route("/throwaway", methods=["GET"])`) and
     watching it fail before removing it again.
     """
-    registered = {route.path for route in knowledge_base.mcp._additional_http_routes}
+    registered = {route.path for route in server_of(knowledge_base)._additional_http_routes}
     assert registered - {"/openapi.yaml"} == set(build_spec()["paths"])
 
 
 async def test_the_served_document_equals_the_built_one(knowledge_base):
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
         response = await http.get("/openapi.yaml")
     assert response.status_code == 200
@@ -202,7 +202,7 @@ async def test_a_real_health_response_matches_the_documented_fields(every_status
     long as this test compared key sets alone. Re-introduce `"string"` in
     `spec/builder.py` and this fails.
     """
-    transport = httpx.ASGITransport(app=every_status.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(every_status).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
         body = (await http.get("/health")).json()
 
@@ -243,7 +243,7 @@ async def test_a_health_response_with_plugin_notes_validates(tmp_path):
         }
     )
     knowledge_base = KnowledgeBase(config, tmp_path / "cache")
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
         body = (await http.get("/health")).json()
 
@@ -260,7 +260,7 @@ async def test_a_failed_fetch_carries_only_its_status_and_error(every_status):
     that never materialised one has not got -- and the document says they are
     absent only when `status` is `failed`, so the published contract is what
     is checked here rather than the field list, which a superset satisfies."""
-    transport = httpx.ASGITransport(app=every_status.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(every_status).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
         fetches = (await http.get("/health")).json()["fetches"]
 
@@ -273,7 +273,7 @@ async def test_a_failed_fetch_carries_only_its_status_and_error(every_status):
 
 
 async def test_a_real_reindex_response_matches_the_documented_fields(knowledge_base):
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
         body = (await http.post("/reindex")).json()
 
@@ -291,7 +291,7 @@ async def test_health_counts_the_agents_and_validates(tmp_path):
     from tests.test_agents import agents_tree
 
     knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
         health = (await http.get("/health")).json()
         reindex = (await http.post("/reindex")).json()

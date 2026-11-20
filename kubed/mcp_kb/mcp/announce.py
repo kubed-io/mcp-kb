@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import mcp_types
-from fastmcp.server.middleware import Middleware
-
-from .request import http_request
+from kubed.mcp import Middleware
+from kubed.mcp.protocol import types
+from kubed.mcp.request import request_values
 
 if TYPE_CHECKING:
     from ..server import KnowledgeBase
@@ -66,8 +65,8 @@ class AnnounceChanges(Middleware):
         if told == generation:
             return
         if told is not None:
-            await ctx.send_notification(mcp_types.ResourceListChangedNotification())
-            await ctx.send_notification(mcp_types.PromptListChangedNotification())
+            await ctx.send_notification(types.ResourceListChangedNotification())
+            await ctx.send_notification(types.PromptListChangedNotification())
         try:
             await ctx.set_state(GENERATION_KEY, generation)
         except Exception:  # noqa: BLE001 - as above; remembering is best-effort
@@ -90,7 +89,7 @@ def _can_remember() -> bool:
     wasted, not merely redundant, but harmless: ``AnnounceChanges`` guards every
     one of them against a state store that will not read them back.
     """
-    http = http_request()
+    http = request_values()
     if http is None:
         return True
     _, headers = http

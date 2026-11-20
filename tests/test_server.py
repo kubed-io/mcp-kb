@@ -8,11 +8,11 @@ import fastmcp
 import httpx
 import pytest
 from fastmcp import Client
-from mcp_types import SERVER_INFO_META_KEY
+from kubed.mcp.protocol import types
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
-from tests.conftest import key_of, make_config
+from tests.conftest import key_of, make_config, server_of
 from tests.test_skills_extension import request
 
 KB_INFO = {"name": "mcp-kb", "version": dist_version("kubed-mcp-kb")}
@@ -29,16 +29,16 @@ async def call(client, name, **args):
 @pytest.mark.parametrize("mode", ["auto"])
 async def test_every_result_names_kb_and_its_version(skills_dir, mode):
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
-    async with Client(server.mcp, mode=mode) as client:
+    async with Client(server_of(server), mode=mode) as client:
         listing = await request(client, "skills/list")
-    assert listing["_meta"][SERVER_INFO_META_KEY] == KB_INFO
+    assert listing["_meta"][types.SERVER_INFO_META_KEY] == KB_INFO
     assert KB_INFO["version"] != fastmcp.__version__
 
 
 @pytest.mark.unit
 async def test_initialize_names_kb_and_its_version(skills_dir):
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
-    async with Client(server.mcp, mode="legacy") as client:
+    async with Client(server_of(server), mode="legacy") as client:
         info = client.initialize_result.server_info
     assert {"name": info.name, "version": info.version} == KB_INFO
 
@@ -50,7 +50,7 @@ async def test_initialize_names_kb_and_its_version(skills_dir):
 async def test_resources_are_indexes_not_one_per_skill(skills_dir):
     """The listing is the cheap layer; it must not grow with the catalogue."""
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         uris = [str(r.uri) for r in await client.list_resources()]
     assert "skill://flatsource/_index.md" in uris
     assert "skill://deepsource/plugin-a/_index.md" in uris
@@ -61,7 +61,7 @@ async def test_resources_are_indexes_not_one_per_skill(skills_dir):
 async def test_reading_an_index_then_a_skill(skills_dir):
     """The whole interface: list addresses, read one, read the next."""
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         index = (await client.read_resource("skill://deepsource/plugin-a/_index.md"))[
             0
         ].text
@@ -75,7 +75,7 @@ async def test_reading_an_index_then_a_skill(skills_dir):
 @pytest.mark.unit
 async def test_reading_a_manifest_then_one_of_its_files(skills_dir):
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         manifest = (await client.read_resource("skill://flatsource/alpha/_manifest"))[
             0
         ].text
@@ -88,7 +88,7 @@ async def test_reading_a_manifest_then_one_of_its_files(skills_dir):
 @pytest.mark.unit
 async def test_an_unknown_uri_is_an_error_not_an_empty_read(skills_dir):
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         with pytest.raises(Exception, match=r"nope|[Uu]nknown|not found"):
             await client.read_resource("skill://flatsource/nope")
 
@@ -99,7 +99,7 @@ async def test_server_scoped_to_libraries_hides_the_rest(skills_dir):
     server = KnowledgeBase(
         make_config(skills_dir, libraries=["flatsource"]), skills_dir / "_cache"
     )
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         uris = [str(r.uri) for r in await client.list_resources()]
         assert not any(u.startswith("skill://deepsource/") for u in uris)
         with pytest.raises(Exception, match=r"nknown|not found"):
@@ -110,7 +110,7 @@ async def test_server_scoped_to_libraries_hides_the_rest(skills_dir):
 async def test_empty_config_still_serves(tmp_path):
     """No plugins configured must not crash the server -- it just serves nothing."""
     server = KnowledgeBase(Config(), tmp_path / "cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         assert await client.list_resources() == []
 
 
@@ -128,7 +128,7 @@ async def test_a_failed_fetch_does_not_take_the_others_down(skills_dir):
     assert "not a directory" in server.status["plugins"]["gone"]["error"]
     assert server.status["fetches"][key_of(config, "flatsource")]["status"] == "ok"
     assert server.status["plugins"]["flatsource"]["status"] == "ok"
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         uris = [str(r.uri) for r in await client.list_resources()]
     assert "skill://flatsource/_index.md" in uris
 
@@ -143,7 +143,7 @@ async def test_the_mirrors_are_four_tools_whatever_the_catalogue_holds(skills_di
     # Skip the middleware, which is the thing that hides these. What is
     # registered is what an ?resources=off client is shown; what a resource
     # client sees is covered over real HTTP in test_header_scope.
-    registered = await server.mcp.list_tools(run_middleware=False)
+    registered = await server_of(server).list_tools(run_middleware=False)
     assert sorted(t.name for t in registered) == [
         "get_prompt",
         "list_prompts",
@@ -156,7 +156,7 @@ async def test_the_mirrors_are_four_tools_whatever_the_catalogue_holds(skills_di
 async def test_the_mirror_tools_are_advertised_as_read_only(skills_dir):
     """Unannotated, MCP's defaults advertise a tool as destructive."""
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
-    registered = await server.mcp.list_tools(run_middleware=False)
+    registered = await server_of(server).list_tools(run_middleware=False)
     assert registered
     for tool in registered:
         hints = tool.to_mcp_tool().annotations
@@ -172,7 +172,7 @@ async def test_the_mirror_tools_are_advertised_as_read_only(skills_dir):
 async def test_the_mirror_returns_the_same_rows_as_the_resource_listing(skills_dir):
     """If these drift, the tool is no longer the resource interface."""
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         resources = {str(r.uri) for r in await client.list_resources()}
         rows = json.loads(await call(client, "list_resources"))
     assert {row["uri"] for row in rows} == resources
@@ -182,7 +182,7 @@ async def test_the_mirror_returns_the_same_rows_as_the_resource_listing(skills_d
 @pytest.mark.unit
 async def test_read_resource_returns_what_reading_the_uri_returns(skills_dir):
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         gamma = "skill://deepsource/plugin-a/gamma/SKILL.md"
         through_tool = await call(client, "read_resource", uri=gamma)
         through_resource = (await client.read_resource(gamma))[0].text
@@ -196,7 +196,7 @@ async def test_read_resource_explains_an_unknown_uri(skills_dir, caplog):
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
     caplog.clear()
     with caplog.at_level(logging.INFO):
-        async with Client(server.mcp) as client:
+        async with Client(server_of(server)) as client:
             result = await client.call_tool(
                 "read_resource", {"uri": "skill://nope/nope"}, raise_on_error=False
             )
@@ -212,7 +212,7 @@ async def test_the_mirror_honours_the_hard_library_scope(skills_dir):
     server = KnowledgeBase(
         make_config(skills_dir, libraries=["flatsource"]), skills_dir / "_cache"
     )
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         out = await call(
             client, "read_resource", uri="skill://deepsource/plugin-a/gamma/SKILL.md"
         )
@@ -255,7 +255,7 @@ async def test_a_configmap_mount_is_served_under_the_names_it_was_mounted_as(tmp
 
     assert knowledge_base.snapshot.resources.files("library") == ["shared/foo.md"]
     assert all(".." not in str(s.path) for s in knowledge_base.index.visible())
-    async with Client(knowledge_base.mcp) as client:
+    async with Client(server_of(knowledge_base)) as client:
         shared = (await client.read_resource("skill://library/shared/foo.md"))[0].text
         skill = (await client.read_resource("skill://library/alpha/SKILL.md"))[0].text
     assert shared == "shared body"
@@ -282,7 +282,7 @@ async def test_a_hidden_file_in_a_skill_is_not_readable_by_guessing(tmp_path):
     )
     server = KnowledgeBase(config, tmp_path / "cache")
 
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         visible = (await client.read_resource("skill://lib/x/notes.md"))[0].text
         with pytest.raises(Exception, match=r"[Uu]nknown|not found"):
             await client.read_resource("skill://lib/x/.env")
@@ -303,7 +303,7 @@ async def test_health_shows_the_resolved_description(tmp_path):
         {"libraries": [{"name": "up", "source": f"file://{root}"}]}
     )
     transport = httpx.ASGITransport(
-        app=KnowledgeBase(config, tmp_path / "cache").mcp.http_app()
+        app=server_of(KnowledgeBase(config, tmp_path / "cache")).http_app()
     )
     async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
         health = (await http.get("/health")).json()

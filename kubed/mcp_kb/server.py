@@ -1,8 +1,9 @@
-"""The MCP server itself: wiring, and the lifecycle of what it serves.
+"""The knowledge base: the lifecycle of what the server serves.
 
-Assembles a FastMCP instance from the catalogue a config file describes -- the
-address space, the resources, the mirror tools, the routes -- and runs it on a
-transport. Turning a fetch into a directory is ``sources``'s job; resolving
+Builds the catalogue a config file describes and keeps it current; the MCP
+server over it -- the address space, the resources, the mirror tools, the
+routes -- is ``app.create_app``'s. Turning a fetch into a directory is
+``sources``'s job; resolving
 the config's plugins and reading a marketplace is ``plugins``'s; deciding what
 in a plugin counts as a skill, a prompt or a library-level file is
 ``catalogue/harvest.py``'s; building one immutable view of all of it is
@@ -26,9 +27,10 @@ Three rules follow from that, and every change here has to keep them:
   partial catalogue, and a request already in flight finishes against the
   consistent one it started with.
 - **Read through the getter.** Every provider, tool and route is handed a
-  ``lambda: self.snapshot...``, never a ``Catalogue``. A stored one would pin
-  that component to the generation it was registered in, which is a bug that
-  looks exactly like "the refresh does not work".
+  ``lambda: self.snapshot...`` or has the current ``Catalogue`` injected per
+  call, never a stored one. A stored one would pin that component to the
+  generation it was registered in, which is a bug that looks exactly like "the
+  refresh does not work".
 """
 
 from __future__ import annotations
@@ -40,10 +42,8 @@ import threading
 import time
 from collections.abc import AsyncIterator, Iterable
 from pathlib import Path
+from typing import Any
 
-from fastmcp import FastMCP
-
-from . import routes
 from .catalogue.harvest import inside
 from .catalogue.index import (
     INDEX_VERSION,
@@ -71,16 +71,8 @@ from .catalogue.snapshot import (
 )
 from .catalogue.uris import Catalogue
 from .config import Config
-from .mcp import prompts, resources, tools
-from .mcp.agents import AgentsExtension
-from .mcp.announce import AnnounceChanges
-from .mcp.instructions import ScopedInstructions
-from .mcp.pins import RefuseEmptyScope, what_is_wrong
-from .mcp.request import client_reads_resources, client_uses_prompts
-from .mcp.skills import AdvertiseLegacyExtensions, SkillsExtension
 from .plugins import Fetch, Plugin, declared_plugins, marketplace_fetches
 from .plugins.marketplace import find_marketplace, read_marketplace
-from .spec import package_version
 
 log = logging.getLogger(__name__)
 
@@ -88,16 +80,10 @@ INDEX_FILE = "index.json"
 
 
 class KnowledgeBase:
-    """An MCP server over the libraries a config file names.
+    """The libraries a config file names: built at boot, then kept current.
 
-    The catalogue is served twice, because MCP clients are not all alike. As
-    ``skill://`` **resources**, which is what it is; and as two **tools** that
-    mirror those resources exactly, for the many clients that only implement
-    tools -- n8n among them, to which a resource-only server looks empty.
-
-    The mirror is hidden from clients that read resources, so each client sees
-    one way to ask, not two. A client declares it cannot read resources with
-    ``?resources=off`` on the MCP URL or an ``X-MCP-Resources: off`` header.
+    Building one is the cold start, so a config whose credentials are refused
+    fails here, before anything serves. ``app.create_app`` serves it.
     """
 
     def __init__(self, config: Config, cache: Path):
@@ -119,47 +105,6 @@ class KnowledgeBase:
         self.snapshot: Snapshot = self._build(generation=0)
         log_changes({}, self.snapshot.status)
         self._write_index()
-
-        ttl = config.min_refresh_seconds
-        self.mcp = FastMCP(
-            "mcp-kb",
-            version=package_version(),
-            lifespan=self._lifespan,
-            # A client may hold a listing for as long as the shortest refresh
-            # interval, which is the soonest it could possibly be wrong. That
-            # is the whole staleness bound for a sessionless client, which
-            # AnnounceChanges cannot reach. Private, because a listing is
-            # scoped by the caller's own headers.
-            cache_ttl=ttl,
-            cache_scope=None if ttl is None else "private",
-        )
-
-        resources.register(self.mcp, lambda: self.snapshot.catalogue)
-        extensions = [
-            extension(
-                lambda: self.snapshot.catalogue,
-                lambda scope: what_is_wrong(scope, config, self.snapshot),
-            )
-            for extension in (SkillsExtension, AgentsExtension)
-        ]
-        for extension in extensions:
-            self.mcp.add_extension(extension)
-        # initialize carries what server/discover does: the skills id with {},
-        # the agents id with {"listChanged": False}.
-        self.mcp.add_middleware(
-            AdvertiseLegacyExtensions({e.identifier: e.settings() for e in extensions})
-        )
-        self.mcp.add_middleware(ScopedInstructions(lambda: self.snapshot.catalogue))
-        resource_tools = tools.register(self.mcp, lambda: self.snapshot.catalogue)
-        prompt_tools = prompts.register(self.mcp, lambda: self.snapshot)
-        mirrors = dict.fromkeys(resource_tools, client_reads_resources)
-        mirrors.update(dict.fromkeys(prompt_tools, client_uses_prompts))
-        self.mcp.add_middleware(
-            RefuseEmptyScope(lambda scope: what_is_wrong(scope, config, self.snapshot))
-        )
-        self.mcp.add_middleware(resources.HideMirrorTools(mirrors))
-        self.mcp.add_middleware(AnnounceChanges(self))
-        routes.register(self.mcp, self)
 
     # -- what the snapshot currently holds -----------------------------------
 
@@ -482,7 +427,7 @@ class KnowledgeBase:
     # -- keeping it current --------------------------------------------------
 
     @contextlib.asynccontextmanager
-    async def _lifespan(self, server: FastMCP) -> AsyncIterator[dict]:
+    async def lifespan(self, server: Any) -> AsyncIterator[dict]:
         """Run the refresh loop for as long as the server is up."""
         del server
         task = asyncio.create_task(loop(self))
@@ -492,28 +437,6 @@ class KnowledgeBase:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-
-    def run(
-        self, transport: str = "http", host: str = "0.0.0.0", port: int = 8000
-    ) -> None:
-        """Serve on ``transport``, blocking until the process is stopped.
-
-        FastMCP's banner is a box of box-drawing characters, which reads well in
-        a terminal and as noise in a log collector; its own "Starting MCP
-        server" line says the same. uvicorn is given no log config of its own,
-        so its lines go through the handler ``main.configure_logging``
-        installed and read like the rest.
-        """
-        if transport == "stdio":
-            self.mcp.run(transport="stdio", show_banner=False)
-        else:
-            self.mcp.run(
-                transport="http",
-                host=host,
-                port=port,
-                show_banner=False,
-                uvicorn_config={"log_config": None},
-            )
 
 
 def _root(fetch_root: Path, subdir: str) -> Path | None:

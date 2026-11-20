@@ -17,7 +17,7 @@ import traceback
 from typing import TYPE_CHECKING
 
 import yaml
-from fastmcp import FastMCP
+from kubed.mcp import QuickMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -35,8 +35,8 @@ log = logging.getLogger(__name__)
 REINDEX_FAILURE_MESSAGE = "reindex failed; see the server log"
 
 
-def register(mcp: FastMCP, knowledge_base: KnowledgeBase) -> None:
-    """Register the HTTP routes on ``mcp``."""
+def register(mcp: QuickMCP, knowledge_base: KnowledgeBase) -> None:
+    """Register the HTTP routes on ``mcp``'s server, beside the MCP transport."""
     # Built once, here, rather than per request or lazily on first hit: the
     # document describes the routes this function registers, not the
     # catalogue, so nothing about it can change while the process runs.
@@ -61,7 +61,7 @@ def register(mcp: FastMCP, knowledge_base: KnowledgeBase) -> None:
             },
         }
 
-    @mcp.custom_route("/openapi.yaml", methods=["GET"])
+    @mcp.server.custom_route("/openapi.yaml", methods=["GET"])
     async def openapi_yaml(_request: Request) -> Response:
         """This HTTP surface as OpenAPI 3.1.
 
@@ -70,7 +70,7 @@ def register(mcp: FastMCP, knowledge_base: KnowledgeBase) -> None:
         """
         return Response(spec_yaml, media_type="text/yaml")
 
-    @mcp.custom_route("/health", methods=["GET"])
+    @mcp.server.custom_route("/health", methods=["GET"])
     async def health(_request: Request) -> JSONResponse:
         """Readiness probe, and the fastest way to tell which fetches loaded.
 
@@ -86,7 +86,7 @@ def register(mcp: FastMCP, knowledge_base: KnowledgeBase) -> None:
         """
         return JSONResponse(report())
 
-    @mcp.custom_route("/reindex", methods=["POST"])
+    @mcp.server.custom_route("/reindex", methods=["POST"])
     async def reindex(_request: Request) -> JSONResponse:
         """Rebuild every fetch now, and report the catalogue that results.
 

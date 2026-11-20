@@ -14,6 +14,7 @@ from fastmcp import Client
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
+from tests.conftest import server_of
 
 pytestmark = pytest.mark.unit
 
@@ -53,13 +54,13 @@ def _pair(tmp_path, first, second, files=("shared/**",), libraries=None):
 
 
 async def _health(knowledge_base):
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
         return (await http.get("/health")).json()
 
 
 async def _serves(knowledge_base, uri):
-    async with Client(knowledge_base.mcp) as client:
+    async with Client(server_of(knowledge_base)) as client:
         return (await client.read_resource(uri))[0].text
 
 
@@ -87,7 +88,7 @@ async def test_a_second_plugin_serving_a_claimed_skill_uri_fails(tmp_path):
     }
     assert health["libraries"]["lib"]["skills"] == 1
     assert "From first." in await _serves(kb, "skill://lib/folder/x/SKILL.md")
-    async with Client(kb.mcp) as client:
+    async with Client(server_of(kb)) as client:
         with pytest.raises(Exception, match="not found"):
             await client.read_resource("skill://lib/folder/y/SKILL.md")
 
@@ -161,7 +162,7 @@ async def test_a_second_plugin_serving_a_claimed_prompt_name_fails(tmp_path):
     assert _conflict(health) == {
         "second": "conflict: prompt lib_same is already served by plugin 'first'"
     }
-    async with Client(kb.mcp) as client:
+    async with Client(server_of(kb)) as client:
         prompts = await client.list_prompts()
         rendered = await client.get_prompt("lib_same")
         with pytest.raises(Exception, match="not found"):
@@ -186,7 +187,7 @@ async def test_a_later_file_inside_an_earlier_plugins_skill_fails_its_plugin(tmp
         "second": "conflict: skill://lib/x/notes.md is already served by"
         " plugin 'first'"
     }
-    async with Client(kb.mcp) as client:
+    async with Client(server_of(kb)) as client:
         with pytest.raises(Exception, match="not found"):
             await client.read_resource("skill://lib/shared/b.md")
 
