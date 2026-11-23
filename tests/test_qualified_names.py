@@ -209,10 +209,12 @@ async def test_the_extension_digest_follows_the_rewrite(url):
     assert entry["frontmatter"]["description"] == "See kit:writing."
 
 
-async def test_the_manifest_still_describes_disk_bytes(url):
+async def test_the_manifest_describes_the_bytes_served(url):
     manifest = json.loads(await _read(url, "skill://kit/cite/_manifest"))
     (main,) = [f for f in manifest["files"] if f["path"] == "SKILL.md"]
-    assert main["size"] == len(SKILL_ON_DISK.encode())
+    served = await _read(url, "skill://kit/cite/SKILL.md")
+    assert served != SKILL_ON_DISK
+    assert main["size"] == len(served.encode())
 
 
 async def test_an_agent_reads_names_as_addresses_and_preloads_its_skills(url):

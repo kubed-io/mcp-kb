@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Discover the agents your plugins ship** through the experimental `agents/list` and `agents/get`, scoped like everything else.
 - A client can tell kb serves `skill://` addresses from `resources/templates/list`.
 - A `<plugin>:<skill>` name in a skill, prompt or agent reads as the skill's `skill://` address.
+- Browse a library, a folder or a skill's own folders with `resources/directory/read`, or read the `_index.json` beside each.
 
 ### Changed
 
@@ -44,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A plugin's `plugin.json` reads as Claude Code reads it: its `skills` add to the usual skill folders, and a marketplace entry's lists append to it.
 - Marketplace entries marked `strict: false` now load, unless they conflict with the plugin's own `plugin.json`.
 - The issue and pull request agents run from kubed-io/actions' shared workflows.
+- **BREAKING:** A skill that fails the Agent Skills checks (strict frontmatter, at most 512 files and 16 MiB), or that sits inside another skill, is no longer served at all; the log says why.
+- A skill's `_manifest` gives the size and hash of the bytes a read returns, the same as its `skills/get` entry.
+- `skills/get` of a skill that is not served answers `Unknown skill URI: <uri>`.
 
 ### Fixed
 

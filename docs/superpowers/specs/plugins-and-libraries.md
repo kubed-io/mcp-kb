@@ -119,7 +119,7 @@ plugin serves.
 | a skill | its `name` breaks the naming rule in [skills.md](skills.md) |
 | a skill | its `name` differs from its directory's name, unless the skill is the plugin root |
 | a skill | an earlier skill of the plugin has its address |
-| a library file | its name is `_index.md` or `_files.md` |
+| a library file | its name is `_index.md`, `_index.json` or `_files.md` |
 | a library file | its address is a served skill's, lies inside one, or contains one |
 | a prompt | the name its path builds is not a usable name (PLG-25) |
 | a prompt | an earlier prompt of the plugin has its name (PLG-25) |

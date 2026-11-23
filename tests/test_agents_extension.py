@@ -63,7 +63,7 @@ async def test_both_extensions_are_declared(tmp_path, mode):
     async with Client(server_of(server), mode=mode) as client:
         caps = client.session.server_capabilities
         assert caps.extensions[AGENTS_EXTENSION_ID] == {"listChanged": False}
-        assert caps.extensions[EXTENSION_ID] == {}
+        assert caps.extensions[EXTENSION_ID] == {"directoryRead": True}
 
 
 @pytest.mark.unit

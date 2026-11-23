@@ -27,9 +27,8 @@ from kubed.mcp.protocol import (
 from pydantic import Field
 
 from ..catalogue.uris import Catalogue
-from .request import AGENTS_EXTENSION_ID, requested_addressing
+from .request import AGENTS_EXTENSION_ID, requested_addressing, requested_scope
 from .scope import Scope
-from .skills import checked_scope, complete
 
 # kb sends no notifications/agents/list_changed (AGT-1).
 SETTINGS = {"listChanged": False}
@@ -39,6 +38,33 @@ AGENT_NOT_FOUND = {"reason": "agent_not_found"}
 
 class GetAgentParams(RequestParams):
     name: str = Field(min_length=1)
+
+
+def checked_scope(problem: Callable[[Scope], str | None]) -> Scope:
+    """This request's scope, or the refusal its scope earns (SCP-29).
+
+    The extension keeps the same invalid-scope contract as resources and
+    prompts, including when a handler is invoked directly.
+    """
+    scope = requested_scope()
+    refusal = problem(scope)
+    if refusal:
+        raise MCPError(code=INVALID_PARAMS, message=refusal)
+    return scope
+
+
+def complete(**fields: object) -> dict:
+    """A result in the envelope this extension carries.
+
+    Local/live sources can change between calls. Clients may retain a
+    definition, but must not reuse it as a fresh listing.
+    """
+    return {
+        "resultType": "complete",
+        "ttlMs": 0,
+        "cacheScope": "private",
+        **fields,
+    }
 
 
 class AgentsExtension(ServerExtension):

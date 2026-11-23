@@ -15,7 +15,6 @@ Two quirks of the server under test:
   microseconds. The one test about the TTL turns it back on.
 """
 
-import json
 import logging
 import socket
 import threading
@@ -27,6 +26,7 @@ import pytest
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import BasicAuth, Config, EnvRef
 from kubed.mcp_kb.mcp.prompts import PromptProvider
+from kubed.mcp_kb.mcp.skill_catalogue import SkillCatalogue
 from kubed.mcp_kb.plugins import Fetch
 from kubed.mcp_kb.sources import live
 from tests.conftest import DEEP_YAML, server_of
@@ -181,13 +181,14 @@ def test_a_manifest_is_priced_against_the_server_before_it_is_served(
     they describe the copy on disk and the very next read serves something
     else."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    before = json.loads(knowledge_base.catalogue.read(f"{SKILL}/_manifest"))
+    skills = SkillCatalogue(lambda: knowledge_base.snapshot.catalogue)
+    before = skills.skills()["notes/x"].manifest.files["SKILL.md"]
 
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
-    after = json.loads(knowledge_base.catalogue.read(f"{SKILL}/_manifest"))
+    after = skills.skills()["notes/x"].manifest.files["SKILL.md"]
 
     assert after != before
-    assert after["files"][0]["size"] > before["files"][0]["size"]
+    assert after.size > before.size
 
 
 def test_a_new_upstream_file_needs_a_refresh(webdav, tmp_path):

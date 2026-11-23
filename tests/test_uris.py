@@ -5,7 +5,6 @@ of the server are thin projections of it -- so they are tested here directly
 rather than only through whichever half happens to be convenient.
 """
 
-import json
 from pathlib import Path
 
 import pytest
@@ -149,41 +148,72 @@ def test_a_skill_root_is_a_directory_not_its_instructions(catalogue):
     assert "First skill." in catalogue.read("skill://flatsource/alpha/SKILL.md")
 
 
-@pytest.mark.unit
-def test_manifest_carries_path_size_and_hash(catalogue):
-    """fastmcp.utilities.skills raises on a manifest missing any of the three."""
-    manifest = json.loads(catalogue.read("skill://flatsource/alpha/_manifest"))
-    assert manifest["skill"] == "flatsource/alpha"
-    deep = json.loads(catalogue.read("skill://deepsource/plugin-a/gamma/_manifest"))
-    assert deep["skill"] == "deepsource/plugin-a/gamma"
-    assert set(manifest["files"][0]) == {"path", "size", "hash"}
-    assert manifest["files"][0]["hash"].startswith("sha256:")
+def _skill_at(catalogue, address):
+    return next(s for s in catalogue.visible_skills() if s.address == address)
 
 
 @pytest.mark.unit
-def test_manifest_excludes_a_file_reached_through_a_symlink(catalogue, skills_dir, tmp_path):
-    """A symlink out of the skill root must not leak the target's path/size/hash.
+def test_a_skills_files_are_what_a_read_serves(catalogue):
+    """What the skill provider builds a skill, and its ``_manifest``, from."""
+    files = catalogue.skill_files(_skill_at(catalogue, "flatsource/alpha"))
+    assert list(files) == ["SKILL.md"]
+    assert files["SKILL.md"] == catalogue.read("skill://flatsource/alpha/SKILL.md")
 
-    Reading it is already refused by ``_skill_file``'s resolve-then-compare, so
-    this is metadata-only, but the manifest should not advertise it either.
-    """
+
+@pytest.mark.unit
+def test_a_skills_files_leave_out_a_symlink_out_of_it(catalogue, skills_dir, tmp_path):
+    """A symlink out of the skill root must not leak the target's path or bytes."""
     secret = tmp_path / "secret.txt"
     secret.write_text("shh\n")
     (skills_dir / "flatsource" / "alpha" / "leak.md").symlink_to(secret)
 
-    manifest = json.loads(catalogue.read("skill://flatsource/alpha/_manifest"))
-    assert "leak.md" not in {f["path"] for f in manifest["files"]}
+    files = catalogue.skill_files(_skill_at(catalogue, "flatsource/alpha"))
+    assert "leak.md" not in files
 
 
 @pytest.mark.unit
-def test_manifest_lists_only_the_files_the_harvest_would_keep(catalogue, skills_dir):
-    """The manifest is what a client syncing a skill to disk goes shopping from,
-    so it advertises what the skill ships and not an editor's swap file."""
+def test_a_skills_files_are_only_those_the_harvest_would_keep(catalogue, skills_dir):
+    """A client syncing a skill to disk goes shopping from them, so they name
+    what the skill ships and not an editor's swap file."""
     (skills_dir / "flatsource" / "alpha" / ".tmp-half").write_text("not a file\n")
 
-    manifest = json.loads(catalogue.read("skill://flatsource/alpha/_manifest"))
+    files = catalogue.skill_files(_skill_at(catalogue, "flatsource/alpha"))
 
-    assert ".tmp-half" not in {f["path"] for f in manifest["files"]}
+    assert ".tmp-half" not in files
+
+
+@pytest.mark.unit
+def test_a_skills_own_files_are_not_read_beside_its_provider(catalogue):
+    """``skill_files=False`` is the provider registered after the skills one."""
+    uri = "skill://flatsource/alpha/SKILL.md"
+    assert catalogue.read(uri, skill_files=False) is None
+    assert catalogue.read("skill://flatsource/alpha/_manifest", skill_files=False) is None
+    assert catalogue.read("skill://flatsource/_index.md", skill_files=False)
+
+
+@pytest.mark.unit
+def test_a_directory_is_its_direct_children_under_the_scope(catalogue):
+    """MD-57 G1: what ``resources/directory/read`` and ``_index.json`` list."""
+    rows = [e.as_dict() for e in catalogue.directory("skill://deepsource")]
+    assert [(r["uri"], r["mimeType"]) for r in rows] == [
+        ("skill://deepsource/README.md", "text/markdown"),
+        ("skill://deepsource/plugin-a", "inode/directory"),
+        ("skill://deepsource/plugin-b", "inode/directory"),
+        ("skill://deepsource/shared", "inode/directory"),
+    ]
+    folder = catalogue.directory("skill://deepsource/plugin-a")
+    assert [(e.uri, e.description) for e in folder] == [
+        ("skill://deepsource/plugin-a/gamma", "Third skill.")
+    ]
+    shared = catalogue.directory("skill://deepsource/shared")
+    assert [e.uri for e in shared] == [
+        "skill://deepsource/shared/guide.md",
+        "skill://deepsource/shared/nested",
+    ]
+    # A skill's own directory is its provider's; out of scope is absent.
+    assert catalogue.directory("skill://deepsource/plugin-a/gamma") is None
+    assert catalogue.directory("skill://deepsource", Scope("flatsource")) is None
+    assert catalogue.directory("skill://nope") is None
 
 
 @pytest.mark.unit
@@ -302,13 +332,11 @@ def test_uri_for_is_the_address_the_catalogue_answers(catalogue, skills_dir):
     skill = next(s for s in load_all_skills(skills_dir) if s.name == "gamma")
     assert uri_for(skill) == "skill://deepsource/plugin-a/gamma/SKILL.md"
     assert catalogue.read(uri_for(skill)) is not None
-    assert catalogue.read(uri_for(skill, "_manifest")) is not None
 
 
 @pytest.mark.unit
 def test_mime_types_follow_the_content(catalogue):
     assert catalogue.mime("skill://deepsource/_index.md") == "text/markdown"
-    assert catalogue.mime("skill://flatsource/alpha/_manifest") == "application/json"
     assert (
         catalogue.mime("skill://deepsource/shared/nested/schema.json")
         == "application/json"

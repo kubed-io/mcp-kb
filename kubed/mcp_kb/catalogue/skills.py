@@ -62,7 +62,8 @@ class Skill:
     two libraries is two skills at two addresses.
 
     ``category`` and ``tags`` are the plugin's, copied here so a scope is a
-    question the skill answers by itself.
+    question the skill answers by itself. ``live`` is whether its fetch is
+    ``cache: live``, so a reader knows which files to revalidate.
     """
 
     name: str
@@ -75,6 +76,7 @@ class Skill:
     category: str | None = None
     tags: frozenset[str] = frozenset()
     library_categories: frozenset[str] = frozenset()
+    live: bool = False
 
     @property
     def address(self) -> str:
@@ -432,6 +434,11 @@ class SkillIndex:
         if found is not None and not _admits(scope, found):
             return None
         return found
+
+    def without(self, addresses: Iterable[str]) -> SkillIndex:
+        """The same index less the skills at ``addresses``."""
+        gone = set(addresses)
+        return SkillIndex([s for s in self._skills if s.address not in gone])
 
 
 def _admits(scope: Scope, skill: Skill) -> bool:
