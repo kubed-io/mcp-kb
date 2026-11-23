@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fastmcp.server.middleware import Middleware
+from kubed.mcp import Middleware
 
 from ..catalogue.instructions import build_instructions
 from ..catalogue.uris import Catalogue

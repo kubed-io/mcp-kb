@@ -19,6 +19,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
+from tests.conftest import server_of
 from tests.test_header_scope import _free_port
 
 pytestmark = pytest.mark.integration
@@ -100,7 +101,7 @@ def _build(base):
 @pytest.fixture(scope="module")
 def url(tmp_path_factory):
     base = tmp_path_factory.mktemp("qualified-names")
-    app = KnowledgeBase(_build(base), base / "_cache").mcp.http_app()
+    app = server_of(KnowledgeBase(_build(base), base / "_cache")).http_app()
     port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")

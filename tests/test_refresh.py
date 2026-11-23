@@ -10,7 +10,7 @@ import httpx
 import pygit2
 import pytest
 from fastmcp import Client
-from fastmcp.server.context import Context
+from kubed.mcp import Context
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import refresh, snapshot
@@ -18,7 +18,7 @@ from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.announce import _can_remember
 from kubed.mcp_kb.mcp.scope import Scope
 from kubed.mcp_kb.sources import SourceError
-from tests.conftest import key_of, make_config
+from tests.conftest import key_of, make_config, server_of
 
 
 @pytest.fixture
@@ -549,7 +549,7 @@ async def test_health_reports_a_stale_fetch_with_its_error(
     _breaking_materialise(monkeypatch, *flatsource)
     knowledge_base.refresh(force=True, only=flatsource)
 
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
         body = (await http.get("/health")).json()
 
@@ -637,7 +637,7 @@ def test_listings_are_memoised_per_scope(skills_dir, cache):
 async def test_a_rebuild_is_visible_to_a_connected_client(skills_dir, cache):
     """A provider holding a ``Catalogue`` would serve generation 0 forever."""
     knowledge_base = KnowledgeBase(make_config(skills_dir), cache)
-    async with Client(knowledge_base.mcp) as client:
+    async with Client(server_of(knowledge_base)) as client:
         assert "skill://deepsource/plugin-c/_index.md" not in [
             str(r.uri) for r in await client.list_resources()
         ]
@@ -671,7 +671,7 @@ async def test_the_lifespan_verifies_the_index_the_server_started_from(
     knowledge_base = KnowledgeBase(make_config(skills_dir), cache)
     _touch(skills_dir / "flatsource" / "alpha" / "SKILL.md")
 
-    async with Client(knowledge_base.mcp):
+    async with Client(server_of(knowledge_base)):
         assert await _until(lambda: knowledge_base.generation == 1)
     assert _fetch(knowledge_base, "flatsource")["status"] == "ok"
 
@@ -746,7 +746,7 @@ async def test_the_loop_keeps_rebuilding_a_fetch_whose_refresh_is_due(
     monkeypatch.setattr(refresh, "TICK_SECONDS", 0.01)
     knowledge_base = KnowledgeBase(make_config(skills_dir, refresh="1s"), cache)
 
-    async with Client(knowledge_base.mcp):
+    async with Client(server_of(knowledge_base)):
         # Ticks with nothing to do must not churn the generation.
         await asyncio.sleep(0.1)
         assert knowledge_base.generation == 0
@@ -782,7 +782,7 @@ async def test_an_unchanged_fetch_is_examined_once_per_interval_not_every_tick(
 
     monkeypatch.setattr(refresh, "fingerprint", counting_fingerprint)
 
-    async with Client(knowledge_base.mcp):
+    async with Client(server_of(knowledge_base)):
         await asyncio.sleep(1.3)  # a little over one interval, at 50 ticks/s
 
     # ~1 interval elapsed for 2 fetches: a handful of walks is right. A
@@ -804,7 +804,7 @@ async def test_a_persistently_failing_fetch_is_not_retried_every_tick(
     knowledge_base = KnowledgeBase(config, cache)
     seen = _counting_materialise(monkeypatch)
 
-    async with Client(knowledge_base.mcp):
+    async with Client(server_of(knowledge_base)):
         await asyncio.sleep(1.3)
 
     assert len([k for k in seen if k == key_of(config, "gone")]) <= 4
@@ -818,13 +818,13 @@ async def test_can_remember_is_true_only_with_a_session_header(skills_dir, cache
     """
     knowledge_base = KnowledgeBase(make_config(skills_dir), cache)
 
-    @knowledge_base.mcp.custom_route("/can-remember", methods=["GET"])
+    @server_of(knowledge_base).custom_route("/can-remember", methods=["GET"])
     async def can_remember(_request):
         from starlette.responses import JSONResponse
 
         return JSONResponse({"can_remember": _can_remember()})
 
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
         without_header = await http.get("/can-remember")
         with_header = await http.get(
@@ -849,7 +849,7 @@ async def test_reindex_answers_with_an_error_payload_instead_of_a_500(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(knowledge_base, "refresh_async", boom)
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
         response = await http.post("/reindex")
 
@@ -888,7 +888,7 @@ async def test_reindex_failure_body_never_carries_the_exception_text(
         raise RuntimeError(f"cloning {leak} with s3cr3t-deploy-token failed")
 
     monkeypatch.setattr(knowledge_base, "refresh_async", boom)
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     with caplog.at_level(logging.ERROR):
         async with httpx.AsyncClient(
             transport=transport, base_url="http://knowledge_base"
@@ -908,7 +908,7 @@ async def test_reindex_failure_body_never_carries_the_exception_text(
 @pytest.mark.unit
 async def test_reindex_endpoint_rebuilds_and_reports(skills_dir, cache):
     knowledge_base = KnowledgeBase(make_config(skills_dir), cache)
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
         response = await http.post("/reindex")
 
@@ -934,7 +934,7 @@ async def test_a_session_is_told_once_when_the_generation_moves(
     async def handler(message):
         seen.append(type(message).__name__)
 
-    async with Client(knowledge_base.mcp, message_handler=handler) as client:
+    async with Client(server_of(knowledge_base), message_handler=handler) as client:
         await client.list_resources()
         assert _changed(seen) == []
 
@@ -964,7 +964,7 @@ async def test_a_sessionless_connection_is_told_nothing_and_still_works(
     async def handler(message):
         seen.append(type(message).__name__)
 
-    async with Client(knowledge_base.mcp, message_handler=handler) as client:
+    async with Client(server_of(knowledge_base), message_handler=handler) as client:
         await client.list_resources()
         knowledge_base.refresh(force=True)
         assert len(await client.list_resources()) > 0

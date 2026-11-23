@@ -33,17 +33,15 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from fastmcp import FastMCP
-from fastmcp.exceptions import NotFoundError
-from fastmcp.resources import TextResource
-from fastmcp.resources.base import Resource
-from fastmcp.resources.template import ResourceTemplate
-from fastmcp.server.middleware import Middleware
-from fastmcp.server.providers.base import Provider
-from fastmcp.utilities.versions import VersionSpec
-from mcp.shared.exceptions import MCPError
-from mcp_types import INVALID_PARAMS
-from mcp_types import ResourceTemplate as SDKResourceTemplate
+from kubed.mcp import (
+    Middleware,
+    NotFoundError,
+    QuickMCP,
+    Resource,
+    ResourceTemplate,
+    TextResource,
+)
+from kubed.mcp.protocol import INVALID_PARAMS, MCPError, Provider, VersionSpec, types
 
 from ..catalogue.uris import Catalogue
 from .request import full_listing, requested_addressing, requested_scope
@@ -65,7 +63,7 @@ class SkillTemplate(ResourceTemplate):
     defaults an empty one to ``text/plain``, so the wire row drops it.
     """
 
-    def to_mcp_template(self, **overrides: Any) -> SDKResourceTemplate:
+    def to_mcp_template(self, **overrides: Any) -> types.ResourceTemplate:
         return super().to_mcp_template(**{"mimeType": None, **overrides})
 
 
@@ -227,7 +225,7 @@ class HideMirrorTools(Middleware):
         ]
 
 
-def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> None:
+def register(mcp: QuickMCP, catalogue: Callable[[], Catalogue]) -> None:
     """Publish the catalogue as ``skill://`` resources, read per request."""
     mcp.add_provider(CatalogueProvider(catalogue))
     mcp.add_middleware(NameTheFileToRead(catalogue))

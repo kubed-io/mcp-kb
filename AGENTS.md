@@ -45,7 +45,8 @@ installer's, against whatever image tag it chooses.
 
 | Path | What it is |
 | --- | --- |
-| `kubed/mcp_kb/server.py` | `KnowledgeBase` — the composition root: cold start, the refresh loop, which snapshot is current. No tool bodies |
+| `kubed/mcp_kb/server.py` | `KnowledgeBase`: cold start, the refresh loop, which snapshot is current. No FastMCP, no tool bodies |
+| `kubed/mcp_kb/app.py` | `create_app` — the composition root: the `QuickMCP` (kubed-mcp) over a `KnowledgeBase`, its container's `KnowledgeBase` singleton and `Catalogue` transient, and every `register(...)` |
 | `kubed/mcp_kb/main.py` | CLI and env parsing, and the `mcp-kb` console script |
 | `kubed/mcp_kb/routes.py` | the plain-HTTP surface: `/health`, `/reindex`, `/openapi.yaml` |
 | `kubed/mcp_kb/config.py` | the config file's model — `Config`, `SourceConfig`, `PluginConfig`, `LibraryConfig`, `Selector`, `BasicAuth`, `EnvRef`, `schema()` |
@@ -88,11 +89,11 @@ installer's, against whatever image tag it chooses.
 The split follows the layout proposed in `modelcontextprotocol/python-sdk#1681`:
 **MCP wiring separate from tool implementations**, with pure logic factored out
 of the handlers. FastMCP has no `APIRouter` equivalent (`PrefectHQ/fastmcp#948`
-closed unanswered), so each module exposes a `register(...)` the server calls.
+closed unanswered), so each module exposes a `register(...)` that `create_app` calls.
 Mounting sub-servers is the other option and is wrong here: it namespaces tool
 names with a prefix, and these names are the agent's API.
 
-- **Adding a tool** → `mcp/tools.py`. Never `server.py`. But think first: the
+- **Adding a tool** → `mcp/tools.py`. Never `server.py` or `app.py`. But think first: the
   tools are a *mirror* of the resources and the prompts, and one that is not
   breaks the promise the whole design rests on — that a client which knows how
   to read MCP resources already knows how to drive this server.
@@ -155,6 +156,13 @@ names with a prefix, and these names are the agent's API.
 without an MCP client, `tests/test_skills.py` and `tests/test_uris.py` exercise
 the scoping rules directly rather than only through a tool call, and
 `tests/test_boundaries.py` fails if either package grows the import.
+
+Where FastMCP is used, it arrives through `kubed-mcp`'s facade: `kubed.mcp`,
+`kubed.mcp.protocol`, `kubed.mcp.auth` and `kubed.mcp.request`, never `fastmcp`,
+`mcp` or `mcp_types` imported directly. `kubed-mcp` owns the FastMCP pin, so
+`pyproject.toml` declares none. A name the facade lacks is added there, in
+kubed-io/quick-mcp, not imported around it; `mcp.server` is the FastMCP instance,
+for what `QuickMCP` does not pass through (a transform, a custom route).
 
 ## The surface, and why the tools are a mirror
 
@@ -282,8 +290,8 @@ which generation is being served, and has a refresh picked up an edit yet.
   so two libraries shipping a `testing/` collapse into one and the loser
   vanishes from the server entirely. Neither failure raises anything.
 - **A provider that stores a `Catalogue` serves the old generation forever** —
-  read through the getter (`lambda: knowledge_base.snapshot.catalogue`), never a
-  captured reference. A `Revalidator` has the same shape of bug and a nastier
+  read through the getter (`lambda: knowledge_base.snapshot.catalogue`), or take
+  it as `Inject[Catalogue]`, as the mirror tools do, never a captured reference. A `Revalidator` has the same shape of bug and a nastier
   symptom: a refresh exports a source to a *new* directory, so one that outlives
   its snapshot goes on revalidating into a tree nothing is serving, and the edit
   never appears. It is built in `build_snapshot` and retired with the snapshot.

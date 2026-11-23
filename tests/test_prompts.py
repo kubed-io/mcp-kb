@@ -21,7 +21,12 @@ from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.prompts import PromptProvider
 from kubed.mcp_kb.mcp.scope import Scope
 from kubed.mcp_kb.plugins import Globs
-from tests.conftest import load_all_prompts, load_library_prompts, make_config
+from tests.conftest import (
+    load_all_prompts,
+    load_library_prompts,
+    make_config,
+    server_of,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -186,7 +191,7 @@ def test_a_body_starting_with_a_dashed_rule_still_parses(tmp_path):
 
 async def test_a_client_sees_the_prompt_and_its_arguments(skills_dir, prompts_dir):
     server = KnowledgeBase(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         listed = {p.name: p for p in await client.list_prompts()}
     hello = listed["flatsource_hello"]
     assert hello.description == "Say hello."
@@ -198,7 +203,7 @@ async def test_a_client_sees_the_prompt_and_its_arguments(skills_dir, prompts_di
 
 async def test_rendering_fills_arguments_and_defaults(skills_dir, prompts_dir):
     server = KnowledgeBase(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         given = await client.get_prompt(
             "flatsource_hello", {"who": "Dr K", "greeting": "Hi"}
         )
@@ -215,13 +220,12 @@ async def test_rendering_fills_arguments_and_defaults(skills_dir, prompts_dir):
 async def test_a_missing_required_argument_is_refused(skills_dir, prompts_dir, caplog):
     """Invalid params naming the argument -- the caller's mistake -- and not the
     internal error and ERROR traceback FastMCP gives any other render failure."""
-    from mcp.shared.exceptions import MCPError
-    from mcp_types import INVALID_PARAMS
+    from kubed.mcp.protocol import INVALID_PARAMS, MCPError
 
     server = KnowledgeBase(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
     caplog.clear()
     with caplog.at_level(logging.INFO):
-        async with Client(server.mcp) as client:
+        async with Client(server_of(server)) as client:
             with pytest.raises(MCPError) as caught:
                 await client.get_prompt("flatsource_hello", {})
     assert caught.value.error.code == INVALID_PARAMS
@@ -231,7 +235,7 @@ async def test_a_missing_required_argument_is_refused(skills_dir, prompts_dir, c
 
 async def test_logql_braces_survive_rendering(skills_dir, prompts_dir):
     server = KnowledgeBase(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         result = await client.get_prompt("deepsource_check", {"service": "api"})
     assert text(result) == '{app="api"} |= "error"\n'
 
@@ -263,7 +267,7 @@ async def test_a_claude_command_and_a_copilot_prompt_serve_as_one_kind_of_prompt
         }
     )
     server = KnowledgeBase(config, tmp_path / "cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         listed = {p.name: p for p in await client.list_prompts()}
         deployed = await client.get_prompt("kit_deploy", {"app": "api", "env": "prod"})
         reviewed = await client.get_prompt(
@@ -310,7 +314,7 @@ async def test_the_index_row_decides_a_prompts_dialect(tmp_path):
     (prompt,) = restarted.prompts
     assert prompt.dialect == "copilot"
     assert [a.name for a in prompt.arguments] == ["app"]
-    async with Client(restarted.mcp) as client:
+    async with Client(server_of(restarted)) as client:
         rendered = await client.get_prompt("kit_deploy", {"app": "api"})
     assert text(rendered) == "Deploy api to $env.\n"
 
@@ -329,7 +333,7 @@ async def test_a_prompts_title_is_published(tmp_path):
         }
     )
     server = KnowledgeBase(config, tmp_path / "cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         listed = {p.name: p for p in await client.list_prompts()}
     assert listed["kit_hello"].title == "Say Hello"
 
@@ -338,7 +342,7 @@ async def test_skill_libraries_scopes_prompts(skills_dir, prompts_dir):
     """A prompt from an unconfigured library is neither listed nor renderable."""
     config = make_config(skills_dir, prompts_dir, libraries=["flatsource"])
     server = KnowledgeBase(config, skills_dir / "_cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         assert [p.name for p in await client.list_prompts()] == ["flatsource_hello"]
         with pytest.raises(Exception, match="deepsource_check"):
             await client.get_prompt("deepsource_check", {"service": "api"})

@@ -28,10 +28,8 @@ Both tools are hidden from a client that reads resources; see
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 
-from fastmcp import FastMCP
-from fastmcp.exceptions import ToolError
+from kubed.mcp import Inject, QuickMCP, ToolError
 
 from ..catalogue.uris import Catalogue
 from .request import full_listing, requested_addressing, requested_scope
@@ -52,16 +50,17 @@ READ_ONLY = {
 }
 
 
-def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> set[str]:
+def register(mcp: QuickMCP) -> set[str]:
     """Register the mirror tools; return their names for the listing filter.
 
-    ``catalogue`` is a getter for the same reason it is one in ``resources.py``:
-    a closure over the object would pin these tools to the generation they were
-    registered in.
+    Each call is handed the ``Catalogue`` serving now, injected rather than
+    closed over: a closure over the object would pin these tools to the
+    generation they were registered in. The container builds it once per call,
+    so one call reads one generation, and it is no part of either tool's schema.
     """
 
     @mcp.tool(annotations={"title": "List skill resources", **READ_ONLY})
-    def list_resources() -> list[dict[str, str]]:
+    def list_resources(catalogue: Inject[Catalogue]) -> list[dict[str, str]]:
         """List the skill resources available, as `uri`/`name`/`description`.
 
         Start here. The listing is indexes, not skills: a
@@ -77,7 +76,7 @@ def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> set[str]:
         This returns exactly what an MCP `resources/list` would, so a `uri` from
         here can be read with `read_resource` or with your own resource reader.
         """
-        entries = catalogue().entries(requested_scope(), full=full_listing())
+        entries = catalogue.entries(requested_scope(), full=full_listing())
         a = requested_addressing()
         # A tool result is text, so the gateway prefix applies to the rows.
         return [
@@ -90,7 +89,7 @@ def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> set[str]:
         ]
 
     @mcp.tool(annotations={"title": "Read a skill resource", **READ_ONLY})
-    def read_resource(uri: str) -> str:
+    def read_resource(uri: str, catalogue: Inject[Catalogue]) -> str:
         """Read one `skill://` URI: an index, a skill's file, or a library's file.
 
         Args:
@@ -115,12 +114,12 @@ def register(mcp: FastMCP, catalogue: Callable[[], Catalogue]) -> set[str]:
         `references/FOO.md`; citing it does not fetch it, so fetch it only if
         you are going to use it.
         """
-        current, scope = catalogue(), requested_scope()
+        scope = requested_scope()
         a = requested_addressing()
-        body = current.read(a.canonical(uri), scope)
+        body = catalogue.read(a.canonical(uri), scope)
         if body is not None:
             return a.text(body)
-        hint = current.hint(a.canonical(uri), scope) or (
+        hint = catalogue.hint(a.canonical(uri), scope) or (
             "Call list_resources() for the indexes, then read one to see the URIs"
             " inside it."
         )

@@ -1,10 +1,12 @@
 """Shared fixtures: a synthetic skills tree covering both nesting depths."""
 
+import weakref
 from pathlib import Path
 
 import frontmatter
 import pytest
 
+from kubed.mcp_kb.app import create_app
 from kubed.mcp_kb.catalogue import harvest
 from kubed.mcp_kb.catalogue.prompts import load_prompts
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, load_skills
@@ -30,6 +32,22 @@ PROMPT_GLOBS = Globs(skills=(), prompts=("*.md",))
 # What each synthetic skills plugin declares about itself. A tag per plugin, so
 # a tag scope can tell the two apart the way a library scope can.
 PLUGIN_TAGS = {"flatsource": ("flat",), "deepsource": ("deep",)}
+
+# One app per knowledge base, so a test that reaches the server twice -- a route
+# added, then the ASGI app built -- reaches the same one.
+_APPS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def server_of(knowledge_base):
+    """The FastMCP server ``create_app`` builds over ``knowledge_base``.
+
+    What a ``fastmcp.Client`` connects to in memory, and what ``http_app()`` is
+    called on.
+    """
+    if knowledge_base not in _APPS:
+        _APPS[knowledge_base] = create_app(knowledge_base)
+    return _APPS[knowledge_base].server
+
 
 # Frontmatter nested deeper than the YAML parser's stack, as far as
 # ``frontmatter_out_of_stack`` is concerned; the real parser may well read it.

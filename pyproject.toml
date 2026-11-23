@@ -25,11 +25,11 @@ classifiers = [
 authors = [{ name = "Kelly", email = "admin@kellyferrone.com" }]
 maintainers = [{ name = "Kelly", email = "admin@kellyferrone.com" }]
 dependencies = [
-  "fastmcp>=4.0.0,<5",
-  # The platform this server and selenium-flow share (kubed-io/quick-mcp). It is
-  # the sibling namespace package kubed.mcp, and holds only a version so far; its
-  # own fastmcp range (>=4.1.4,<5) overlaps ours. Pre-1.0, so a minor is a break.
-  "kubed-mcp>=0.0.1,<0.1",
+  # The platform this server and selenium-flow share (kubed-io/quick-mcp), and
+  # the one route to FastMCP: the sibling namespace package kubed.mcp builds the
+  # server and re-exports every FastMCP and MCP SDK name kb uses, and it owns the
+  # FastMCP pin, so kb declares none of its own. Pre-1.0, so a minor is a break.
+  "kubed-mcp>=0.1,<0.2",
   "pyyaml>=6.0",
   "python-frontmatter>=1.1",
   # git sources. pygit2 bundles libgit2, so the image needs no git binary and

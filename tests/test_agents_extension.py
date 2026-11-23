@@ -17,10 +17,10 @@ import pytest
 import uvicorn
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
-from mcp.shared.exceptions import MCPError
-from mcp_types import SERVER_INFO_META_KEY
+from kubed.mcp.protocol import MCPError, types
 
 from kubed.mcp_kb.mcp.request import AGENTS_EXTENSION_ID, EXTENSION_ID
+from tests.conftest import server_of
 from tests.test_agents import DIAGRAMMER, agents_tree
 from tests.test_skills_extension import request
 
@@ -44,7 +44,7 @@ def _free_port() -> int:
 def _ours(result: dict) -> dict:
     """``result`` without the stamp a 2026-era runner puts on every result."""
     meta = dict(result.get("_meta", {}))
-    meta.pop(SERVER_INFO_META_KEY, None)
+    meta.pop(types.SERVER_INFO_META_KEY, None)
     rest = {k: v for k, v in result.items() if k != "_meta"}
     return {**rest, "_meta": meta} if meta else rest
 
@@ -60,7 +60,7 @@ def _failure(error: pytest.ExceptionInfo[MCPError]) -> tuple:
 @ERAS
 async def test_both_extensions_are_declared(tmp_path, mode):
     server = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
-    async with Client(server.mcp, mode=mode) as client:
+    async with Client(server_of(server), mode=mode) as client:
         caps = client.session.server_capabilities
         assert caps.extensions[AGENTS_EXTENSION_ID] == {"listChanged": False}
         assert caps.extensions[EXTENSION_ID] == {}
@@ -70,7 +70,7 @@ async def test_both_extensions_are_declared(tmp_path, mode):
 @ERAS
 async def test_list_returns_cards(tmp_path, mode):
     server = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
-    async with Client(server.mcp, mode=mode) as client:
+    async with Client(server_of(server), mode=mode) as client:
         listing = _ours(await request(client, "agents/list"))
     assert {k: listing[k] for k in ENVELOPE} == ENVELOPE
     assert set(listing) == {*ENVELOPE, "agents"}
@@ -94,7 +94,7 @@ async def test_list_returns_cards(tmp_path, mode):
 @ERAS
 async def test_get_returns_the_definition(tmp_path, mode):
     server = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
-    async with Client(server.mcp, mode=mode) as client:
+    async with Client(server_of(server), mode=mode) as client:
         got = _ours(await request(client, "agents/get", name="drawio_diagrammer"))
         again = _ours(await request(client, "agents/get", name="drawio_diagrammer"))
     assert got == again
@@ -128,7 +128,7 @@ async def test_get_returns_the_definition(tmp_path, mode):
 @ERAS
 async def test_unknown_is_agent_not_found(tmp_path, mode):
     server = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
-    async with Client(server.mcp, mode=mode) as client:
+    async with Client(server_of(server), mode=mode) as client:
         for name in ("nobody", "drawio_x", "solo", "drive_x"):
             with pytest.raises(MCPError) as error:
                 await request(client, "agents/get", name=name)
@@ -139,14 +139,14 @@ async def test_unknown_is_agent_not_found(tmp_path, mode):
 @ERAS
 async def test_a_cursor_is_refused(tmp_path, mode):
     server = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
-    async with Client(server.mcp, mode=mode) as client:
+    async with Client(server_of(server), mode=mode) as client:
         with pytest.raises(MCPError) as error:
             await request(client, "agents/list", cursor="not-issued")
     assert (error.value.code, error.value.message) == (-32602, "Invalid agents cursor")
 
 
 async def _surface(server, mode) -> dict:
-    async with Client(server.mcp, mode=mode) as client:
+    async with Client(server_of(server), mode=mode) as client:
         return {
             "tools": await client.list_tools(),
             "resources": await client.list_resources(),
@@ -189,7 +189,7 @@ def url(tmp_path_factory):
     # An address in the frontmatter, which a prefix must leave as written.
     diagrammer = base / "market/plugins/drawio/agents/diagrammer.md"
     diagrammer.write_text(DIAGRAMMER.replace("color: cyan\n", SEE + "color: cyan\n"))
-    app = tree.knowledge_base(base / "_cache").mcp.http_app()
+    app = server_of(tree.knowledge_base(base / "_cache")).http_app()
     port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")

@@ -26,9 +26,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from fastmcp.server.middleware import Middleware
-from mcp.shared.exceptions import MCPError
-from mcp_types import INVALID_PARAMS
+from kubed.mcp import Middleware
+from kubed.mcp.protocol import INVALID_PARAMS, MCPError
 
 from .prompts import PromptProvider
 from .request import requested_scope

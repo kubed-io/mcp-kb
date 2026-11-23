@@ -37,6 +37,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from kubed.mcp_kb import config as config_module  # noqa: E402
+from kubed.mcp_kb.app import create_app  # noqa: E402
 from kubed.mcp_kb.config import Config, schema  # noqa: E402
 from kubed.mcp_kb.mcp import prompts as prompts_module  # noqa: E402
 from kubed.mcp_kb.mcp import request as request_module  # noqa: E402
@@ -337,8 +338,8 @@ def _live_tools() -> list:
                 "libraries": [{"name": "example", "plugins": ["example"]}],
             }
         )
-        server = KnowledgeBase(config, tmp / "cache")
-        found = asyncio.run(server.mcp.list_tools(run_middleware=False))
+        app = create_app(KnowledgeBase(config, tmp / "cache"))
+        found = asyncio.run(app.server.list_tools(run_middleware=False))
         return [tool.to_mcp_tool() for tool in found]
 
 

@@ -8,15 +8,14 @@ import json
 import frontmatter
 import pytest
 from fastmcp import Client
-from mcp.shared.exceptions import MCPError
-from mcp_types import Request, RequestParams
+from kubed.mcp.protocol import MCPError, RequestParams, types
 from pydantic import ConfigDict, TypeAdapter
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue.addressing import Addressing
 from kubed.mcp_kb.mcp.scope import EVERYTHING
 from kubed.mcp_kb.mcp.skills import EXTENSION_ID, addressed
-from tests.conftest import DEEP_YAML, make_config
+from tests.conftest import DEEP_YAML, make_config, server_of
 from tests.test_header_scope import server_url  # noqa: F401 - shared HTTP fixture
 
 
@@ -26,14 +25,14 @@ class ExtensionParams(RequestParams):
 
 async def request(client, method, **params):
     return await client.session.send_request(
-        Request(method=method, params=ExtensionParams(**params)), TypeAdapter(dict)
+        types.Request(method=method, params=ExtensionParams(**params)), TypeAdapter(dict)
     )
 
 
 @pytest.mark.parametrize("mode", ["auto", "legacy"])
 async def test_discovery_get_and_verified_reads(skills_dir, mode):
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
-    async with Client(server.mcp, mode=mode) as client:
+    async with Client(server_of(server), mode=mode) as client:
         caps = client.session.server_capabilities
         assert caps.resources is not None
         assert caps.extensions[EXTENSION_ID] == {}
@@ -67,7 +66,7 @@ async def test_manifest_hashes_transformed_wire_bytes_and_preserves_metadata(ski
     (path / "guide.md").write_bytes("Café\r\n".encode())
     (path / ".env").write_text("secret", encoding="utf-8")
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         entry = (await request(client, "skills/get", uri="skill://flatsource/alpha/SKILL.md"))["skill"]
         assert entry["frontmatter"]["description"] == "First line.\nSecond line.\n"
         assert entry["frontmatter"]["metadata"] == {"audience": ["one", "two"]}
@@ -87,7 +86,7 @@ async def test_manifest_hashes_transformed_wire_bytes_and_preserves_metadata(ski
 async def test_direct_get_needs_no_listing_and_follows_refresh(skills_dir):
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
     uri = "skill://flatsource/alpha/SKILL.md"
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         before = (await request(client, "skills/get", uri=uri))["skill"]
         path = skills_dir / "flatsource" / "alpha" / "SKILL.md"
         path.write_text(path.read_text() + "\nUpdated instructions.\n", encoding="utf-8")
@@ -98,7 +97,7 @@ async def test_direct_get_needs_no_listing_and_follows_refresh(skills_dir):
 
 async def test_unknown_skill_invalid_cursor_and_optional_directory_method(skills_dir):
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         for uri in ("skill://flatsource/nope/SKILL.md", "skill://flatsource/_index.md"):
             with pytest.raises(MCPError) as error:
                 await request(client, "skills/get", uri=uri)
@@ -115,7 +114,7 @@ async def test_malformed_frontmatter_remains_an_ordinary_resource(skills_dir):
     path = skills_dir / "flatsource" / "alpha" / "SKILL.md"
     path.write_text("---\nname: alpha\n---\nMissing description.\n", encoding="utf-8")
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         listing = await request(client, "skills/list")
         assert len(listing["skills"]) == 3
         assert (await client.read_resource("skill://flatsource/alpha/SKILL.md"))[0].text
@@ -134,7 +133,7 @@ async def test_frontmatter_gone_too_deep_remains_an_ordinary_resource(
         f"---\nname: alpha\ndescription: d\nx: {DEEP_YAML}\n---\nBody.\n",
         encoding="utf-8",
     )
-    async with Client(server.mcp) as client:
+    async with Client(server_of(server)) as client:
         listing = await request(client, "skills/list")
         assert len(listing["skills"]) == 3
         assert (await client.read_resource("skill://flatsource/alpha/SKILL.md"))[0].text

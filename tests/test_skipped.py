@@ -23,6 +23,7 @@ from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import skills
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.scope import Scope
+from tests.conftest import server_of
 
 pytestmark = pytest.mark.unit
 
@@ -53,14 +54,14 @@ def _kb(tmp_path, build, globs):
 
 
 async def _health(knowledge_base):
-    transport = httpx.ASGITransport(app=knowledge_base.mcp.http_app())
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
         return (await http.get("/health")).json()
 
 
 async def _read(knowledge_base, uri):
     """The body at ``uri``, or None when the server says it is not there."""
-    async with Client(knowledge_base.mcp) as client:
+    async with Client(server_of(knowledge_base)) as client:
         try:
             return (await client.read_resource(uri))[0].text
         except Exception as exc:  # noqa: BLE001 - "not found" is the answer
@@ -238,7 +239,7 @@ async def test_a_second_prompt_with_one_name_in_a_plugin_is_skipped(tmp_path):
     assert _skipped(health)["prompts/sub/debug.md"] == (
         "prompt debug is already served by prompts/debug.md"
     )
-    async with Client(kb.mcp) as client:
+    async with Client(server_of(kb)) as client:
         prompts = await client.list_prompts()
         rendered = await client.get_prompt("lib_debug")
         mirrored = await client.call_tool("list_prompts", {})
@@ -278,7 +279,7 @@ async def test_a_skipped_skills_own_files_neither_serve_nor_fail_the_plugin(tmp_
 
     assert status["status"] == "ok"
     assert [entry["path"] for entry in status["skipped"]] == ["skills/bad"]
-    async with Client(kb.mcp) as client:
+    async with Client(server_of(kb)) as client:
         assert "body" in (await client.read_resource("skill://lib/good/SKILL.md"))[0].text
         with pytest.raises(Exception, match="not found"):
             await client.read_resource("skill://lib/skills/bad/notes.md")

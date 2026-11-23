@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 import yaml
-from mcp_types import SERVER_INFO_META_KEY
+from kubed.mcp.protocol import types
 
 from tests.live.kb import connect, health, rpc
 
@@ -20,7 +20,7 @@ async def test_serverinfo_is_kbs_own_version(kb_url):
         server_info = client.initialize_result.server_info
         assert {"name": server_info.name, "version": server_info.version} == expected
     listing = await rpc(kb_url, "agents/list")
-    assert listing["_meta"][SERVER_INFO_META_KEY] == expected
+    assert listing["_meta"][types.SERVER_INFO_META_KEY] == expected
     assert expected["version"] != "0.0.0"
 
 

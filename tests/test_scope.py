@@ -5,6 +5,7 @@ comma inside one value means *all of*, a repeated value means *any of*.
 """
 
 import pytest
+from kubed.mcp.request import request_values
 from starlette.requests import Request
 
 from kubed.mcp_kb.mcp import request as request_module
@@ -14,7 +15,6 @@ from kubed.mcp_kb.mcp.request import (
     client_reads_resources,
     client_uses_prompts,
     full_listing,
-    http_request,
     requested_scope,
 )
 from kubed.mcp_kb.mcp.scope import EVERYTHING, Scope
@@ -39,7 +39,7 @@ def http(query="", headers=()):
 def on_http(monkeypatch):
     def install(query="", headers=()):
         monkeypatch.setattr(
-            "fastmcp.server.dependencies.get_http_request", lambda: http(query, headers)
+            "kubed.mcp.request.get_http_request", lambda: http(query, headers)
         )
 
     return install
@@ -50,8 +50,8 @@ def off_http(monkeypatch):
     def raise_it(*_args):
         raise RuntimeError("no active request")
 
-    monkeypatch.setattr("fastmcp.server.dependencies.get_http_request", raise_it)
-    monkeypatch.setattr("fastmcp.server.dependencies.get_http_headers", dict)
+    monkeypatch.setattr("kubed.mcp.request.get_http_request", raise_it)
+    monkeypatch.setattr("kubed.mcp.request.get_http_headers", lambda **_: {})
 
 
 # -- the grammar ---------------------------------------------------------------
@@ -189,7 +189,7 @@ def test_the_capability_readers_take_the_first_value_too(on_http):
 
 def test_every_value_is_a_list_even_when_there_is_one(on_http):
     on_http(query="library=grafana", headers=(("kb-tag", "loki"),))
-    params, headers = http_request()
+    params, headers = request_values()
 
     assert params == {"library": ["grafana"]}
     assert headers["kb-tag"] == ["loki"]
@@ -202,13 +202,13 @@ def test_headers_reachable_without_the_request_are_still_read(monkeypatch):
     def no_request():
         raise RuntimeError("no active request")
 
-    monkeypatch.setattr("fastmcp.server.dependencies.get_http_request", no_request)
+    monkeypatch.setattr("kubed.mcp.request.get_http_request", no_request)
     monkeypatch.setattr(
-        "fastmcp.server.dependencies.get_http_headers",
-        lambda: {"Kb-Library": "grafana", "Kb-Tag": "loki,tempo"},
+        "kubed.mcp.request.get_http_headers",
+        lambda **_: {"Kb-Library": "grafana", "Kb-Tag": "loki,tempo"},
     )
 
-    assert http_request() == (
+    assert request_values() == (
         {},
         {"kb-library": ["grafana"], "kb-tag": ["loki,tempo"]},
     )
@@ -216,7 +216,7 @@ def test_headers_reachable_without_the_request_are_still_read(monkeypatch):
 
 
 def test_off_http_there_is_nothing_to_narrow_by(off_http):
-    assert http_request() is None
+    assert request_values() is None
     assert requested_scope() == EVERYTHING
     assert client_uses_prompts() is True
     assert client_reads_resources() is True
@@ -224,11 +224,11 @@ def test_off_http_there_is_nothing_to_narrow_by(off_http):
 
 
 def test_the_readers_have_one_way_in(monkeypatch):
-    """Everything in this module reads the request through `http_request`, so a
-    second reader cannot drift from it."""
+    """Everything in this module reads the request through `request_values`, so
+    a second reader cannot drift from it."""
     monkeypatch.setattr(
         request_module,
-        "http_request",
+        "request_values",
         lambda: ({"categories": ["design"]}, {}),
     )
 

@@ -39,7 +39,7 @@ is given `--kb-url`.
 
 | Path | Holds |
 |---|---|
-| `kubed/mcp_kb/` | `server.py` composes it and owns which snapshot is current, `main.py` starts it, `routes.py` is the plain-HTTP surface, `config.py` is the config model and the published schema |
+| `kubed/mcp_kb/` | `app.py` composes it, `server.py` owns which snapshot is current, `main.py` starts it, `routes.py` is the plain-HTTP surface, `config.py` is the config model and the published schema |
 | `kubed/mcp_kb/plugins/` | what the config declares and a marketplace publishes, resolved: `address.py` is the address grammar, `marketplace.py` reads somebody else's catalogue, `manifest.py` a plugin's own `plugin.json`, `select.py` the category and tag query |
 | `kubed/mcp_kb/catalogue/` | what is served and how it is found: `harvest.py` decides what counts, `skills.py` is the domain, `uris.py` is the `skill://` address space, `prompts/` parses a prompt file in any of three dialects with no FastMCP in it, `placeholders.py` resolves the two `${CLAUDE_*}` this server knows, `index.py` persists it, `snapshot.py` builds one immutable view, `refresh.py` decides when to look again |
 | `kubed/mcp_kb/sources/` | where bytes come from, one fetch at a time: `file.py`, `git.py`, `webdav.py`, the shared `export.py`, and `live.py` because revalidation is a source concern |

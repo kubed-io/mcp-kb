@@ -17,7 +17,7 @@ import traceback
 from typing import TYPE_CHECKING
 
 import yaml
-from fastmcp import FastMCP
+from kubed.mcp import QuickMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -35,8 +35,8 @@ log = logging.getLogger(__name__)
 REINDEX_FAILURE_MESSAGE = "reindex failed; see the server log"
 
 
-def register(mcp: FastMCP, knowledge_base: KnowledgeBase) -> None:
-    """Register the HTTP routes on ``mcp``."""
+def register(mcp: QuickMCP, knowledge_base: KnowledgeBase) -> None:
+    """Register the HTTP routes on ``mcp``'s server, beside the MCP transport."""
     # Built once, here, rather than per request or lazily on first hit: the
     # document describes the routes this function registers, not the
     # catalogue, so nothing about it can change while the process runs.
