@@ -36,7 +36,13 @@ every skill's description to find the folder it wanted.
 
 Every other address is a directory -- a library, a folder, a skill's root --
 and serves nothing, as on any other skill server. ``hint`` says which file to
-read instead, for the error a caller sees.
+read instead, for the error a caller sees, and ``directory`` lists a library's
+or a folder's direct children, for ``resources/directory/read`` and
+``_index.json``.
+
+A skill's own files, its ``_manifest`` and its folders' indexes are served by
+FastMCP's skills provider, from the text ``skill_files`` gives it (MD-55):
+this module decides what they are, and the provider serves them.
 
 Nothing here imports FastMCP. Absent content is ``None``, never an exception, so
 a caller in the resource half can raise and a caller in the tool half can
@@ -45,16 +51,11 @@ explain -- and the scoping rule stays in one place either way.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import mimetypes
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-
-import frontmatter
-import yaml
 
 from ..mcp.scope import EVERYTHING, Scope
 from . import placeholders
@@ -69,11 +70,14 @@ SCHEME = "skill://"
 MAIN_FILE = "SKILL.md"
 MANIFEST = "_manifest"
 INDEX = "_index.md"
+INDEX_JSON = "_index.json"
 LIBRARY_FILES = "_files.md"
 # Names the server generates at any folder. A file called one of these is
 # skipped by the harvest and never served by the plugin-root fallback: where
 # there is a generated body it answers first, and ``/health`` says as much.
-RESERVED_NAMES = frozenset({INDEX, LIBRARY_FILES})
+RESERVED_NAMES = frozenset({INDEX, INDEX_JSON, LIBRARY_FILES})
+# What a folder is, as a directory resource (SEP-2640).
+DIRECTORY = "inode/directory"
 # Distinct scopes a catalogue remembers listings for before starting over.
 MEMO_LIMIT = 64
 # Where an agent definition says what kb knows of it (AGT-9).
@@ -168,55 +172,6 @@ def index_uri(library: str, folder: str = "") -> str:
     return f"{SCHEME}{'/'.join(p for p in (library, folder) if p)}/{INDEX}"
 
 
-def _manifest_json(skill: Skill) -> str:
-    """A skill's file listing, in the shape the ecosystem already reads.
-
-    Path, size and hash for every file -- the same three fields FastMCP's
-    ``SkillProvider`` emits, because ``fastmcp.utilities.skills`` requires all
-    three and raises on a manifest missing any of them. Dropping the hash would
-    be cheaper in tokens and would quietly break every client that syncs skills
-    to disk.
-
-    The same dot-file rule the harvest applies, so what a manifest advertises is
-    what the skill ships: a client that syncs a skill to disk must not be sent
-    after an editor's swap file.
-
-    Size and hash describe the bytes on disk, ``SKILL.md`` included -- and a
-    read of ``SKILL.md`` resolves ``${CLAUDE_PLUGIN_ROOT}`` and
-    ``${CLAUDE_SKILL_DIR}`` into addresses, so a client that hashes what it
-    read finds that one file differs. A citation through the plugin root into
-    one of its plugin's skills becomes that skill's address too. That is by
-    design: the manifest describes the skill as it was published, and the
-    substitution is this server answering the two placeholders it is the
-    authority on (§C1.37). Every other file is served verbatim and hashes equal.
-    """
-    files = []
-    for path in sorted(_manifest_files(skill)):
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(8192), b""):
-                digest.update(chunk)
-        files.append(
-            {
-                "path": path.relative_to(skill.path).as_posix(),
-                "size": path.stat().st_size,
-                "hash": f"sha256:{digest.hexdigest()}",
-            }
-        )
-    return json.dumps({"skill": skill.address, "files": files}, indent=2)
-
-
-def _manifest_files(skill: Skill) -> list[Path]:
-    """The files a manifest describes: every regular one the harvest would keep."""
-    return [
-        p
-        for p in skill.path.rglob("*")
-        if p.is_file()
-        and not p.is_symlink()
-        and not hidden(p.relative_to(skill.path))
-    ]
-
-
 def _in(skill: Skill, folder: str) -> bool:
     """Whether ``skill`` sits in ``folder`` or anywhere below it; ``""`` is all."""
     return not folder or skill.folder == folder or skill.folder.startswith(f"{folder}/")
@@ -309,6 +264,10 @@ class Catalogue:
         self._resources = resources
         self._revalidate = revalidate
         self._memo: dict[tuple[Scope, bool], list[Entry]] = {}
+        # A skill's files and their text, unless it is live: an export never
+        # changes under a generation, so each is read once however many ask.
+        self._files: dict[Path, dict[str, Path]] = {}
+        self._texts: dict[Path, str] = {}
 
     @property
     def agents(self) -> AgentRoster:
@@ -420,69 +379,85 @@ class Catalogue:
 
     # -- what a scope may see -----------------------------------------------
 
-    def skill_uris(self, scope: Scope = EVERYTHING) -> list[str]:
-        """Canonical skill addresses, without generated resource indexes."""
-        return sorted(uri_for(skill) for skill in self._index.visible(scope))
+    def without(self, addresses: Sequence[str]) -> Catalogue:
+        """The same catalogue less the skills at ``addresses``.
 
-    def skill_entry(self, uri: str, scope: Scope = EVERYTHING) -> dict | None:
-        """A SEP-2640 entry, with digests of the content resources/read serves.
-
-        The legacy _manifest hashes disk bytes. That is not an integrity
-        manifest for the wire: SKILL.md placeholders and text newlines can
-        change on read. Read through the catalogue so scope, live revalidation,
-        substitutions and nested-skill resolution agree with resource reads.
-        Invalid frontmatter remains readable as an ordinary resource but is
-        not advertised as a conforming skill.
+        For a server that refuses to serve some skills: everything that lists,
+        hints at or rewrites a pointer to one is answered from what is left,
+        so nothing names a skill the server will not read.
         """
-        parsed = parse(uri)
-        if parsed is None:
-            return None
-        found = self._skill_at(*parsed, scope)
-        if found is None or found[1] != MAIN_FILE:
-            return None
-        skill = found[0]
-        if uri != uri_for(skill):
-            return None
-        text = self.read(uri, scope)
-        if text is None or not text.startswith("---\n"):
-            return None
-        try:
-            metadata = frontmatter.loads(text).metadata
-            # Frontmatter travels as JSON, without inventing string forms for
-            # YAML-only values that would fail a client's field-by-field check.
-            json.dumps(metadata, allow_nan=False)
-        except (yaml.YAMLError, TypeError, ValueError, RecursionError):
-            return None
-        description = metadata.get("description")
-        if (
-            metadata.get("name") != skill.name
-            or not isinstance(description, str)
-            or not 1 <= len(description) <= 1024
-        ):
-            return None
+        if not addresses:
+            return self
+        narrowed = Catalogue(
+            self._index.without(addresses),
+            self._resources,
+            self._revalidate,
+            self._libraries,
+            self._agents,
+        )
+        # The same trees, so what one has read the other need not read again.
+        narrowed._files = self._files
+        narrowed._texts = self._texts
+        return narrowed
 
-        resources = []
-        for path in sorted(skill.path.rglob("*")):
-            relative = path.relative_to(skill.path)
-            if (
-                not path.is_file()
-                or hidden(relative)
-                or readable(skill.path, relative.as_posix()) is None
-            ):
-                continue
-            file_uri = uri_for(skill, relative.as_posix())
-            body = text if file_uri == uri else self.read(file_uri, scope)
-            if body is None:
-                continue
-            content = body.encode("utf-8")
-            resources.append(
-                {
-                    "uri": file_uri,
-                    "digest": f"sha256:{hashlib.sha256(content).hexdigest()}",
-                    "size": len(content),
-                }
+    def visible_skills(self, scope: Scope = EVERYTHING) -> list[Skill]:
+        """Every skill ``scope`` admits, by address."""
+        return sorted(self._index.visible(scope), key=lambda s: s.address)
+
+    def skill_files(self, skill: Skill, scope: Scope = EVERYTHING) -> dict[str, str]:
+        """Every file of ``skill`` as a read of it serves it, keyed by path, sorted.
+
+        The files are the regular ones under the skill's directory that are not
+        hidden and resolve inside it, nested skills' files included; each is the
+        text ``read`` gives for it, ``SKILL.md`` rewritten for ``scope``. A file
+        that cannot be read is left out, so what this names is what is served.
+        """
+        found: dict[str, str] = {}
+        for file, target in self._files_of(skill).items():
+            text = self._text(skill, target)
+            found[file] = (
+                self._instructions(skill, text, scope) if file == MAIN_FILE else text
             )
-        return {"uri": uri, "frontmatter": metadata, "resources": resources}
+        return found
+
+    def _files_of(self, skill: Skill) -> dict[str, Path]:
+        """``skill``'s files and where each reads from, walked once unless live."""
+        files = None if skill.live else self._files.get(skill.path)
+        if files is None:
+            files = {}
+            for path in sorted(skill.path.rglob("*")):
+                relative = path.relative_to(skill.path)
+                if not path.is_file() or hidden(relative):
+                    continue
+                target = readable(skill.path, relative.as_posix())
+                if target is not None:
+                    files[relative.as_posix()] = target
+            if not skill.live:
+                self._files[skill.path] = files
+        return files
+
+    def live_stamp(self, scope: Scope = EVERYTHING) -> tuple:
+        """What the live skills ``scope`` admits hold on disk now, revalidated.
+
+        Empty when none is live. A server that keeps what it built from
+        ``skill_files`` builds again when this changes: a live read serves an
+        upstream edit (SKL-37), and a digest still describes the bytes served.
+        """
+        stamp = []
+        for skill in self.visible_skills(scope):
+            if not skill.live:
+                continue
+            for path in sorted(skill.path.rglob("*")):
+                if not path.is_file() or hidden(path.relative_to(skill.path)):
+                    continue
+                if self._revalidate is not None:
+                    self._revalidate(path)
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                stamp.append((str(path), stat.st_mtime_ns, stat.st_size))
+        return tuple(stamp)
 
     def selected(self, scope: Scope = EVERYTHING) -> list[LibraryText]:
         """Libraries with a skill visible in ``scope``: constructor order, then
@@ -712,6 +687,10 @@ class Catalogue:
         material actually sits and what its citations and
         ``${CLAUDE_PLUGIN_ROOT}`` point at. The fallback reads what it is asked
         for and lists nothing.
+
+        A skill's own files and its ``_manifest`` read as nothing here: the
+        skills provider serves them, from ``skill_files`` (MD-55). A path under
+        a skill reads here only through the plugin-root fallback.
         """
         parsed = parse(uri)
         if parsed is None:
@@ -721,9 +700,10 @@ class Catalogue:
             return None
         found = self._skill_at(library, path, scope)
         if found is not None and found[1]:
-            body = self._skill_file(*found, scope)
-            if body is None:
-                body = self._root_file(*found)
+            skill, file = found
+            if file == MANIFEST or self._has(skill, file):
+                return None
+            body = self._root_file(skill, file)
             if body is not None:
                 return body
         if path == INDEX:
@@ -786,6 +766,54 @@ class Catalogue:
         if any(f.startswith(f"{folder}/") for f in files):
             return f"It is a folder, not a file: {files_hint}"
         return None
+
+    def directory(self, uri: str, scope: Scope = EVERYTHING) -> list[Entry] | None:
+        """The direct children of a library or a folder, or None for anything else.
+
+        A folder of skills, a skill, a folder of library files and a library
+        file, each as ``scope`` admits it, by URI: what
+        ``resources/directory/read`` and ``_index.json`` list (MD-57). A folder
+        or a skill is a directory resource, with no trailing ``/``. A skill's
+        own directory and what is inside it are the skill provider's, so they
+        are None here, as an absent or out-of-scope address is. An index or
+        ``_files.md`` sits beside a folder, not in it, so neither is listed.
+        """
+        parsed = parse(uri)
+        if parsed is None:
+            return None
+        library, folder = parsed
+        if self._skill_at(library, folder, EVERYTHING) is not None:
+            return None
+        skills = [s for s in self._in_library(library, scope) if _in(s, folder)]
+        prefix = f"{folder}/" if folder else ""
+        files = [
+            f for f in self._library_files(library, scope) if f.startswith(prefix)
+        ]
+        if not skills and not files:
+            return None
+
+        def entry(rel: str, description: str, mime_type: str = DIRECTORY) -> Entry:
+            return Entry(
+                f"{SCHEME}{library}/{rel}", f"{library}/{rel}", description, mime_type
+            )
+
+        found: dict[str, Entry] = {}
+        for child, count in _children(skills, folder).items():
+            found.setdefault(child, entry(child, _count(count)))
+        for skill in skills:
+            if skill.folder == folder:
+                rel = skill.address.removeprefix(f"{library}/")
+                found.setdefault(rel, entry(rel, skill.description))
+        for file in files:
+            head, slash, _ = file[len(prefix) :].partition("/")
+            rel = prefix + head
+            if slash:
+                text = f"Files the {library} library ships outside any skill."
+                found.setdefault(rel, entry(rel, text))
+            else:
+                text = f"A file the {library} library ships outside any skill."
+                found.setdefault(rel, entry(rel, text, mime_for(rel)))
+        return sorted(found.values(), key=lambda e: e.uri)
 
     def _index_body(
         self, library: str, folder: str | None, scope: Scope
@@ -850,31 +878,12 @@ class Catalogue:
             + "\n"
         )
 
-    def _skill_file(self, skill: Skill, file: str, scope: Scope) -> str | None:
-        if file == MANIFEST:
-            # Every file first: a size and a hash are claims about the bytes,
-            # and on a live source the ones on disk may be an edit behind the
-            # body the very next read would serve. The TTL covers that read.
-            for path in _manifest_files(skill):
-                if self._revalidate is not None:
-                    self._revalidate(path)
-            return _manifest_json(skill)
-        # The manifest leaves hidden files out, so a read does too: a `.env`
-        # beside a SKILL.md is not served to whoever guesses its name.
-        if hidden(Path(file)):
-            return None
-        target = readable(skill.path, file)
-        if target is None:
-            return None
-        # A live source's file may have moved since it was copied, and this
-        # is where that is noticed -- a read is the only thing that asks.
-        if self._revalidate is not None:
-            self._revalidate(target)
-        text = target.read_text(encoding="utf-8", errors="replace")
-        if file != MAIN_FILE:
-            # Instructions are substituted; everything else is bytes on disk,
-            # which is what `_manifest`'s size and hash describe.
-            return text
+    def _has(self, skill: Skill, file: str) -> bool:
+        """Whether ``file`` is one of ``skill``'s own, as ``skill_files`` names them."""
+        return file in self._files_of(skill)
+
+    def _instructions(self, skill: Skill, text: str, scope: Scope) -> str:
+        """A ``SKILL.md`` as ``scope`` reads it: names and placeholders resolved."""
         # A citation through the plugin root into one of its own skills renders
         # as that skill's address: the literal path would be refused, because
         # the library-level read keeps out of a skill's own directory and a
@@ -887,6 +896,20 @@ class Catalogue:
             skill_dir=f"{SCHEME}{skill.address}",
             skills=self.plugin_skill_dirs(skill.library, skill.plugin, scope),
         )
+
+    def _text(self, skill: Skill, target: Path) -> str:
+        """One file of ``skill`` as text, read once unless the skill is live.
+
+        A live skill's file is read off disk each time, and revalidated by
+        ``live_stamp``, which its reader asks first.
+        """
+        if skill.live:
+            return target.read_text(encoding="utf-8", errors="replace")
+        text = self._texts.get(target)
+        if text is None:
+            text = target.read_text(encoding="utf-8", errors="replace")
+            self._texts[target] = text
+        return text
 
     def _root_file(self, skill: Skill, file: str) -> str | None:
         """One file of the skill's plugin root, addressed below the skill.
@@ -920,14 +943,12 @@ class Catalogue:
         )
 
     def mime(self, uri: str) -> str:
-        """The media type a read of ``uri`` will return."""
+        """The media type a read of ``uri`` will return, from its extension.
+
+        A skill's ``_manifest`` is its provider's to type, so a library file of
+        that name is not JSON here.
+        """
         parsed = parse(uri)
         if parsed is None or not parsed[1]:
             return "text/markdown"
-        library, path = parsed
-        if path.endswith(f"/{MANIFEST}"):
-            # Only a skill's manifest is JSON; a library file may share the name.
-            found = self._skill_at(library, path[: -len(MANIFEST) - 1], EVERYTHING)
-            if found is not None and found[1] == "":
-                return "application/json"
-        return mime_for(path)
+        return mime_for(parsed[1])

@@ -29,10 +29,12 @@ from __future__ import annotations
 
 import logging
 
-from kubed.mcp import Inject, QuickMCP, ToolError
+from kubed.mcp import Context, Inject, NotFoundError, QuickMCP, ToolError
+from kubed.mcp.skills import FolderNotFound
 
 from ..catalogue.uris import Catalogue
 from .request import full_listing, requested_addressing, requested_scope
+from .resources import canonical
 
 LIST_TOOL = "list_resources"
 READ_TOOL = "read_resource"
@@ -57,6 +59,10 @@ def register(mcp: QuickMCP) -> set[str]:
     closed over: a closure over the object would pin these tools to the
     generation they were registered in. The container builds it once per call,
     so one call reads one generation, and it is no part of either tool's schema.
+
+    ``read_resource`` reads through the server's own resources, so a skill's
+    file, its ``_manifest`` and a folder's ``_index.json`` are the bytes
+    ``resources/read`` returns, whichever provider serves them.
     """
 
     @mcp.tool(annotations={"title": "List skill resources", **READ_ONLY})
@@ -89,7 +95,9 @@ def register(mcp: QuickMCP) -> set[str]:
         ]
 
     @mcp.tool(annotations={"title": "Read a skill resource", **READ_ONLY})
-    def read_resource(uri: str, catalogue: Inject[Catalogue]) -> str:
+    async def read_resource(
+        uri: str, catalogue: Inject[Catalogue], ctx: Context
+    ) -> str:
         """Read one `skill://` URI: an index, a skill's file, or a library's file.
 
         Args:
@@ -116,10 +124,23 @@ def register(mcp: QuickMCP) -> set[str]:
         """
         scope = requested_scope()
         a = requested_addressing()
-        body = catalogue.read(a.canonical(uri), scope)
-        if body is not None:
-            return a.text(body)
-        hint = catalogue.hint(a.canonical(uri), scope) or (
+        try:
+            # Past the middleware: this call already went through it, and the
+            # miss below is worded for a tool, not as a resource error.
+            result = await ctx.fastmcp.read_resource(
+                canonical(uri, a), run_middleware=False
+            )
+        except NotFoundError:
+            result = None
+        if result is not None:
+            return "".join(
+                c.content if isinstance(c.content, str) else c.content.decode()
+                for c in result.contents
+            )
+        hint = catalogue.hint(a.canonical(uri), scope)
+        if hint is None:
+            hint = await _folder_hint(ctx, canonical(uri, a))
+        hint = hint or (
             "Call list_resources() for the indexes, then read one to see the URIs"
             " inside it."
         )
@@ -130,3 +151,12 @@ def register(mcp: QuickMCP) -> set[str]:
         raise ToolError(f"No resource at '{uri}'. {hint}", log_level=logging.DEBUG)
 
     return MIRROR_TOOLS
+
+
+async def _folder_hint(ctx: Context, uri: str) -> str | None:
+    """A folder inside a skill names its ``_index.md``, as a resource read does."""
+    for provider in ctx.fastmcp.providers:
+        children = getattr(provider, "children", None)
+        if children is not None and await children(uri) is not None:
+            return FolderNotFound(uri).hint
+    return None

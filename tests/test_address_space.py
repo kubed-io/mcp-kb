@@ -733,17 +733,18 @@ async def test_a_library_file_named_manifest_is_not_labelled_json(tmp_path):
     assert manifest.mime_type == "application/json"
 
 
-async def test_a_skill_nested_inside_a_skill_is_served_as_the_spec_says(tmp_path):
-    """SEP-2640 allows a skill inside another skill's directory.
+async def test_a_skill_nested_inside_a_skill_is_the_outer_skills_files(tmp_path):
+    """FastMCP's catalogue has no room for a skill inside another (SKL-7).
 
-    Both are published flat, each at its own URI; the enclosing skill's
-    manifest lists the nested skill's files as its own supporting files; and a
-    URI under both names one file, so reaching it through either skill reads the
-    same bytes. Nothing about the nesting is a conflict, and nothing is skipped.
+    The enclosing skill is served, with the nested one's files among its own,
+    so they read at their address under it; the nested skill is not served as a
+    skill, and nothing lists it.
     """
     import json
 
     from fastmcp import Client
+    from kubed.mcp.protocol import types
+    from pydantic import TypeAdapter
 
     from kubed.mcp_kb import KnowledgeBase
     from kubed.mcp_kb.config import Config
@@ -767,18 +768,19 @@ async def test_a_skill_nested_inside_a_skill_is_served_as_the_spec_says(tmp_path
 
     async with Client(server_of(kb)) as client:
         index = (await client.read_resource("skill://lib/_index.md"))[0].text
-        folder = (await client.read_resource("skill://lib/x/_index.md"))[0].text
         inner = (await client.read_resource("skill://lib/x/y/SKILL.md"))[0].text
         shared = (await client.read_resource("skill://lib/x/y/refs/a.md"))[0].text
         manifest = (await client.read_resource("skill://lib/x/_manifest"))[0].text
+        listed = await client.session.send_request(
+            types.Request(method="skills/list", params=None), TypeAdapter(dict)
+        )
 
     assert "skill://lib/x/SKILL.md: outer" in index
-    assert "skill://lib/x/_index.md: 1 skill" in index
-    assert "skill://lib/x/y/SKILL.md: inner" in folder
+    assert "y/" not in index
     assert "inner body" in inner
     assert shared == "shared bytes\n"
     assert {"y/SKILL.md", "y/refs/a.md"} <= {f["path"] for f in json.loads(manifest)["files"]}
-    assert "skipped" not in kb.snapshot.status["plugins"]["lib"]
+    assert [s["uri"] for s in listed["skills"]] == ["skill://lib/x/SKILL.md"]
 
 
 TEMPLATE = (

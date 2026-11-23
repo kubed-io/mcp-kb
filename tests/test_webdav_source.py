@@ -23,6 +23,7 @@ from kubed.mcp_kb.plugins import Fetch, fetch_for
 from kubed.mcp_kb.sources import AccessRefused, SourceError, fingerprint, materialise
 from kubed.mcp_kb.sources import export as exports
 from kubed.mcp_kb.sources.webdav import ETAGS_FILE, VERSION_FILE, client, fetch_file
+from tests.conftest import served
 from tests.webdav_server import FOLDER, PASSWORD, USERNAME
 
 pytestmark = pytest.mark.unit
@@ -477,7 +478,7 @@ def test_a_webdav_source_is_served_without_naming_the_backend_anywhere(
 
     assert [s.name for s in knowledge_base.index.visible()] == ["x"]
     assert knowledge_base.status["fetches"][KEY]["status"] == "ok"
-    assert "first" in knowledge_base.catalogue.read("skill://notes/x/SKILL.md")
+    assert "first" in served(knowledge_base.catalogue, "skill://notes/x/SKILL.md")
     rows = "\n".join(str(entry) for entry in knowledge_base.catalogue.entries())
     assert "webdav" not in rows
     assert "127.0.0.1" not in rows
@@ -611,4 +612,4 @@ def test_refused_credentials_on_a_refresh_leave_the_source_stale(
     notes = knowledge_base.status["fetches"][KEY]
     assert notes["status"] == "stale"
     assert "HTTP 401: the credentials were refused" in notes["error"]
-    assert "first" in knowledge_base.catalogue.read("skill://notes/x/SKILL.md")
+    assert "first" in served(knowledge_base.catalogue, "skill://notes/x/SKILL.md")

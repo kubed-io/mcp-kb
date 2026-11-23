@@ -101,7 +101,8 @@ that falls back to a plugin root (see [skills.md](skills.md)) tries only the roo
 scope, or the root of the in-scope skill it was addressed under.
 
 **SCP-24.** A read of an out-of-scope address fails exactly as a read of an absent one does, on
-`resources/read`, the `read_resource` tool, `skills/get` (`Skill not found`), `agents/get`
+`resources/read`, the `read_resource` tool, `skills/get` (`Unknown skill URI: <uri>`),
+`resources/directory/read` (`Directory not found`), `agents/get`
 (`Agent not found`, with `data.reason: "agent_not_found"`) and `prompts/get` or `get_prompt` alike:
 the same error code and the same message.
 
@@ -140,7 +141,7 @@ that fails.
 | 9 | categories or tags are set and the scope would be shown no listing row, no prompt and no agent | refused: `The scope names things that exist, but nothing in library '<x>' carries the combination: <what was asked>.` (`any library` when none is set) |
 
 Rows 6 and 7 use the plural (`categories`, `tags`) when several are unknown. An empty list is
-written `none`.
+written `none`. Rows 8 and 9 count only skills that are served (SKL-45).
 
 **SCP-32.** The known categories are the own categories of every plugin `/health` reports and the
 `categories` of every library. When a library is set, only that library's plugins and that

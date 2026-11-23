@@ -44,7 +44,7 @@ from pydantic import ConfigDict, Field
 
 from ..catalogue.names import QualifiedNames
 from ..catalogue.prompts import FilePrompt, MissingArguments
-from ..catalogue.uris import SCHEME
+from ..catalogue.uris import SCHEME, Catalogue
 from .request import requested_addressing, requested_scope
 from .scope import EVERYTHING, Scope
 from .tools import READ_ONLY
@@ -231,9 +231,17 @@ class PromptProvider(Provider):
     working off it, and the shape this one keeps for the same reason.
     """
 
-    def __init__(self, snapshot: Callable[[], Snapshot]):
+    def __init__(
+        self,
+        snapshot: Callable[[], Snapshot],
+        catalogue: Callable[[], Catalogue] | None = None,
+    ):
         super().__init__()
         self._snapshot = snapshot
+        # Where a body's names and plugin-root paths resolve: the catalogue
+        # the request reads, so a prompt never names a skill that is not
+        # served. The snapshot's own when none is given.
+        self._catalogue = catalogue
 
     def visible(self, scope: Scope = EVERYTHING) -> list[FilePrompt]:
         prompts = self._snapshot().prompts
@@ -272,10 +280,11 @@ class PromptProvider(Provider):
         # came from, and revalidating that would be a round trip for nothing.
         if prompt.file.live:
             snapshot.revalidate(prompt.file.path)
-        dirs = snapshot.catalogue.plugin_skill_dirs(
+        catalogue = snapshot.catalogue if self._catalogue is None else self._catalogue()
+        dirs = catalogue.plugin_skill_dirs(
             prompt.file.library, prompt.file.plugin, requested_scope()
         )
-        names = snapshot.catalogue.qualified_names(
+        names = catalogue.qualified_names(
             prompt.file.library, prompt.file.plugin, requested_scope()
         )
         return prompt.model_copy(update={"skill_dirs": dirs, "names": names})
@@ -341,7 +350,11 @@ def _annotate(tool: Tool, title: str) -> Tool:
 PROMPT_TOOLS = frozenset({"list_prompts", "get_prompt"})
 
 
-def register(mcp: QuickMCP, snapshot: Callable[[], Snapshot]) -> set[str]:
+def register(
+    mcp: QuickMCP,
+    snapshot: Callable[[], Snapshot],
+    catalogue: Callable[[], Catalogue] | None = None,
+) -> set[str]:
     """Publish the prompts, and their tool mirror; return the mirror's names.
 
     The mirror is FastMCP's own ``PromptsAsTools`` rather than one written here:
@@ -349,7 +362,7 @@ def register(mcp: QuickMCP, snapshot: Callable[[], Snapshot]) -> set[str]:
     if the prompt has several -- which a resource or a hand-rolled tool would
     flatten to text.
     """
-    mcp.add_provider(PromptProvider(snapshot))
+    mcp.add_provider(PromptProvider(snapshot, catalogue))
     # PromptsAsTools reads prompts back through the FastMCP server it is given.
     mcp.add_transform(ReadOnlyPromptsAsTools(mcp.server))
     return set(PROMPT_TOOLS)

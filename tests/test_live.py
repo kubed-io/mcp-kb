@@ -15,7 +15,6 @@ Two quirks of the server under test:
   microseconds. The one test about the TTL turns it back on.
 """
 
-import json
 import logging
 import socket
 import threading
@@ -27,9 +26,10 @@ import pytest
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import BasicAuth, Config, EnvRef
 from kubed.mcp_kb.mcp.prompts import PromptProvider
+from kubed.mcp_kb.mcp.skill_catalogue import SkillCatalogue
 from kubed.mcp_kb.plugins import Fetch
 from kubed.mcp_kb.sources import live
-from tests.conftest import DEEP_YAML, server_of
+from tests.conftest import DEEP_YAML, read_served, server_of
 from tests.webdav_server import FOLDER, PASSWORD, USERNAME
 
 pytestmark = pytest.mark.unit
@@ -46,6 +46,21 @@ PROMPT = "---\ndescription: A prompt.\n---\n\n{body}\n"
 def credential(monkeypatch):
     """The password the config only ever names."""
     monkeypatch.setenv(ENV, PASSWORD)
+
+
+@pytest.fixture(autouse=True)
+def no_refresh_loop(monkeypatch):
+    """Reads go through an MCP client, whose connection starts the server's
+    lifespan; its refresh loop would list the source on its own schedule, and
+    what is under test here is what a read alone asks of the server."""
+    import asyncio
+
+    from kubed.mcp_kb import server
+
+    async def idle(knowledge_base):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(server, "loop", idle)
 
 
 @pytest.fixture(autouse=True)
@@ -87,22 +102,35 @@ def test_an_edit_upstream_is_visible_on_the_next_read_without_a_refresh(
     webdav, tmp_path
 ):
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    assert "first" in knowledge_base.catalogue.read(URI)
+    assert "first" in read_served(knowledge_base, URI)
 
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
 
-    assert "edited in nextcloud" in knowledge_base.catalogue.read(URI)
+    assert "edited in nextcloud" in read_served(knowledge_base, URI)
     assert knowledge_base.generation == 0, "no refresh happened; the read did the work"
+
+
+def test_an_edit_upstream_fastmcp_refuses_unlists_the_skill(webdav, tmp_path):
+    """MD-57 for a live skill: once it no longer builds, nothing names it."""
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+    assert "skill://notes/x/SKILL.md" in read_served(knowledge_base, "skill://notes/_index.md")
+
+    webdav.write("skills/x/SKILL.md", "---\nname: x\ndescription: ''\n---\nBody.\n")
+
+    assert read_served(knowledge_base, URI) is None
+    index = read_served(knowledge_base, "skill://notes/_index.md")
+    assert index is None or "skill://notes/x" not in index
+    assert knowledge_base.generation == 0, "the read did it, not a refresh"
 
 
 def test_a_library_level_file_is_revalidated_too(webdav, tmp_path):
     """A skill's instructions are not the only thing a live source serves."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    assert knowledge_base.catalogue.read(GUIDE) == "library-level guidance\n"
+    assert read_served(knowledge_base, GUIDE) == "library-level guidance\n"
 
     webdav.write("docs/guide.md", "guidance, revised and lengthened upstream\n")
 
-    assert "revised and lengthened" in knowledge_base.catalogue.read(GUIDE)
+    assert "revised and lengthened" in read_served(knowledge_base, GUIDE)
 
 
 async def test_a_live_prompt_renders_the_edited_body(webdav, tmp_path):
@@ -181,13 +209,14 @@ def test_a_manifest_is_priced_against_the_server_before_it_is_served(
     they describe the copy on disk and the very next read serves something
     else."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    before = json.loads(knowledge_base.catalogue.read(f"{SKILL}/_manifest"))
+    skills = SkillCatalogue(lambda: knowledge_base.snapshot.catalogue)
+    before = skills.skills()["notes/x"].manifest.files["SKILL.md"]
 
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
-    after = json.loads(knowledge_base.catalogue.read(f"{SKILL}/_manifest"))
+    after = skills.skills()["notes/x"].manifest.files["SKILL.md"]
 
     assert after != before
-    assert after["files"][0]["size"] > before["files"][0]["size"]
+    assert after.size > before.size
 
 
 def test_a_new_upstream_file_needs_a_refresh(webdav, tmp_path):
@@ -195,22 +224,22 @@ def test_a_new_upstream_file_needs_a_refresh(webdav, tmp_path):
     knowledge_base = _knowledge_base(webdav, tmp_path)
     webdav.skill("y", "a skill added after the folder was indexed")
 
-    assert knowledge_base.catalogue.read("skill://notes/y/SKILL.md") is None
+    assert read_served(knowledge_base, "skill://notes/y/SKILL.md") is None
     assert [s.name for s in knowledge_base.index.visible()] == ["x"]
 
     assert knowledge_base.refresh() == [KEY]
-    assert "a skill added after" in knowledge_base.catalogue.read("skill://notes/y/SKILL.md")
+    assert "a skill added after" in read_served(knowledge_base, "skill://notes/y/SKILL.md")
 
 
 def test_reads_within_the_ttl_do_not_hit_the_server(webdav, tmp_path, monkeypatch):
     """One read of a skill is several reads of its files; one PROPFIND is enough."""
     monkeypatch.setattr(live, "TTL_SECONDS", 60.0)
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
     webdav.requests.clear()
 
-    knowledge_base.catalogue.read(URI)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
+    read_served(knowledge_base, URI)
 
     assert webdav.requests == []
 
@@ -229,8 +258,8 @@ def test_a_snapshot_source_never_revalidates(webdav, tmp_path, monkeypatch):
     monkeypatch.setattr(live, "fetch_file", boom)
     webdav.requests.clear()
 
-    assert "first" in knowledge_base.catalogue.read(URI)
-    assert knowledge_base.catalogue.read(GUIDE) == "library-level guidance\n"
+    assert "first" in read_served(knowledge_base, URI)
+    assert read_served(knowledge_base, GUIDE) == "library-level guidance\n"
     assert reached == [], "the read path never reached the network"
     assert webdav.requests == []
 
@@ -245,23 +274,23 @@ def test_a_flaky_server_degrades_to_the_cached_copy(webdav, tmp_path):
     reason to serve it unrevalidated, never a reason to fail the read.
     """
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    assert "first" in knowledge_base.catalogue.read(URI)
+    assert "first" in read_served(knowledge_base, URI)
 
     webdav.stop()
 
-    assert "first" in knowledge_base.catalogue.read(URI)
-    assert knowledge_base.catalogue.read(GUIDE) == "library-level guidance\n"
+    assert "first" in read_served(knowledge_base, URI)
+    assert read_served(knowledge_base, GUIDE) == "library-level guidance\n"
 
 
 def test_a_failed_revalidation_says_nothing_about_the_credentials(
     webdav, tmp_path, caplog
 ):
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
     webdav.stop()
 
     with caplog.at_level("WARNING"):
-        knowledge_base.catalogue.read(URI)
+        read_served(knowledge_base, URI)
 
     assert caplog.text, "a revalidation that failed is worth a line in the log"
     assert PASSWORD not in caplog.text
@@ -272,11 +301,11 @@ def test_a_failed_revalidation_names_the_source_once(webdav, tmp_path, caplog):
     """fetch_file's error already carries the fetch, and the log line adds it:
     `notes://kb: revalidating … failed: notes://kb: …` reads as two fetches."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
     webdav.stop()
 
     with caplog.at_level("WARNING"):
-        knowledge_base.catalogue.read(URI)
+        read_served(knowledge_base, URI)
 
     assert caplog.text.count(f"{KEY}:") == 1
     assert caplog.text.count("skills/x/SKILL.md") == 1
@@ -301,7 +330,7 @@ def test_a_server_that_hangs_is_asked_once_and_then_left_alone(
         after = [_elapsed(knowledge_base, URI) for _ in range(5)]
         other = _elapsed(knowledge_base, GUIDE)
 
-    assert "first" in knowledge_base.catalogue.read(URI), "the cached copy is still served"
+    assert "first" in read_served(knowledge_base, URI), "the cached copy is still served"
     assert first < 1.0, f"one read must not cost the httpx default: {first:.2f}s"
     assert max(after) < 0.05, f"a wedged server must cost nothing twice: {after}"
     assert other < 0.05, "the cooldown covers the source, not the one file"
@@ -314,9 +343,9 @@ async def test_health_says_a_live_source_is_cooling_after_a_failure(
     """An operator reading /health has to be able to tell "nothing changed"
     from "we stopped asking"."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
     monkeypatch.setattr(live, "fetch_file", _wedged)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
 
     transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
@@ -331,12 +360,12 @@ def test_a_source_that_answers_again_stops_cooling(webdav, tmp_path, monkeypatch
     knowledge_base = _knowledge_base(webdav, tmp_path)
     answering = live.fetch_file
     monkeypatch.setattr(live, "fetch_file", _wedged)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
     assert knowledge_base.snapshot.stats(KEY)["cooling"] is True
 
     monkeypatch.setattr(live, "fetch_file", answering)
     time.sleep(0.1)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
 
     assert "cooling" not in knowledge_base.snapshot.stats(KEY)
 
@@ -349,7 +378,7 @@ def test_the_ttl_runs_from_the_answer_and_not_from_the_question(
     comes back -- so a slow server is asked once per read, not once per TTL."""
     monkeypatch.setattr(live, "TTL_SECONDS", 0.3)
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
     answering = live.fetch_file
 
     def slow(*args, **kwargs):
@@ -358,11 +387,11 @@ def test_the_ttl_runs_from_the_answer_and_not_from_the_question(
 
     time.sleep(0.35)
     monkeypatch.setattr(live, "fetch_file", slow)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
 
     monkeypatch.setattr(live, "fetch_file", answering)
     webdav.requests.clear()
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
 
     assert webdav.requests == [], "the TTL must bound a slow server too"
 
@@ -385,7 +414,7 @@ def test_the_revalidator_follows_the_export_a_refresh_created(webdav, tmp_path):
 
     webdav.skill("x", "edited after the refresh, and longer than it was")
 
-    assert "edited after the refresh" in knowledge_base.catalogue.read(URI)
+    assert "edited after the refresh" in read_served(knowledge_base, URI)
     assert "first" in (retired / "SKILL.md").read_text(), "the retired export stands"
 
 
@@ -401,18 +430,18 @@ def test_one_client_serves_every_live_read(webdav, tmp_path, monkeypatch):
 
     monkeypatch.setattr(live, "client", counted)
 
-    knowledge_base.catalogue.read(URI)
-    knowledge_base.catalogue.read(URI)
-    knowledge_base.catalogue.read(GUIDE)
+    read_served(knowledge_base, URI)
+    read_served(knowledge_base, URI)
+    read_served(knowledge_base, GUIDE)
 
     assert built == [KEY]
 
 
 async def test_health_reports_what_a_live_source_revalidated(webdav, tmp_path):
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
 
     transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
@@ -420,7 +449,8 @@ async def test_health_reports_what_a_live_source_revalidated(webdav, tmp_path):
 
     fetch = body["fetches"][KEY]
     assert fetch["live"] is True
-    assert fetch["revalidated"] == 2
+    # Once per request that reads skills, and once for the first build.
+    assert fetch["revalidated"] == 3
     assert fetch["fetched"] == 1
 
 
@@ -429,7 +459,7 @@ async def test_health_says_nothing_about_the_backend_or_the_credentials(
 ):
     """A backend is config-only, and /health is not where it stops being one."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    knowledge_base.catalogue.read(URI)
+    read_served(knowledge_base, URI)
 
     transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
@@ -456,7 +486,7 @@ def _wedged(*args, **kwargs):
 
 def _elapsed(knowledge_base, uri: str) -> float:
     start = time.monotonic()
-    knowledge_base.catalogue.read(uri)
+    read_served(knowledge_base, uri)
     return time.monotonic() - start
 
 

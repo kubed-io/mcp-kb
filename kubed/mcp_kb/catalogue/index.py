@@ -78,6 +78,7 @@ class SkillRow:
         category: str | None,
         tags: frozenset[str],
         library_categories: frozenset[str] = frozenset(),
+        live: bool = False,
     ) -> Skill:
         return Skill(
             name=self.name,
@@ -90,6 +91,7 @@ class SkillRow:
             category=category,
             tags=tags,
             library_categories=library_categories,
+            live=live,
         )
 
 

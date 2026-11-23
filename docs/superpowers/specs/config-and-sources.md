@@ -165,13 +165,16 @@ revalidated like any other.
 ## file
 
 **SRC-20.** A file fetch is served in place; nothing is copied. A path that is not a directory
-fails the fetch with `<path> is not a directory`.
+fails the fetch with `<path> is not a directory`. A skill's files are read once per generation,
+so an edit to one in place is served from the next refresh (or `POST /reindex`); a library file
+or a prompt is read off disk each time.
 
 ## `cache: live`
 
-**SRC-21.** On a live fetch, each read of one of its files (skill file, library file, `_manifest`,
-prompt) first revalidates that file: one request for its ETag, and a download only if the ETag
-differs from the local copy's.
+**SRC-21.** On a live fetch, each read of one of its files (library file, prompt) first
+revalidates that file, and each request that reads skills first revalidates every file of the live
+skills in its scope (SKL-37): one request for its ETag, and a download only if the ETag differs
+from the local copy's.
 
 **SRC-22.** A download is staged in `<cache>/src/<slug>/.work/` and renamed over the local copy in
 one step, so a reader sees one whole version of the file.

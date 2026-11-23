@@ -232,7 +232,8 @@ SKL-52 of [skills.md](skills.md): `${CLAUDE_PLUGIN_ROOT}/skills/drawio/SKILL.md`
 
 **PRM-62.** In every dialect, a qualified skill name (SKL-54) in a prompt's body
 renders as [skills.md](skills.md)'s SKL-55 says. The prompt's plugin is the own plugin, and the
-library is the one serving the prompt. The rewrite runs on the body as written, before the
+library is the one serving the prompt. Only a skill that is served for the request's scope and
+prefix is a candidate (SKL-45). The rewrite runs on the body as written, before the
 dialect's placeholders, so an argument's value is never rewritten. It is the first step of PRM-47's
 order.
 

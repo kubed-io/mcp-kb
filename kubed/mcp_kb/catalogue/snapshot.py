@@ -754,6 +754,7 @@ def _serve_library(
                 category=plugin.category,
                 tags=plugin.labels,
                 library_categories=lib_categories,
+                live=is_live(plugin.fetch),
             )
             for row in admitted[pid].skills
         ]

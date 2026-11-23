@@ -18,10 +18,15 @@ wrong here for two reasons that only show up at scale:
   expense this server rejects ``ResourcesAsTools`` for.
 
 ``Catalogue`` fixes both by listing *indexes* and resolving content on demand,
-which is the resource half of progressive disclosure. It would be cleaner still
-as a directory tree, but MCP's ``resources/directory/read`` has no
-implementation in FastMCP 4.0.3, so a dozen index URIs are the closest thing
-available.
+which is the resource half of progressive disclosure. A library and a folder
+are directories too: ``CatalogueProvider.children`` lists one for
+``resources/directory/read`` and ``_index.json``, from the same scoped
+``Catalogue.directory``.
+
+A skill's own files are not this provider's. ``skill_catalogue.SkillCatalogue``
+serves them, registered before this one, and this provider answers only what it
+misses: the indexes, ``_files.md``, the library files and the plugin-root
+fallbacks (SKL-30, SKL-31), so it never shadows a skill file.
 
 ``resources/templates/list`` carries one fixed row, ``skill://{library}/{+path}``.
 It is how a client learns the space exists, and it is never matched: a read
@@ -30,7 +35,9 @@ that misses stays a miss, whatever the template would have expanded to.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import json
+import re
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from kubed.mcp import (
@@ -42,11 +49,16 @@ from kubed.mcp import (
     TextResource,
 )
 from kubed.mcp.protocol import INVALID_PARAMS, MCPError, Provider, VersionSpec, types
+from kubed.mcp.skills import FolderNotFound, NameTheIndex
 
-from ..catalogue.uris import Catalogue
+from ..catalogue.addressing import Addressing
+from ..catalogue.uris import INDEX_JSON, Catalogue, parse
 from .request import full_listing, requested_addressing, requested_scope
 
 TEMPLATE_URI = "skill://{library}/{+path}"
+# An escaped "/" in an address, and the address nothing answers.
+_ENCODED_SLASH = re.compile(r"%2f", re.IGNORECASE)
+NOWHERE = "skill://%2F"
 
 TEMPLATE_DESCRIPTION = (
     "A skill, index or file this server serves: {library} is a library's name"
@@ -112,15 +124,43 @@ class CatalogueProvider(Provider):
         catalogue = self._catalogue()
         a = requested_addressing()
         canonical = a.canonical(uri)
+        name = uri.removeprefix(a.prefix).removeprefix("skill://")
+        parent, _, last = canonical.rpartition("/")
+        if last == INDEX_JSON:
+            children = await self.children(parent)
+            if children is not None:
+                return TextResource(
+                    uri=uri,
+                    name=name,
+                    description=f"What is in {parent}",
+                    mime_type="application/json",
+                    text=json.dumps(children, indent=2),
+                )
         body = catalogue.read(canonical, requested_scope())
         if body is None:
             return None
         return TextResource(
             uri=uri,
-            name=uri.removeprefix(a.prefix).removeprefix("skill://"),
+            name=name,
             mime_type=catalogue.mime(canonical),
             text=a.text(body),
         )
+
+    async def children(self, uri: str) -> list[dict] | None:
+        """A library's or a folder's direct children, as wire ``Resource`` rows.
+
+        What ``resources/directory/read`` and ``_index.json`` list there, from
+        ``Catalogue.directory`` under the caller's scope; None for anything
+        else, a skill's own folders included, which are the skill provider's.
+        """
+        a = requested_addressing()
+        entries = self._catalogue().directory(a.canonical(uri), requested_scope())
+        if entries is None:
+            return None
+        return [
+            {**entry.as_dict(), "description": a.text(entry.description)}
+            for entry in entries
+        ]
 
     async def _list_resource_templates(self) -> Sequence[ResourceTemplate]:
         return [
@@ -174,7 +214,7 @@ class NameTheFileToRead(Middleware):
     async def on_read_resource(self, context, call_next):
         try:
             return await call_next(context)
-        except NotFoundError:
+        except (NotFoundError, FolderNotFound) as miss:
             uri = str(context.message.uri)
             catalogue, scope, a = (
                 self._catalogue(),
@@ -182,6 +222,9 @@ class NameTheFileToRead(Middleware):
                 requested_addressing(),
             )
             hint = catalogue.hint(a.canonical(uri), scope)
+            if hint is None and isinstance(miss, FolderNotFound):
+                # A folder inside a skill, which kubed-mcp named: its index.
+                hint = miss.hint
             if hint is None:
                 raise
             hint = a.text(hint)
@@ -190,6 +233,60 @@ class NameTheFileToRead(Middleware):
                 message=f"Resource not found: {uri!r}. {hint}",
                 data={"uri": uri},
             ) from None
+
+
+def canonical(uri: str, a: Addressing) -> str:
+    """The address a sent URI names: the request's prefix off, dot segments resolved.
+
+    What every provider is asked for, so a skill's file is found through
+    ``../sibling/SKILL.md`` and through ``kb+skill://`` (SKL-13, SKL-42) by a
+    provider that matches addresses exactly. Anything not ``skill://`` is left
+    as it was sent.
+    """
+    if _ENCODED_SLASH.search(uri):
+        # kb never decodes an escape (SKL-13), so ``%2F`` is no separator and
+        # names nothing kb serves; FastMCP's skills provider would decode it.
+        return NOWHERE
+    uri = a.canonical(uri)
+    parsed = parse(uri)
+    if parsed is None:
+        return uri
+    library, path = parsed
+    return f"skill://{library}/{path}" if path else f"skill://{library}"
+
+
+class ReadTheAddress(Middleware):
+    """Hand every provider the canonical address of what the client sent.
+
+    A read's result still carries the URI the client sent (SKL-36): FastMCP
+    answers with the request's own. ``resources/directory/read`` resolves as a
+    read does. ``skills/get`` only loses the prefix: a skill is got by its
+    exact ``SKILL.md`` address (SKL-49).
+    """
+
+    async def on_read_resource(self, context, call_next):
+        uri = str(context.message.uri)
+        address = canonical(uri, requested_addressing())
+        if address != uri:
+            message = context.message.model_copy(update={"uri": address})
+            context = context.copy(message=message)
+        return await call_next(context)
+
+    async def on_request(self, context, call_next):
+        message = context.message
+        if context.method in ("skills/get", "resources/directory/read") and (
+            isinstance(message, Mapping) and isinstance(message.get("uri"), str)
+        ):
+            a = requested_addressing()
+            uri = message["uri"]
+            if context.method == "skills/get":
+                # It matches the exact URI already, escapes and all.
+                uri = a.canonical(uri)
+            else:
+                uri = canonical(uri, a)
+            if uri != message["uri"]:
+                context = context.copy(message={**message, "uri": uri})
+        return await call_next(context)
 
 
 class HideMirrorTools(Middleware):
@@ -226,6 +323,13 @@ class HideMirrorTools(Middleware):
 
 
 def register(mcp: QuickMCP, catalogue: Callable[[], Catalogue]) -> None:
-    """Publish the catalogue as ``skill://`` resources, read per request."""
+    """Publish the catalogue as ``skill://`` resources, read per request.
+
+    After the skills provider, so a skill's file is always its. The hints run
+    outside the address, so an error names the URI the client sent: kb's own
+    first, then kubed-mcp's for a folder inside a skill.
+    """
     mcp.add_provider(CatalogueProvider(catalogue))
     mcp.add_middleware(NameTheFileToRead(catalogue))
+    mcp.add_middleware(ReadTheAddress())
+    mcp.add_middleware(NameTheIndex())

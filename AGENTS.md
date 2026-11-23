@@ -71,7 +71,8 @@ installer's, against whatever image tag it chooses.
 | ⤷ `refresh.py` | when a fetch is due to be looked at again, bounded to the shortest configured interval, and what a failure does to the last good one |
 | `kubed/mcp_kb/sources/` | where bytes come from, one `Fetch` at a time — `file.py`, `git.py`, `webdav.py`, the shared per-version `export.py`, `errors.py`, and `live.py`, because revalidation is a source concern |
 | `kubed/mcp_kb/mcp/` | what an agent sees |
-| ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `HideMirrorTools` |
+| ⤷ `skill_catalogue.py` | `SkillCatalogue` — the skills, served by FastMCP's skills provider (through kubed-mcp) from a catalogue built per scope and prefix |
+| ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `ReadTheAddress`, `HideMirrorTools` |
 | ⤷ `tools.py`, `prompts.py` | the two mirror pairs |
 | ⤷ `request.py`, `scope.py` | what the current request says about itself, and the `Scope` it becomes |
 | ⤷ `instructions.py` | `ScopedInstructions` — sets the `instructions` on each `initialize` and `server/discover` answer |
@@ -201,14 +202,33 @@ template read. The `uriTemplate` is never prefixed, because a gateway prefixes
 it itself and kb doing so as well would prefix it twice; the description is
 text, and is prefixed like any other.
 
-The **Skills extension** is a separate discovery surface in `mcp/skills.py`:
-`skills/list` and `skills/get` publish scoped entries from `Catalogue`, without
-expanding `resources/list` or adding mirror tools. Its complete manifests hash
-the bytes `resources/read` returns, after placeholder substitution and text
-normalization; the legacy `_manifest` continues to describe disk bytes. Both
-`server/discover` and legacy `initialize` must advertise the extension. Follow
-the snapshot getter, preserve raw frontmatter, and leave invalid skill metadata
-readable as ordinary resources without advertising an invalid extension entry.
+**A skill's files are FastMCP's to serve** (MD-55, MD-61): `mcp/skill_catalogue.py`'s
+`SkillCatalogue` is kubed-mcp's `EntryOnlySkillProvider`, whose `load_skills()`
+builds the catalogue for the request's scope and prefix from `Catalogue.skill_files`,
+memoised per (generation, scope, prefix). FastMCP then serves every file, the
+`_manifest`, `skills/list` and `skills/get`, and kubed-mcp the folders inside a
+skill. Three rules keep it one set of bytes:
+
+- **Rewrite when the catalogue is built, never on read** (MD-59). Placeholders,
+  qualified names and the gateway prefix are applied to the text a `Skill` is
+  built from, so the entry's digests, the `_manifest` and the read agree. A
+  middleware that rewrote a `skill://` file on read would break every client that
+  verifies a skill.
+- **`CatalogueProvider` is registered after it, and never answers a skill's
+  file** (`Catalogue.read` answers none): it serves the indexes,
+  `_files.md`, library files and the fallbacks. `ReadTheAddress` hands every
+  provider the canonical address (the request's prefix off, dot segments
+  resolved), because FastMCP matches skill URIs exactly.
+- **A skill FastMCP refuses is not served at all**, and `SkillCatalogue.catalogue()`
+  is the `Catalogue` the request reads: less those skills, and less any that failed
+  to build for its own scope and prefix. Every other surface reads through it,
+  prompts and the scope refusal included, so no index, hint or rewritten name
+  points at a skill that does not read. Never read `snapshot.catalogue` for that.
+
+The provider's `_get_resource` keeps kb's media types and always answers text
+(`ServedFile`), and names the skill by its address in `_manifest`. Both
+`server/discover` and legacy `initialize` advertise the extension with
+`directoryRead`.
 
 The **Agents extension** is another, in `mcp/agents.py`: `agents/list` and
 `agents/get` serve the subagents Claude-format plugins ship, from `Catalogue`'s
@@ -290,8 +310,9 @@ which generation is being served, and has a refresh picked up an edit yet.
   so two libraries shipping a `testing/` collapse into one and the loser
   vanishes from the server entirely. Neither failure raises anything.
 - **A provider that stores a `Catalogue` serves the old generation forever** —
-  read through the getter (`lambda: knowledge_base.snapshot.catalogue`), or take
-  it as `Inject[Catalogue]`, as the mirror tools do, never a captured reference. A `Revalidator` has the same shape of bug and a nastier
+  read through the getter (`SkillCatalogue.catalogue`, over
+  `lambda: knowledge_base.snapshot.catalogue`), or take it as `Inject[Catalogue]`,
+  as the mirror tools do, never a captured reference. A `Revalidator` has the same shape of bug and a nastier
   symptom: a refresh exports a source to a *new* directory, so one that outlives
   its snapshot goes on revalidating into a tree nothing is serving, and the edit
   never appears. It is built in `build_snapshot` and retired with the snapshot.

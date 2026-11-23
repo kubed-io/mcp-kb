@@ -30,6 +30,7 @@ from kubed.mcp_kb.plugins import Fetch, fetch_for
 from kubed.mcp_kb.sources import AccessRefused, SourceError, fingerprint, materialise
 from kubed.mcp_kb.sources import export as exports
 from kubed.mcp_kb.sources.git import COMMIT_FILE, resolve
+from tests.conftest import served
 
 SIGNATURE = pygit2.Signature("Test", "test@example.com", 1700000000, 0)
 
@@ -176,7 +177,7 @@ def test_a_subdirectory_is_the_plugins_root_and_not_the_fetchs(origin, tmp_path)
     fetch = knowledge_base.status["plugins"]["library"]["fetch"]
     assert fetch == _key(origin)
     assert knowledge_base.status["plugins"]["library"]["root"] == "skills"
-    assert "second" in knowledge_base.catalogue.read("skill://library/x/SKILL.md")
+    assert "second" in served(knowledge_base.catalogue, "skill://library/x/SKILL.md")
     assert (tmp_path / "cache" / "src" / _fetch(origin).slug / origin.second).is_dir()
 
 
@@ -232,8 +233,8 @@ def test_a_read_in_flight_survives_a_refresh_that_moved_the_ref(origin, tmp_path
     _advance(origin)
 
     assert knowledge_base.refresh() == [_key(origin, ref="main")]
-    assert "second" in serving.catalogue.read("skill://library/x/SKILL.md")
-    assert "third" in knowledge_base.catalogue.read("skill://library/x/SKILL.md")
+    assert "second" in served(serving.catalogue, "skill://library/x/SKILL.md")
+    assert "third" in served(knowledge_base.catalogue, "skill://library/x/SKILL.md")
 
 
 @pytest.mark.unit
@@ -289,7 +290,7 @@ def test_a_truncated_export_is_rebuilt_across_a_restart(origin, tmp_path):
     restarted.refresh()
 
     assert restarted.status["fetches"][_key(origin, ref="main")]["status"] == "ok"
-    assert "second" in restarted.catalogue.read("skill://library/x/SKILL.md")
+    assert "second" in served(restarted.catalogue, "skill://library/x/SKILL.md")
 
 
 @pytest.mark.unit
@@ -450,7 +451,7 @@ def test_a_source_remapped_to_another_repository_serves_the_new_one(tmp_path):
     second = KnowledgeBase(_pointing_at(tmp_path / "b"), cache)
 
     assert [s.name for s in second.index.visible()] == ["beta"]
-    assert "beta" in second.catalogue.read("skill://library/beta/SKILL.md")
+    assert "beta" in served(second.catalogue, "skill://library/beta/SKILL.md")
     assert second.status["plugins"]["library"]["status"] == "ok"
 
 
