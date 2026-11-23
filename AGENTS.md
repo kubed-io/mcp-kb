@@ -215,13 +215,15 @@ skill. Three rules keep it one set of bytes:
   middleware that rewrote a `skill://` file on read would break every client that
   verifies a skill.
 - **`CatalogueProvider` is registered after it, and never answers a skill's
-  file** (`Catalogue.read(..., skill_files=False)`): it serves the indexes,
+  file** (`Catalogue.read` answers none): it serves the indexes,
   `_files.md`, library files and the fallbacks. `ReadTheAddress` hands every
   provider the canonical address (the request's prefix off, dot segments
   resolved), because FastMCP matches skill URIs exactly.
 - **A skill FastMCP refuses is not served at all**, and `SkillCatalogue.catalogue()`
-  is the `Catalogue` less those skills: every other surface reads through it, so
-  no index, hint or rewritten name points at a skill that does not read.
+  is the `Catalogue` the request reads: less those skills, and less any that failed
+  to build for its own scope and prefix. Every other surface reads through it,
+  prompts and the scope refusal included, so no index, hint or rewritten name
+  points at a skill that does not read. Never read `snapshot.catalogue` for that.
 
 The provider's `_get_resource` keeps kb's media types and always answers text
 (`ServedFile`), and names the skill by its address in `_manifest`. Both

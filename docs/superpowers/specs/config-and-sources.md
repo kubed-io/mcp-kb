@@ -165,7 +165,9 @@ revalidated like any other.
 ## file
 
 **SRC-20.** A file fetch is served in place; nothing is copied. A path that is not a directory
-fails the fetch with `<path> is not a directory`.
+fails the fetch with `<path> is not a directory`. A skill's files are read once per generation,
+so an edit to one in place is served from the next refresh (or `POST /reindex`); a library file
+or a prompt is read off disk each time.
 
 ## `cache: live`
 

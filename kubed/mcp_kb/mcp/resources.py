@@ -36,6 +36,7 @@ that misses stays a miss, whatever the template would have expanded to.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -55,6 +56,9 @@ from ..catalogue.uris import INDEX_JSON, Catalogue, parse
 from .request import full_listing, requested_addressing, requested_scope
 
 TEMPLATE_URI = "skill://{library}/{+path}"
+# An escaped "/" in an address, and the address nothing answers.
+_ENCODED_SLASH = re.compile(r"%2f", re.IGNORECASE)
+NOWHERE = "skill://%2F"
 
 TEMPLATE_DESCRIPTION = (
     "A skill, index or file this server serves: {library} is a library's name"
@@ -132,7 +136,7 @@ class CatalogueProvider(Provider):
                     mime_type="application/json",
                     text=json.dumps(children, indent=2),
                 )
-        body = catalogue.read(canonical, requested_scope(), skill_files=False)
+        body = catalogue.read(canonical, requested_scope())
         if body is None:
             return None
         return TextResource(
@@ -239,6 +243,10 @@ def canonical(uri: str, a: Addressing) -> str:
     provider that matches addresses exactly. Anything not ``skill://`` is left
     as it was sent.
     """
+    if _ENCODED_SLASH.search(uri):
+        # kb never decodes an escape (SKL-13), so ``%2F`` is no separator and
+        # names nothing kb serves; FastMCP's skills provider would decode it.
+        return NOWHERE
     uri = a.canonical(uri)
     parsed = parse(uri)
     if parsed is None:
@@ -251,10 +259,9 @@ class ReadTheAddress(Middleware):
     """Hand every provider the canonical address of what the client sent.
 
     A read's result still carries the URI the client sent (SKL-36): FastMCP
-    answers with the request's own. ``skills/get`` and
-    ``resources/directory/read`` only lose the prefix: a skill is got by its
-    exact ``SKILL.md`` address (SKL-49), and a folder is one only when it is
-    spelled as one.
+    answers with the request's own. ``resources/directory/read`` resolves as a
+    read does. ``skills/get`` only loses the prefix: a skill is got by its
+    exact ``SKILL.md`` address (SKL-49).
     """
 
     async def on_read_resource(self, context, call_next):
@@ -270,7 +277,13 @@ class ReadTheAddress(Middleware):
         if context.method in ("skills/get", "resources/directory/read") and (
             isinstance(message, Mapping) and isinstance(message.get("uri"), str)
         ):
-            uri = requested_addressing().canonical(message["uri"])
+            a = requested_addressing()
+            uri = message["uri"]
+            if context.method == "skills/get":
+                # It matches the exact URI already, escapes and all.
+                uri = a.canonical(uri)
+            else:
+                uri = canonical(uri, a)
             if uri != message["uri"]:
                 context = context.copy(message={**message, "uri": uri})
         return await call_next(context)

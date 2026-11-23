@@ -141,7 +141,7 @@ that fails.
 | 9 | categories or tags are set and the scope would be shown no listing row, no prompt and no agent | refused: `The scope names things that exist, but nothing in library '<x>' carries the combination: <what was asked>.` (`any library` when none is set) |
 
 Rows 6 and 7 use the plural (`categories`, `tags`) when several are unknown. An empty list is
-written `none`.
+written `none`. Rows 8 and 9 count only skills that are served (SKL-45).
 
 **SCP-32.** The known categories are the own categories of every plugin `/health` reports and the
 `categories` of every library. When a library is set, only that library's plugins and that

@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 
 from kubed.mcp import Context, Inject, NotFoundError, QuickMCP, ToolError
+from kubed.mcp.skills import FolderNotFound
 
 from ..catalogue.uris import Catalogue
 from .request import full_listing, requested_addressing, requested_scope
@@ -136,7 +137,10 @@ def register(mcp: QuickMCP) -> set[str]:
                 c.content if isinstance(c.content, str) else c.content.decode()
                 for c in result.contents
             )
-        hint = catalogue.hint(a.canonical(uri), scope) or (
+        hint = catalogue.hint(a.canonical(uri), scope)
+        if hint is None:
+            hint = await _folder_hint(ctx, canonical(uri, a))
+        hint = hint or (
             "Call list_resources() for the indexes, then read one to see the URIs"
             " inside it."
         )
@@ -147,3 +151,12 @@ def register(mcp: QuickMCP) -> set[str]:
         raise ToolError(f"No resource at '{uri}'. {hint}", log_level=logging.DEBUG)
 
     return MIRROR_TOOLS
+
+
+async def _folder_hint(ctx: Context, uri: str) -> str | None:
+    """A folder inside a skill names its ``_index.md``, as a resource read does."""
+    for provider in ctx.fastmcp.providers:
+        children = getattr(provider, "children", None)
+        if children is not None and await children(uri) is not None:
+            return FolderNotFound(uri).hint
+    return None

@@ -12,7 +12,7 @@ import pytest
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex, load_skills
 from kubed.mcp_kb.catalogue.uris import Catalogue, LibraryText, parse, uri_for
 from kubed.mcp_kb.mcp.scope import Scope
-from tests.conftest import build_library_files, fake_plugin, load_all_skills
+from tests.conftest import build_library_files, fake_plugin, load_all_skills, served
 
 
 def _tags(*groups):
@@ -145,7 +145,7 @@ def test_reading_a_folder_index_excludes_the_sibling_folder(catalogue):
 def test_a_skill_root_is_a_directory_not_its_instructions(catalogue):
     """Only `.../SKILL.md` is the instructions; the bare skill path serves nothing."""
     assert catalogue.read("skill://flatsource/alpha") is None
-    assert "First skill." in catalogue.read("skill://flatsource/alpha/SKILL.md")
+    assert "First skill." in served(catalogue, "skill://flatsource/alpha/SKILL.md")
 
 
 def _skill_at(catalogue, address):
@@ -157,7 +157,7 @@ def test_a_skills_files_are_what_a_read_serves(catalogue):
     """What the skill provider builds a skill, and its ``_manifest``, from."""
     files = catalogue.skill_files(_skill_at(catalogue, "flatsource/alpha"))
     assert list(files) == ["SKILL.md"]
-    assert files["SKILL.md"] == catalogue.read("skill://flatsource/alpha/SKILL.md")
+    assert files["SKILL.md"] == served(catalogue, "skill://flatsource/alpha/SKILL.md")
 
 
 @pytest.mark.unit
@@ -184,11 +184,10 @@ def test_a_skills_files_are_only_those_the_harvest_would_keep(catalogue, skills_
 
 @pytest.mark.unit
 def test_a_skills_own_files_are_not_read_beside_its_provider(catalogue):
-    """``skill_files=False`` is the provider registered after the skills one."""
-    uri = "skill://flatsource/alpha/SKILL.md"
-    assert catalogue.read(uri, skill_files=False) is None
-    assert catalogue.read("skill://flatsource/alpha/_manifest", skill_files=False) is None
-    assert catalogue.read("skill://flatsource/_index.md", skill_files=False)
+    """``read`` is the provider registered after the skills one (SKL-58)."""
+    assert catalogue.read("skill://flatsource/alpha/SKILL.md") is None
+    assert catalogue.read("skill://flatsource/alpha/_manifest") is None
+    assert catalogue.read("skill://flatsource/_index.md")
 
 
 @pytest.mark.unit
@@ -235,8 +234,8 @@ def test_skill_names_collide_across_libraries_and_both_survive(skills_dir):
         _write_skill(skills_dir, library, "twin", f"from {library}")
     skills = load_all_skills(skills_dir)
     cat = Catalogue(SkillIndex(skills), build_library_files(skills_dir))
-    assert "from flatsource" in cat.read("skill://flatsource/twin/SKILL.md")
-    assert "from deepsource" in cat.read("skill://deepsource/twin/SKILL.md")
+    assert "from flatsource" in served(cat, "skill://flatsource/twin/SKILL.md")
+    assert "from deepsource" in served(cat, "skill://deepsource/twin/SKILL.md")
 
 
 def _write_skill(root, library, name, description):
@@ -289,9 +288,9 @@ def test_traversal_cannot_walk_out_of_a_skill(catalogue):
 @pytest.mark.unit
 def test_a_skill_file_is_not_reachable_as_a_library_file(catalogue):
     """The two spaces must not overlap, or skill scoping could be bypassed."""
-    assert catalogue.read("skill://deepsource/plugin-a/gamma/SKILL.md") is not None
+    assert served(catalogue, "skill://deepsource/plugin-a/gamma/SKILL.md") is not None
     pinned = Scope("deepsource", categories=frozenset({"nope"}))
-    assert catalogue.read("skill://deepsource/plugin-a/gamma/SKILL.md", pinned) is None
+    assert served(catalogue, "skill://deepsource/plugin-a/gamma/SKILL.md", pinned) is None
 
 
 @pytest.mark.unit
@@ -299,8 +298,8 @@ def test_the_pin_hides_another_library_entirely(catalogue):
     """Out of scope is indistinguishable from absent, on purpose."""
     gamma = "skill://deepsource/plugin-a/gamma/SKILL.md"
     flat = Scope("flatsource")
-    assert catalogue.read(gamma) is not None
-    assert catalogue.read(gamma, scope=flat) is None
+    assert served(catalogue, gamma) is not None
+    assert served(catalogue, gamma, scope=flat) is None
     assert catalogue.read("skill://deepsource/_index.md", scope=flat) is None
     assert catalogue.read("skill://deepsource/plugin-a/_index.md", scope=flat) is None
 
@@ -331,7 +330,7 @@ def test_the_pin_blocks_shared_material_of_another_library(catalogue):
 def test_uri_for_is_the_address_the_catalogue_answers(catalogue, skills_dir):
     skill = next(s for s in load_all_skills(skills_dir) if s.name == "gamma")
     assert uri_for(skill) == "skill://deepsource/plugin-a/gamma/SKILL.md"
-    assert catalogue.read(uri_for(skill)) is not None
+    assert served(catalogue, uri_for(skill)) is not None
 
 
 @pytest.mark.unit

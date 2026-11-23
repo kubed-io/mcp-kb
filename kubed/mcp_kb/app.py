@@ -55,10 +55,14 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
     # container is handed the one main built, and main owns it.
     mcp.singleton(KnowledgeBase, instance=knowledge_base)
 
-    # The skills FastMCP serves, from the snapshot serving now; its catalogue,
-    # less any skill FastMCP refuses, is the one every other surface reads.
+    # The skills FastMCP serves, from the snapshot serving now. The catalogue a
+    # request reads is the snapshot's less every skill that request's skills
+    # catalogue lacks, and every other surface reads it.
     skills = SkillCatalogue(lambda: knowledge_base.snapshot.catalogue)
-    catalogue = skills.catalogue
+
+    def catalogue() -> Catalogue:
+        return skills.catalogue()
+
     # A transient, so a call reads one generation from start to end, and the
     # next call reads whatever a refresh has swapped in since.
     mcp.transient(Catalogue, catalogue)
@@ -68,7 +72,9 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
     resources.register(mcp, catalogue)
     agents = AgentsExtension(
         catalogue,
-        lambda scope: what_is_wrong(scope, config, knowledge_base.snapshot),
+        lambda scope: what_is_wrong(
+            scope, config, knowledge_base.snapshot, skills.catalogue
+        ),
     )
     mcp.add_extension(agents)
     # initialize carries what server/discover does: the skills id with
@@ -79,12 +85,14 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
     )
     mcp.add_middleware(ScopedInstructions(catalogue))
     resource_tools = tools.register(mcp)
-    prompt_tools = prompts.register(mcp, lambda: knowledge_base.snapshot)
+    prompt_tools = prompts.register(mcp, lambda: knowledge_base.snapshot, catalogue)
     mirrors = dict.fromkeys(resource_tools, client_reads_resources)
     mirrors.update(dict.fromkeys(prompt_tools, client_uses_prompts))
     mcp.add_middleware(
         RefuseEmptyScope(
-            lambda scope: what_is_wrong(scope, config, knowledge_base.snapshot)
+            lambda scope: what_is_wrong(
+                scope, config, knowledge_base.snapshot, skills.catalogue
+            )
         )
     )
     mcp.add_middleware(resources.HideMirrorTools(mirrors))

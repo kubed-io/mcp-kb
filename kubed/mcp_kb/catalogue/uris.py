@@ -388,13 +388,17 @@ class Catalogue:
         """
         if not addresses:
             return self
-        return Catalogue(
+        narrowed = Catalogue(
             self._index.without(addresses),
             self._resources,
             self._revalidate,
             self._libraries,
             self._agents,
         )
+        # The same trees, so what one has read the other need not read again.
+        narrowed._files = self._files
+        narrowed._texts = self._texts
+        return narrowed
 
     def visible_skills(self, scope: Scope = EVERYTHING) -> list[Skill]:
         """Every skill ``scope`` admits, by address."""
@@ -664,9 +668,7 @@ class Catalogue:
 
     # -- reading ------------------------------------------------------------
 
-    def read(
-        self, uri: str, scope: Scope = EVERYTHING, *, skill_files: bool = True
-    ) -> str | None:
+    def read(self, uri: str, scope: Scope = EVERYTHING) -> str | None:
         """The content at ``uri``, or None when there is none to give.
 
         None covers absent, malformed, out-of-scope and directory addresses
@@ -686,9 +688,9 @@ class Catalogue:
         ``${CLAUDE_PLUGIN_ROOT}`` point at. The fallback reads what it is asked
         for and lists nothing.
 
-        With ``skill_files`` false, a skill's own file and its ``_manifest``
-        read as nothing, for a caller beside the provider that serves them: a
-        path under a skill then reads only through the plugin-root fallback.
+        A skill's own files and its ``_manifest`` read as nothing here: the
+        skills provider serves them, from ``skill_files`` (MD-55). A path under
+        a skill reads here only through the plugin-root fallback.
         """
         parsed = parse(uri)
         if parsed is None:
@@ -699,14 +701,9 @@ class Catalogue:
         found = self._skill_at(library, path, scope)
         if found is not None and found[1]:
             skill, file = found
-            if skill_files:
-                body = self._skill_file(skill, file, scope)
-            elif file == MANIFEST or self._has(skill, file):
+            if file == MANIFEST or self._has(skill, file):
                 return None
-            else:
-                body = None
-            if body is None:
-                body = self._root_file(skill, file)
+            body = self._root_file(skill, file)
             if body is not None:
                 return body
         if path == INDEX:
@@ -885,20 +882,6 @@ class Catalogue:
         """Whether ``file`` is one of ``skill``'s own, as ``skill_files`` names them."""
         return file in self._files_of(skill)
 
-    def _skill_file(self, skill: Skill, file: str, scope: Scope) -> str | None:
-        # A hidden file is not one of the skill's, so a read leaves it out too:
-        # a `.env` beside a SKILL.md is not served to whoever guesses its name.
-        if hidden(Path(file)):
-            return None
-        target = readable(skill.path, file)
-        if target is None:
-            return None
-        text = self._text(skill, target)
-        if file != MAIN_FILE:
-            # Instructions are substituted; every other file is served as it is.
-            return text
-        return self._instructions(skill, text, scope)
-
     def _instructions(self, skill: Skill, text: str, scope: Scope) -> str:
         """A ``SKILL.md`` as ``scope`` reads it: names and placeholders resolved."""
         # A citation through the plugin root into one of its own skills renders
@@ -915,12 +898,12 @@ class Catalogue:
         )
 
     def _text(self, skill: Skill, target: Path) -> str:
-        """One file of ``skill`` as text, read once unless the skill is live."""
+        """One file of ``skill`` as text, read once unless the skill is live.
+
+        A live skill's file is read off disk each time, and revalidated by
+        ``live_stamp``, which its reader asks first.
+        """
         if skill.live:
-            # A live source's file may have moved since it was copied, and this
-            # is where that is noticed -- a read is the only thing that asks.
-            if self._revalidate is not None:
-                self._revalidate(target)
             return target.read_text(encoding="utf-8", errors="replace")
         text = self._texts.get(target)
         if text is None:

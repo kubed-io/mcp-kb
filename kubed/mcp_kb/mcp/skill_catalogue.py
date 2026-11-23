@@ -28,6 +28,7 @@ import json
 import logging
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import unquote
 
 from kubed.mcp import Resource, ResourceContent, ResourceResult, TextResource
@@ -70,6 +71,17 @@ class ServedFile(SkillFileResource):
         )
 
 
+@dataclass(frozen=True)
+class _Built:
+    """One key's catalogue, and the ``Catalogue`` every other surface reads for it."""
+
+    stamp: tuple
+    skills: dict[str, Skill]
+    # The generation's catalogue less the skills this key could not build, so
+    # nothing an index, a listing or a rewritten name offers fails to read.
+    catalogue: Catalogue
+
+
 class _Generation:
     """What one snapshot's catalogue serves as skills, built as requests ask."""
 
@@ -79,9 +91,7 @@ class _Generation:
         self.refused: dict[str, str] = {}
         # Each skill as it reads with no scope and no prefix, to build from.
         self.built: dict[str, tuple[Texts, Skill]] = {}
-        self.memo: OrderedDict[tuple[Scope, str], tuple[tuple, dict[str, Skill]]] = (
-            OrderedDict()
-        )
+        self.memo: OrderedDict[tuple[Scope, str], _Built] = OrderedDict()
         self.catalogue = source
 
 
@@ -115,9 +125,24 @@ class SkillCatalogue(EntryOnlySkillProvider):
         self._source = catalogue
         self._generation: _Generation | None = None
 
-    def catalogue(self) -> Catalogue:
-        """The catalogue serving now, less the skills FastMCP refuses."""
-        return self._current().catalogue
+    def catalogue(
+        self, scope: Scope | None = None, a: Addressing | None = None
+    ) -> Catalogue:
+        """The catalogue a request reads, less every skill its catalogue lacks.
+
+        That is the request's own scope and prefix unless given: what FastMCP
+        refuses for the whole generation, and what failed to build for this key
+        alone (a prefix that pushes a description past 1024 characters, a live
+        skill edited into one FastMCP refuses). Every surface that lists, hints
+        at or rewrites a name to a skill reads this, so it names only what reads
+        (MD-57).
+
+        Many surfaces ask in one request, so this revalidates nothing once the
+        key is built: the skills themselves do, once per request (``skills``).
+        """
+        scope = requested_scope() if scope is None else scope
+        a = requested_addressing() if a is None else a
+        return self._built(scope, a, revalidate=False).catalogue
 
     def refused(self) -> dict[str, str]:
         """The skills this generation does not serve, by address, with why."""
@@ -156,18 +181,23 @@ class SkillCatalogue(EntryOnlySkillProvider):
                 generation.refused[skill.address] = (
                     f"it sits inside the skill at {outer}"
                 )
+                log.warning(
+                    "skill %s sits inside the skill at %s, so it is served as"
+                    " that skill's files and not as a skill of its own",
+                    skill.address,
+                    outer,
+                )
                 continue
             texts = source.skill_files(skill)
             try:
                 generation.built[skill.address] = (texts, _skill(texts))
             except ValueError as exc:
                 generation.refused[skill.address] = _reason(exc)
-        for address, reason in sorted(generation.refused.items()):
-            log.error(
-                "skill %s is not a valid Agent Skill, so it is not served: %s",
-                address,
-                reason,
-            )
+                log.error(
+                    "skill %s is not a valid Agent Skill, so it is not served: %s",
+                    skill.address,
+                    generation.refused[skill.address],
+                )
         generation.catalogue = source.without(sorted(generation.refused))
 
     async def load_skills(self) -> dict[str, Skill]:
@@ -176,19 +206,57 @@ class SkillCatalogue(EntryOnlySkillProvider):
     def skills(self, scope: Scope = EVERYTHING, a: Addressing | None = None) -> dict:
         """The catalogue for ``scope`` and the prefix ``a``, built once per key.
 
-        Kept until the generation goes, the oldest dropped past ``MEMO_LIMIT``
-        keys, and built again when a live skill in scope has moved since.
+        FastMCP asks once per request, and that is when the live skills in
+        scope are revalidated.
         """
-        a = a or Addressing()
+        return self._built(scope, a or Addressing()).skills
+
+    def _built(self, scope: Scope, a: Addressing, *, revalidate: bool = True) -> _Built:
+        """One key's catalogue, kept until the generation goes.
+
+        The oldest key is dropped past ``MEMO_LIMIT``, and a key is built again
+        when a live skill in its scope has moved since it was built, which is
+        asked only with ``revalidate``. A skill that fails to
+        build for this key is left out, and so is every pointer to it: the
+        other skills are built again from a catalogue without it, until none
+        fails.
+        """
         generation = self._current()
-        catalogue = generation.catalogue
-        stamp = catalogue.live_stamp(scope)
         key = (scope, a.prefix)
         kept = generation.memo.get(key)
-        if kept is not None and kept[0] == stamp:
+        if kept is not None and not revalidate:
             generation.memo.move_to_end(key)
-            return kept[1]
+            return kept
+        stamp = generation.catalogue.live_stamp(scope)
+        if kept is not None and kept.stamp == stamp:
+            generation.memo.move_to_end(key)
+            return kept
+        omitted: dict[str, str] = {}
+        while True:
+            catalogue = generation.catalogue.without(sorted(omitted))
+            skills, failed = self._build(generation, catalogue, scope, a)
+            if not failed.keys() - omitted.keys():
+                break
+            omitted.update(failed)
+        for address, reason in sorted(omitted.items()):
+            log.warning(
+                "skill %s is not served under this scope and prefix: %s",
+                address,
+                reason,
+            )
+        built = _Built(stamp, skills, catalogue)
+        generation.memo[key] = built
+        while len(generation.memo) > MEMO_LIMIT:
+            generation.memo.popitem(last=False)
+        return built
+
+    @staticmethod
+    def _build(
+        generation: _Generation, catalogue: Catalogue, scope: Scope, a: Addressing
+    ) -> tuple[dict[str, Skill], dict[str, str]]:
+        """Every skill ``catalogue`` gives ``scope``, and the ones FastMCP refuses."""
         skills: dict[str, Skill] = {}
+        failed: dict[str, str] = {}
         for skill in catalogue.visible_skills(scope):
             texts = {
                 path: a.text(text)
@@ -201,17 +269,9 @@ class SkillCatalogue(EntryOnlySkillProvider):
             try:
                 skills[skill.address] = _skill(texts, like)
             except ValueError as exc:
-                # Only a rewrite can get here, the skill having passed unscoped:
-                # a prefix that takes a description past 1024 characters.
-                log.warning(
-                    "skill %s is not served under this scope: %s",
-                    skill.address,
-                    _reason(exc),
-                )
-        generation.memo[key] = (stamp, skills)
-        while len(generation.memo) > MEMO_LIMIT:
-            generation.memo.popitem(last=False)
-        return skills
+                # The skill passed unscoped, so a rewrite or a live edit did it.
+                failed[skill.address] = _reason(exc)
+        return skills, failed
 
     async def _list_resources(self) -> list[Resource]:
         # kb's listing is indexes (SKL-14), and its full listing names each

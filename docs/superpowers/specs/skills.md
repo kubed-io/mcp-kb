@@ -83,7 +83,9 @@ file under a nested skill belongs to the nested skill.
 
 **SKL-13.** Before any other check, the path below the library has its `.` and `..` segments
 removed as in RFC 3986. A `..` with nothing before it is dropped, so no address leaves its library.
-Percent-escapes are not decoded. A URI that does not start with `skill://` resolves to nothing.
+This holds for `resources/read`, `read_resource` and `resources/directory/read` alike. Percent-escapes
+are not decoded, so an escaped `/` (`%2F`) is no separator and a URI holding one resolves to
+nothing. A URI that does not start with `skill://` resolves to nothing.
 
 ## The listing
 
@@ -317,9 +319,10 @@ declared it (HTTP-27). The extension is FastMCP's, through kubed-mcp (MD-61), an
 converts to JSON, a `name` matching its address's last segment, a `description` of 1 to 1024
 characters, relative paths, at most 512 files and 16 MiB. A skill that fails, or that sits inside
 another (SKL-7), is not served at all: none of its files reads, and no index, listing row, entry,
-hint or rewritten name points at it. The server logs why. A skill that fails only under one
-request's rewriting (a prefix taking its description past 1024 characters) is left out of that
-request's catalogue alone.
+hint or rewritten name points at it. The server logs why. A skill that fails only for one scope and
+prefix (a prefix taking its description past 1024 characters, or a live skill edited upstream into
+one that fails) is left out for that scope and prefix alone, and is then not served, listed,
+indexed, hinted at or named in a rewritten pointer, a prompt included, under it.
 
 **SKL-46.** An entry describes one conforming skill:
 

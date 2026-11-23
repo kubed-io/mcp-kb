@@ -359,3 +359,170 @@ async def test_the_mirror_reads_what_resources_read_does(server_url):  # noqa: F
             assert tool.content[0].text == read[0].text
         index = (await client.read_resource("skill://flatsource/alpha/_index.md"))[0].text
         assert index.startswith("kb+skill://flatsource/alpha/SKILL.md: ")
+
+
+def _serve(knowledge_base):
+    """``knowledge_base`` on a loopback port, for headers: a context manager."""
+    import contextlib
+    import threading
+
+    import uvicorn
+
+    from tests.test_header_scope import _free_port
+
+    @contextlib.contextmanager
+    def serving():
+        port = _free_port()
+        app = server_of(knowledge_base).http_app()
+        server = uvicorn.Server(
+            uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+        )
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        for _ in range(100):
+            if server.started:
+                break
+            threading.Event().wait(0.05)
+        try:
+            yield f"http://127.0.0.1:{port}/mcp"
+        finally:
+            server.should_exit = True
+            thread.join(timeout=5)
+
+    return serving()
+
+
+async def _named(client) -> set[str]:
+    """Every skill:// URI a listing, an entry, an index or a directory names."""
+    import re
+
+    named = {str(row.uri) for row in await client.list_resources()}
+    for row in (await request(client, "skills/list"))["skills"]:
+        named.update(r["uri"] for r in row["resources"])
+    indexes = [u for u in named if u.endswith(("/_index.md", "/_files.md"))]
+    folders = sorted({"/".join(u.split("/")[:3]) for u in named})
+    while indexes:
+        text = (await client.read_resource(indexes.pop()))[0].text
+        for found in re.findall(r"(?:kb\+)?skill://[^\s`)]+?(?=[:\s`)]|$)", text):
+            if found not in named:
+                named.add(found)
+                if found.endswith(("/_index.md", "/_files.md")):
+                    indexes.append(found)
+    while folders:
+        listed = await request(client, "resources/directory/read", uri=folders.pop())
+        for child in listed["resources"]:
+            named.add(child["uri"])
+            if child["mimeType"] == "inode/directory":
+                folders.append(child["uri"])
+    return {u for u in named if "/" in u.split("://", 1)[1] and not _is_dir(u, named)}
+
+
+def _is_dir(uri: str, named: set[str]) -> bool:
+    """A directory, which serves nothing: some other named URI sits under it."""
+    return any(other.startswith(f"{uri}/") for other in named)
+
+
+async def test_a_skill_one_prefix_cannot_build_is_named_nowhere_under_it(skills_dir):
+    """MD-57 per key: listed is a subset of readable under the prefix too."""
+    from fastmcp.client.transports import StreamableHttpTransport
+
+    words = "skill://flatsource " + "x" * (1022 - len("skill://flatsource "))
+    (skills_dir / "flatsource" / "alpha" / "SKILL.md").write_text(
+        f"---\nname: alpha\ndescription: {words}\n---\nBody.\n"
+    )
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    with _serve(server) as url:
+        for headers in (
+            {"Kb-Resource-Prefix": "kb+", "Kb-Listing": "full"},
+            {"Kb-Resource-Prefix": "kb+"},
+            {"Kb-Listing": "full"},
+        ):
+            transport = StreamableHttpTransport(url, headers=headers)
+            async with Client(transport) as client:
+                named = await _named(client)
+                prefixed = "Kb-Resource-Prefix" in headers
+                assert any("flatsource/alpha" in u for u in named) is not prefixed
+                for uri in named:
+                    if (await client.read_resource(uri))[0].text is None:
+                        pytest.fail(f"{uri} is named but does not read")
+
+
+async def test_a_prompt_names_no_skill_that_is_not_served(tmp_path):
+    """SKL-45 for prompt bodies: a name that resolves to a refused skill is
+    left as written, as one to an absent skill is (SKL-55)."""
+    from kubed.mcp_kb.config import Config
+
+    root = tmp_path / "kit"
+    for name, head in (("good", "description: Fine."), ("bad", "")):
+        (root / "skills" / name).mkdir(parents=True)
+        (root / "skills" / name / "SKILL.md").write_text(
+            f"---\nname: {name}\n{head}\n---\nBody.\n"
+        )
+    (root / "commands").mkdir()
+    (root / "commands" / "use.md").write_text(
+        "---\ndescription: Use them.\n---\nUse kit:good, then kit:bad.\n"
+    )
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "kit", "source": f"file://{root}"}],
+            "libraries": [{"name": "lib", "plugins": ["kit"]}],
+        }
+    )
+    server = KnowledgeBase(config, tmp_path / "cache")
+    async with Client(server_of(server)) as client:
+        text = (await client.get_prompt("lib_use")).messages[0].content.text
+        assert "skill://lib/good/SKILL.md" in text
+        assert "kit:bad" in text
+        assert "skill://lib/bad" not in text
+
+
+def test_a_scope_whose_only_skills_are_refused_names_nothing(tmp_path):
+    """RefuseEmptyScope counts what is served, not what was harvested."""
+    from kubed.mcp_kb.config import Config
+    from kubed.mcp_kb.mcp.pins import what_is_wrong
+
+    for plugin, head in (("kit", "description: Fine."), ("odd", "")):
+        path = tmp_path / plugin / "skills" / plugin
+        path.mkdir(parents=True)
+        (path / "SKILL.md").write_text(f"---\nname: {plugin}\n{head}\n---\nBody.\n")
+    config = Config.model_validate(
+        {
+            "plugins": [
+                {"name": p, "source": f"file://{tmp_path / p}", "tags": [p]}
+                for p in ("kit", "odd")
+            ],
+            "libraries": [{"name": "lib", "plugins": ["kit", "odd"]}],
+        }
+    )
+    server = KnowledgeBase(config, tmp_path / "cache")
+    skills = SkillCatalogue(lambda: server.snapshot.catalogue)
+    odd = Scope.parse(tags=["odd"])
+
+    assert what_is_wrong(odd, config, server.snapshot) is None
+    assert "nothing in any library carries" in what_is_wrong(
+        odd, config, server.snapshot, skills.catalogue
+    )
+    kit = Scope.parse(tags=["kit"])
+    assert what_is_wrong(kit, config, server.snapshot, skills.catalogue) is None
+
+
+async def test_dot_segments_and_escaped_slashes_read_alike_everywhere(skills_dir):
+    """SKL-13: ``..`` resolves for every read, an escaped ``/`` for none."""
+    (skills_dir / "flatsource" / "alpha" / "references").mkdir()
+    (skills_dir / "flatsource" / "alpha" / "references" / "a.md").write_text("# A\n")
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    root = "skill://flatsource/alpha"
+    async with Client(server_of(server)) as client:
+        up = await request(client, "resources/directory/read", uri=f"{root}/references/..")
+        plain = await request(client, "resources/directory/read", uri=root)
+        assert up["resources"] == plain["resources"]
+        sibling = f"{root}/references/../../beta/SKILL.md"
+        assert (await client.read_resource(sibling))[0].text
+        for escaped in ("skill://flatsource%2Falpha/SKILL.md", f"{root}%2fSKILL.md"):
+            with pytest.raises(MCPError, match="Resource not found"):
+                await client.read_resource(escaped)
+        miss = await client.call_tool(
+            "read_resource", {"uri": f"{root}/references"}, raise_on_error=False
+        )
+        assert miss.is_error
+        assert f"read {root}/references/_index.md to list it" in miss.content[0].text

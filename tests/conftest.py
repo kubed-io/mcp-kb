@@ -49,6 +49,48 @@ def server_of(knowledge_base):
     return _APPS[knowledge_base].server
 
 
+def served(catalogue, uri: str, scope=None) -> str | None:
+    """``uri`` as the server serves it from ``catalogue``, under ``scope``.
+
+    A skill's file comes from the skills provider's build, as production serves
+    it; anything else from ``Catalogue.read``. For a test below MCP.
+    """
+    from kubed.mcp_kb.mcp.scope import EVERYTHING
+    from kubed.mcp_kb.mcp.skill_catalogue import SkillCatalogue
+
+    scope = EVERYTHING if scope is None else scope
+    for address, skill in SkillCatalogue(lambda: catalogue).skills(scope).items():
+        root = f"skill://{address}/"
+        if uri.startswith(root):
+            data = skill.files.get(uri[len(root) :])
+            return None if data is None else data.decode("utf-8")
+    return catalogue.read(uri, scope)
+
+
+def read_served(knowledge_base, uri: str) -> str | None:
+    """``uri`` read as a client reads it: ``resources/read`` over an MCP client.
+
+    None when the server answers that it has nothing there. Synchronous, for a
+    test that is not a coroutine; it runs the client on a loop of its own, so a
+    coroutine test may call it too. Off HTTP, so unscoped.
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    from fastmcp import Client
+    from kubed.mcp.protocol import MCPError
+
+    async def read() -> str | None:
+        async with Client(server_of(knowledge_base)) as client:
+            try:
+                return (await client.read_resource(uri))[0].text
+            except MCPError:
+                return None
+
+    with ThreadPoolExecutor(1) as pool:
+        return pool.submit(asyncio.run, read()).result()
+
+
 # Frontmatter nested deeper than the YAML parser's stack, as far as
 # ``frontmatter_out_of_stack`` is concerned; the real parser may well read it.
 DEEP_YAML = "[" * 1000 + "]" * 1000
