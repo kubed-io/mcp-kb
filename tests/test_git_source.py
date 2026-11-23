@@ -23,13 +23,20 @@ from types import SimpleNamespace
 
 import pygit2
 import pytest
+from kubed.mcp import QuickMCP
+from kubed.mcp.plugins import PluginError, PluginLoader
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.plugins import Fetch, fetch_for
-from kubed.mcp_kb.sources import AccessRefused, SourceError, fingerprint, materialise
+from kubed.mcp_kb.sources import AccessRefused, SourceError, loaders
 from kubed.mcp_kb.sources import export as exports
-from kubed.mcp_kb.sources.git import COMMIT_FILE, resolve
+from kubed.mcp_kb.sources.git import (
+    COMMIT_FILE,
+    fingerprint_git,
+    materialise_git,
+    resolve,
+)
 from tests.conftest import served
 
 SIGNATURE = pygit2.Signature("Test", "test@example.com", 1700000000, 0)
@@ -126,7 +133,7 @@ def _advance(origin, body="third"):
 @pytest.mark.unit
 def test_a_git_fetch_exports_the_tree_at_the_default_branch(origin, tmp_path):
     fetch = _fetch(origin)
-    root = materialise(fetch, tmp_path)
+    root = materialise_git(fetch, tmp_path)
 
     assert root == tmp_path / "src" / fetch.slug / origin.second
     assert "second" in _body(root)
@@ -137,7 +144,7 @@ def test_a_git_fetch_exports_the_tree_at_the_default_branch(origin, tmp_path):
 
 @pytest.mark.unit
 def test_a_pinned_commit_is_exported_even_when_it_is_not_the_tip(origin, tmp_path):
-    root = materialise(_fetch(origin, ref=origin.first), tmp_path)
+    root = materialise_git(_fetch(origin, ref=origin.first), tmp_path)
 
     assert "first" in _body(root)
     assert root.name == origin.first
@@ -147,24 +154,24 @@ def test_a_pinned_commit_is_exported_even_when_it_is_not_the_tip(origin, tmp_pat
 @pytest.mark.unit
 def test_a_tag_and_a_branch_resolve(origin, tmp_path):
     tagged = _fetch(origin, ref="v1")
-    assert "first" in _body(materialise(tagged, tmp_path))
+    assert "first" in _body(materialise_git(tagged, tmp_path))
     assert resolve(tagged, tmp_path) == origin.first
 
     branch = _fetch(origin, ref="main")
-    assert "second" in _body(materialise(branch, tmp_path))
+    assert "second" in _body(materialise_git(branch, tmp_path))
     assert resolve(branch, tmp_path) == origin.second
 
 
 @pytest.mark.unit
 def test_an_unknown_ref_is_a_source_error(origin, tmp_path):
     with pytest.raises(SourceError, match="'nope' not found"):
-        materialise(_fetch(origin, ref="nope"), tmp_path)
+        materialise_git(_fetch(origin, ref="nope"), tmp_path)
 
 
 @pytest.mark.unit
 def test_an_unknown_commit_is_a_source_error(origin, tmp_path):
     with pytest.raises(SourceError, match="is not in"):
-        materialise(_fetch(origin, ref="0" * 40), tmp_path)
+        materialise_git(_fetch(origin, ref="0" * 40), tmp_path)
 
 
 @pytest.mark.unit
@@ -200,7 +207,7 @@ def test_an_unreachable_remote_is_a_source_error(tmp_path):
     )
 
     with pytest.raises(SourceError, match="lab://nothing-here: clone failed"):
-        materialise(fetch, tmp_path / "cache")
+        materialise_git(fetch, tmp_path / "cache")
 
 
 # -- an export is never written where one is being served ----------------------
@@ -214,10 +221,10 @@ def test_a_new_export_leaves_the_old_one_whole(origin, tmp_path):
     through is never the export the refresh is writing.
     """
     source = _fetch(origin, ref="main")
-    old = materialise(source, tmp_path)
+    old = materialise_git(source, tmp_path)
     _advance(origin)
 
-    new = materialise(source, tmp_path)
+    new = materialise_git(source, tmp_path)
 
     assert new != old
     assert "second" in _body(old)
@@ -255,7 +262,7 @@ def test_an_export_is_complete_before_it_is_visible(origin, tmp_path, monkeypatc
         return real(self, target)
 
     monkeypatch.setattr(Path, "rename", spy)
-    root = materialise(_fetch(origin), tmp_path)
+    root = materialise_git(_fetch(origin), tmp_path)
 
     assert whole[str(root)] is True
 
@@ -268,10 +275,10 @@ def test_a_stamped_export_missing_its_files_is_rebuilt(origin, tmp_path):
     commit, the directory existed, and the skills were gone.
     """
     source = _fetch(origin)
-    root = materialise(source, tmp_path)
+    root = materialise_git(source, tmp_path)
     (root / "skills" / "x" / "SKILL.md").unlink()
 
-    again = materialise(source, tmp_path)
+    again = materialise_git(source, tmp_path)
 
     assert "second" in _body(again)
 
@@ -302,7 +309,7 @@ def test_a_rebuild_never_interrupts_a_reader_of_the_served_tree(origin, tmp_path
     serving out of. The repair is right; doing it there is not.
     """
     source = _fetch(origin, ref="main")
-    root = materialise(source, tmp_path)
+    root = materialise_git(source, tmp_path)
     served = root / "skills" / "x" / "SKILL.md"
     errors: list[str] = []
     stop = threading.Event()
@@ -324,7 +331,7 @@ def test_a_rebuild_never_interrupts_a_reader_of_the_served_tree(origin, tmp_path
             # A file the stamp does not account for: the export no longer holds
             # the commit it claims, which is what makes the next pass rebuild.
             (current / f"unaccounted{round_}.md").write_text("not in the stamp\n")
-            current = materialise(source, tmp_path)
+            current = materialise_git(source, tmp_path)
             time.sleep(0.05)
     finally:
         stop.set()
@@ -345,7 +352,7 @@ def test_a_crashed_export_leaves_nothing_at_a_commit_path(origin, tmp_path):
     (half / "skills").mkdir(parents=True)
     (half / "skills" / "leftover.md").write_text("never finished\n")
 
-    root = materialise(source, tmp_path)
+    root = materialise_git(source, tmp_path)
 
     assert not half.exists()
     assert not (root / "skills" / "leftover.md").exists()
@@ -360,15 +367,15 @@ def test_superseded_exports_are_collected_once_nothing_can_be_reading_them(
     commit it ever saw -- but the one the previous snapshot was built against
     stays, however old it is."""
     source = _fetch(origin, ref="main")
-    oldest = materialise(source, tmp_path)
+    oldest = materialise_git(source, tmp_path)
     _advance(origin, "third")
-    previous = materialise(source, tmp_path)
+    previous = materialise_git(source, tmp_path)
     _advance(origin, "fourth")
     for export in (oldest, previous):
         aged = export.stat().st_mtime - exports.GRACE_SECONDS - 60
         os.utime(export, (aged, aged))
 
-    newest = materialise(source, tmp_path)
+    newest = materialise_git(source, tmp_path)
 
     assert sorted(p.name for p in (tmp_path / "src" / source.slug).iterdir()) == (
         sorted([previous.name, newest.name])
@@ -378,26 +385,80 @@ def test_superseded_exports_are_collected_once_nothing_can_be_reading_them(
 @pytest.mark.unit
 def test_a_second_materialise_reuses_the_clone(origin, tmp_path, monkeypatch):
     source = _fetch(origin)
-    materialise(source, tmp_path)
+    materialise_git(source, tmp_path)
 
     def must_not_clone(*args, **kwargs):
         raise AssertionError("the clone must not be repeated")
 
     monkeypatch.setattr(pygit2, "clone_repository", must_not_clone)
 
-    assert "second" in _body(materialise(source, tmp_path))
+    assert "second" in _body(materialise_git(source, tmp_path))
 
 
 @pytest.mark.unit
 def test_an_export_is_not_repeated_for_a_commit_already_exported(origin, tmp_path):
     """/reindex must not delete and rewrite a tree the snapshot is serving."""
     source = _fetch(origin)
-    root = materialise(source, tmp_path)
+    root = materialise_git(source, tmp_path)
     (root / "skills" / "x" / "SKILL.md").write_text("proof this file was not rewritten")
 
-    materialise(source, tmp_path)
+    materialise_git(source, tmp_path)
 
     assert _body(root) == "proof this file was not rewritten"
+
+
+# -- as kubed-mcp's loader ------------------------------------------------------
+
+
+def _loader(origin, cache):
+    """The loader kb makes for ``_config``'s source, the scheme ``lab``."""
+    return loaders(_config(origin), cache)["lab"]
+
+
+@pytest.mark.unit
+def test_every_address_in_one_fetch_is_read_from_one_fetch(origin, tmp_path):
+    """Seven marketplace entries in one repository are one clone and one export
+    (SRC-53, SRC-54):
+    an address read after its fetch is materialised gets that tree, even when the
+    remote has moved since, and its subdir is inside it."""
+    loader = _loader(origin, tmp_path)
+    name = origin.path.name
+    root = loader.materialise(f"lab://{name}?ref=main")
+    _advance(origin)
+
+    docs = loader.materialise(f"lab://{name}//docs?ref=main")
+
+    assert docs == root / "docs"
+    assert "second" in _body(loader.materialise(f"lab://{name}?ref=main"))
+    with pytest.raises(SourceError, match=f"nope is not a directory in lab://{name}"):
+        loader.materialise(f"lab://{name}//nope?ref=main")
+
+
+@pytest.mark.unit
+def test_a_forgotten_fetch_is_fetched_again(origin, tmp_path):
+    """What a rebuild does: the next address reads the remote as it is now."""
+    loader = _loader(origin, tmp_path)
+    key = f"lab://{origin.path.name}?ref=main"
+    loader.materialise(key)
+    _advance(origin)
+
+    loader.forget(key)
+
+    assert "third" in _body(loader.materialise(key))
+
+
+@pytest.mark.unit
+def test_kubed_mcp_serves_a_plugin_through_the_loader(origin, tmp_path):
+    loader = _loader(origin, tmp_path)
+    assert isinstance(loader, PluginLoader)
+    mcp = QuickMCP("kb")
+    mcp.add_loader(loader)
+
+    plugin = mcp.add_plugin(f"lab://{origin.path.name}", namespace="library")
+
+    assert plugin.skills == ("skill://library/x/SKILL.md",)
+    with pytest.raises(PluginError, match="lab://missing: clone failed"):
+        mcp.add_plugin("lab://missing", namespace="other")
 
 
 def _repository_holding(root, name):
@@ -463,8 +524,8 @@ def test_the_fingerprint_is_the_exported_commit_and_moves_with_the_tip(
     origin, tmp_path
 ):
     source = _fetch(origin, ref="main")
-    root = materialise(source, tmp_path)
-    before = fingerprint(source, tmp_path, root)
+    root = materialise_git(source, tmp_path)
+    before = fingerprint_git(source, tmp_path, root)
 
     assert before == {
         "commit": origin.second,
@@ -474,21 +535,21 @@ def test_the_fingerprint_is_the_exported_commit_and_moves_with_the_tip(
     }
 
     third = _advance(origin)
-    after = fingerprint(source, tmp_path, root)
+    after = fingerprint_git(source, tmp_path, root)
 
     assert after != before
     assert after["remote"] == third
-    assert "third" in _body(materialise(source, tmp_path))
+    assert "third" in _body(materialise_git(source, tmp_path))
 
 
 @pytest.mark.unit
 def test_the_fingerprint_of_the_default_branch_follows_head(origin, tmp_path):
     source = _fetch(origin)
-    root = materialise(source, tmp_path)
+    root = materialise_git(source, tmp_path)
 
-    assert fingerprint(source, tmp_path, root)["remote"] == origin.second
+    assert fingerprint_git(source, tmp_path, root)["remote"] == origin.second
     third = _advance(origin)
-    assert fingerprint(source, tmp_path, root)["remote"] == third
+    assert fingerprint_git(source, tmp_path, root)["remote"] == third
 
 
 @pytest.mark.unit
@@ -497,7 +558,7 @@ def test_a_pinned_sha_fingerprints_without_touching_the_remote(
 ):
     """A pinned commit cannot move, so asking the remote about it is pure cost."""
     source = _fetch(origin, ref=origin.first)
-    root = materialise(source, tmp_path)
+    root = materialise_git(source, tmp_path)
 
     def must_not_connect(*args, **kwargs):
         raise AssertionError("a pinned sha must not reach the remote")
@@ -505,7 +566,7 @@ def test_a_pinned_sha_fingerprints_without_touching_the_remote(
     monkeypatch.setattr(pygit2.Remote, "connect", must_not_connect)
     monkeypatch.setattr(pygit2.Remote, "list_heads", must_not_connect)
 
-    assert fingerprint(source, tmp_path, root) == {
+    assert fingerprint_git(source, tmp_path, root) == {
         "commit": origin.first,
         "files": 2,
         "ref": origin.first,
@@ -516,11 +577,11 @@ def test_a_pinned_sha_fingerprints_without_touching_the_remote(
 @pytest.mark.unit
 def test_a_ref_that_vanished_from_the_remote_is_a_source_error(origin, tmp_path):
     source = _fetch(origin, ref="v1")
-    root = materialise(source, tmp_path)
+    root = materialise_git(source, tmp_path)
     origin.repo.references["refs/tags/v1"].delete()
 
     with pytest.raises(SourceError, match="'v1' not found"):
-        fingerprint(source, tmp_path, root)
+        fingerprint_git(source, tmp_path, root)
 
 
 # -- credentials ---------------------------------------------------------------
@@ -537,7 +598,7 @@ def test_a_token_is_resolved_from_the_environment_and_never_written_down(
         auth={"username": "x-access-token", "password": {"env": "GIT_TOKEN"}},
     )
 
-    materialise(source, tmp_path)
+    materialise_git(source, tmp_path)
 
     written = [
         p.read_bytes()
@@ -556,7 +617,7 @@ def test_an_unset_credential_is_a_source_error(origin, tmp_path, monkeypatch):
     )
 
     with pytest.raises(SourceError, match="GIT_TOKEN"):
-        materialise(source, tmp_path)
+        materialise_git(source, tmp_path)
 
 
 # -- through the catalogue -----------------------------------------------------
@@ -709,10 +770,10 @@ def test_a_private_remote_resolves_a_branch_it_has_to_authenticate_for(
     monkeypatch.setenv("GIT_TOKEN", PASSWORD)
     source = _private(private, ref="main")
 
-    root = materialise(source, tmp_path)
+    root = materialise_git(source, tmp_path)
 
     assert "second" in _body(root)
-    assert fingerprint(source, tmp_path, root)["remote"] == private.second
+    assert fingerprint_git(source, tmp_path, root)["remote"] == private.second
     assert resolve(source, tmp_path) == private.second
 
 
@@ -721,9 +782,9 @@ def test_a_private_remote_with_no_ref_resolves_head(private, tmp_path, monkeypat
     monkeypatch.setenv("GIT_TOKEN", PASSWORD)
     source = _private(private)
 
-    root = materialise(source, tmp_path)
+    root = materialise_git(source, tmp_path)
 
-    assert fingerprint(source, tmp_path, root)["remote"] == private.second
+    assert fingerprint_git(source, tmp_path, root)["remote"] == private.second
 
 
 @pytest.mark.unit
@@ -733,7 +794,7 @@ def test_a_wrong_credential_fails_without_naming_the_secret(
     monkeypatch.setenv("GIT_TOKEN", "wrong-" + PASSWORD)
 
     with pytest.raises(AccessRefused) as raised:
-        materialise(_private(private), tmp_path)
+        materialise_git(_private(private), tmp_path)
 
     assert "the credentials were refused" in str(raised.value)
     assert "wrong-" not in str(raised.value)
@@ -746,7 +807,7 @@ def test_a_remote_is_cloned_bare_and_shallow(private, tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_TOKEN", PASSWORD)
 
     fetch = _private(private)
-    materialise(fetch, tmp_path)
+    materialise_git(fetch, tmp_path)
 
     clone = tmp_path / "git" / fetch.slug
     assert pygit2.Repository(str(clone)).is_bare
@@ -760,7 +821,7 @@ def test_a_pin_below_the_shallow_tip_is_fetched_by_sha(private, tmp_path, monkey
     reason ``ref`` is a field and not part of the URL."""
     monkeypatch.setenv("GIT_TOKEN", PASSWORD)
 
-    root = materialise(_private(private, ref=private.first), tmp_path)
+    root = materialise_git(_private(private, ref=private.first), tmp_path)
 
     assert "first" in _body(root)
 
@@ -786,23 +847,23 @@ def test_a_github_source_against_the_real_thing(tmp_path):
 
     with pytest.raises(SourceError):
         # A sha that does not exist: proves the pin is fetched, not guessed.
-        materialise(github("b36e0825a2f1c0e2c0b4d7a0e3c7b1f2a4d6e8c0"), tmp_path)
+        materialise_git(github("b36e0825a2f1c0e2c0b4d7a0e3c7b1f2a4d6e8c0"), tmp_path)
 
     floating = github()
-    root = materialise(floating, tmp_path)
+    root = materialise_git(floating, tmp_path)
 
     assert (root / "skills").is_dir()
-    stamp = fingerprint(floating, tmp_path, root)
+    stamp = fingerprint_git(floating, tmp_path, root)
     assert stamp["commit"] == stamp["remote"]
 
     # The GitHub-specific path the plan singles out: a pin far below the tip,
     # which a depth-1 clone cannot contain and has to fetch by sha. A floating
     # HEAD never exercises it, and neither does a pin that happens to be HEAD.
     old = github("00029480418050a896d8b41e9f10cae8bb4320ab")
-    older = materialise(old, tmp_path)
+    older = materialise_git(old, tmp_path)
 
     assert older != root
-    assert fingerprint(old, tmp_path, older)["commit"] == old.ref
+    assert fingerprint_git(old, tmp_path, older)["commit"] == old.ref
 
 
 @pytest.mark.unit

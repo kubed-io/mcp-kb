@@ -14,6 +14,13 @@ marketplace entries in one repository are one clone. Its ``key`` is what every
 error names and its ``slug`` is where the cache puts it -- never a plugin, a
 library or a credential.
 
+Each declared source, and the built-in ``file``, is read through a loader: a
+kubed-mcp ``PluginLoader`` answering the addresses whose scheme is the source's
+name. A loader materialises a fetch key once, and every address with that key
+is the same tree, its subdir inside it. Deciding when a fetch has moved and
+rebuilding it stays kb's: it fingerprints through the loader, and ``forget``
+is how a rebuild asks for the tree again.
+
 A fetch that cannot be materialised is an error *value*, not an exception
 that escapes: one bad fetch must not take the others down, and ``/health``
 reports it instead.
@@ -21,37 +28,129 @@ reports it instead.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from ..plugins import Fetch
+from ..catalogue.harvest import inside
+from ..config import BUILTIN_SCHEMES
+from ..plugins import Fetch, source_fetch
+from ..plugins.address import parse_address
 from .errors import AccessRefused, SourceError
 from .file import fingerprint_file, materialise_file
 from .git import fingerprint_git, materialise_git
 from .webdav import fingerprint_webdav, materialise_webdav
 
+if TYPE_CHECKING:
+    from ..config import Config, SourceConfig
+
 __all__ = [
     "AccessRefused",
+    "FileLoader",
+    "GitLoader",
     "SourceError",
-    "fingerprint",
-    "materialise",
+    "SourceLoader",
+    "WebdavLoader",
+    "loaders",
+    "not_in",
+    "plugin_root",
 ]
 
 
-def materialise(fetch: Fetch, cache: Path) -> Path:
-    if fetch.backend == "file":
-        return materialise_file(fetch, cache)
-    if fetch.backend == "git":
-        return materialise_git(fetch, cache)
-    if fetch.backend == "webdav":
-        return materialise_webdav(fetch, cache)
-    raise SourceError(f"{fetch.key}: no backend {fetch.backend!r}")  # pragma: no cover
+class SourceLoader:
+    """One source's fetches, as a ``PluginLoader`` for the source's name.
+
+    The source, with the credentials it declares, and the cache directory are
+    given here; None is the built-in ``file://``. ``materialise(address)`` is
+    the folder the address names: its fetch's tree, then the subdir inside it.
+    """
+
+    build: Callable[[Fetch, Path], Path]
+    stamp: Callable[[Fetch, Path, Path], dict]
+
+    def __init__(self, source: SourceConfig | None, cache: Path) -> None:
+        self.source = source
+        self.cache = cache
+        self.schemes = BUILTIN_SCHEMES if source is None else (source.name,)
+        self._trees: dict[str, Path] = {}
+
+    def materialise(self, address: str) -> Path:
+        parsed = parse_address(address)
+        fetch = source_fetch(self.source, parsed)
+        tree = self._trees.get(fetch.key)
+        if tree is None:
+            tree = self._trees[fetch.key] = self.build(fetch, self.cache)
+        root = plugin_root(tree, parsed.subdir)
+        if root is None:
+            raise SourceError(not_in(parsed.subdir, fetch))
+        return root
+
+    def fingerprint(self, fetch: Fetch, root: Path) -> dict:
+        """What the tree at ``root`` is, and what its remote is now."""
+        return self.stamp(fetch, self.cache, root)
+
+    def forget(self, key: str) -> None:
+        """Drop the tree of fetch ``key``, so the next address fetches it again."""
+        self._trees.pop(key, None)
 
 
-def fingerprint(fetch: Fetch, cache: Path, root: Path) -> dict:
-    if fetch.backend == "file":
-        return fingerprint_file(fetch, cache, root)
-    if fetch.backend == "git":
-        return fingerprint_git(fetch, cache, root)
-    if fetch.backend == "webdav":
-        return fingerprint_webdav(fetch, cache, root)
-    raise SourceError(f"{fetch.key}: no backend {fetch.backend!r}")  # pragma: no cover
+class FileLoader(SourceLoader):
+    build = staticmethod(materialise_file)
+    stamp = staticmethod(fingerprint_file)
+
+
+class GitLoader(SourceLoader):
+    build = staticmethod(materialise_git)
+    stamp = staticmethod(fingerprint_git)
+
+
+class WebdavLoader(SourceLoader):
+    build = staticmethod(materialise_webdav)
+    stamp = staticmethod(fingerprint_webdav)
+
+
+LOADERS: dict[str, type[SourceLoader]] = {
+    "file": FileLoader,
+    "git": GitLoader,
+    "webdav": WebdavLoader,
+}
+
+
+def loaders(config: Config, cache: Path) -> dict[str, SourceLoader]:
+    """A loader for each declared source and for ``file://``, by its scheme."""
+    found: dict[str, SourceLoader] = {"file": FileLoader(None, cache)}
+    for source in config.sources:
+        found[source.name] = LOADERS[source.backend](source, cache)
+    return found
+
+
+def plugin_root(fetch_root: Path, subdir: str) -> Path | None:
+    """The plugin or marketplace root inside a materialised fetch, or None.
+
+    ``inside`` is the guard the harvest and every read use, and it belongs
+    here too: a subdir that is a *symlink* out of the fetch makes ``is_dir()``
+    true for an arbitrary directory, which then becomes the harvest's base --
+    so everything under it is "contained" relative to the escaped root and is
+    served. ``..`` never gets this far (``parse_address`` refuses it), and a
+    link inside the fetch still resolves, which is what makes a ConfigMap
+    mount -- every path of which is a symlink -- servable.
+
+    The path handed back is the one that was asked for rather than its
+    target, because that is what a ``skill://`` address and an index row are
+    built from; containment is decided on the resolved one and nothing else.
+    """
+    root = fetch_root / subdir
+    if inside(root, fetch_root.resolve()) is None or not root.is_dir():
+        return None
+    return root
+
+
+def not_in(subdir: str, fetch: Fetch) -> str:
+    """Why a root was refused: the subdir and the fetch, and no cache path.
+
+    One message for both refusals, because from outside they are one thing --
+    the fetch holds no directory this plugin or marketplace can be served
+    from, whether because there is nothing there or because what is there
+    leads out of the tree.
+    """
+    return f"{subdir or '/'} is not a directory in {fetch.key}"

@@ -6,8 +6,13 @@ resolved by deferring it to call time.
 from __future__ import annotations
 
 
-class SourceError(RuntimeError):
-    """A source could not be materialised."""
+class SourceError(ValueError):
+    """A source could not be materialised.
+
+    A ``ValueError`` because that is a failure kubed-mcp's ``add_plugin`` reports
+    for a loader. Its ``PluginError`` is one too, but importing it would bring
+    FastMCP into ``catalogue/`` (``tests/test_boundaries.py``).
+    """
 
 
 class AccessRefused(SourceError):

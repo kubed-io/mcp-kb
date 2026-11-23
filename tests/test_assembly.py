@@ -541,7 +541,7 @@ async def test_a_cold_start_reuses_the_index_and_re_reads_the_marketplace(
     """Nothing is cloned or harvested on a restart; the marketplace's entries
     are re-derived from the tree already on disk."""
     from kubed.mcp_kb import server
-    from kubed.mcp_kb.catalogue import snapshot
+    from kubed.mcp_kb.sources import SourceLoader
 
     config = _config(tmp_path, libraries=[{"name": "obs", "source": "lab://market"}])
     first = KnowledgeBase(config, tmp_path / "cache")
@@ -550,8 +550,8 @@ async def test_a_cold_start_reuses_the_index_and_re_reads_the_marketplace(
         raise AssertionError("a cold start must reuse the index")
 
     # server.py imports build_plugin by name, so it is patched where it is
-    # called from; materialise is called inside snapshot.build_fetch.
-    monkeypatch.setattr(snapshot, "materialise", must_not_run)
+    # called from; every fetch is materialised through its source's loader.
+    monkeypatch.setattr(SourceLoader, "materialise", must_not_run)
     monkeypatch.setattr(server, "build_plugin", must_not_run)
     second = KnowledgeBase(config, tmp_path / "cache")
 

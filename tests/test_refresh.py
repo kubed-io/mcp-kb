@@ -17,7 +17,7 @@ from kubed.mcp_kb.catalogue import refresh, snapshot
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.announce import _can_remember
 from kubed.mcp_kb.mcp.scope import Scope
-from kubed.mcp_kb.sources import SourceError
+from kubed.mcp_kb.sources import SourceError, SourceLoader
 from tests.conftest import key_of, make_config, server_of
 
 
@@ -71,27 +71,27 @@ def _add_prompt(path):
 
 def _counting_materialise(monkeypatch):
     """Record every fetch ``build_fetch`` materialises, and keep materialising."""
-    real = snapshot.materialise
+    real = SourceLoader.materialise
     seen = []
 
-    def spy(fetch, cache_dir):
-        seen.append(fetch.key)
-        return real(fetch, cache_dir)
+    def spy(loader, address):
+        seen.append(address)
+        return real(loader, address)
 
-    monkeypatch.setattr(snapshot, "materialise", spy)
+    monkeypatch.setattr(SourceLoader, "materialise", spy)
     return seen
 
 
 def _breaking_materialise(monkeypatch, key, error="the remote is unreachable"):
     """Make one fetch's ``materialise`` raise, leaving every other fetch alone."""
-    real = snapshot.materialise
+    real = SourceLoader.materialise
 
-    def broken(fetch, cache_dir):
-        if fetch.key == key:
+    def broken(loader, address):
+        if address == key:
             raise SourceError(f"{key}: {error}")
-        return real(fetch, cache_dir)
+        return real(loader, address)
 
-    monkeypatch.setattr(snapshot, "materialise", broken)
+    monkeypatch.setattr(SourceLoader, "materialise", broken)
 
 
 def _keys(config, *names):
@@ -131,10 +131,10 @@ def test_a_cold_start_reads_the_index_and_does_not_materialise(
     first = KnowledgeBase(make_config(skills_dir), cache)
     assert (cache / "index.json").exists()
 
-    def must_not_run(fetch, cache_dir):
+    def must_not_run(loader, address):
         raise AssertionError("must not run")
 
-    monkeypatch.setattr(snapshot, "materialise", must_not_run)
+    monkeypatch.setattr(SourceLoader, "materialise", must_not_run)
     second = KnowledgeBase(make_config(skills_dir), cache)
 
     assert len(second.index) == len(first.index)
@@ -773,14 +773,14 @@ async def test_an_unchanged_fetch_is_examined_once_per_interval_not_every_tick(
     # The fingerprint walk, not `materialise`, is the expensive step an
     # unchanged fetch repeats -- `build_fetch` (and `materialise` with it)
     # is only ever reached once a fingerprint actually moves.
-    real_fingerprint = refresh.fingerprint
+    real_fingerprint = SourceLoader.fingerprint
     calls = []
 
-    def counting_fingerprint(fetch, cache_dir, root):
+    def counting_fingerprint(loader, fetch, root):
         calls.append(fetch.key)
-        return real_fingerprint(fetch, cache_dir, root)
+        return real_fingerprint(loader, fetch, root)
 
-    monkeypatch.setattr(refresh, "fingerprint", counting_fingerprint)
+    monkeypatch.setattr(SourceLoader, "fingerprint", counting_fingerprint)
 
     async with Client(server_of(knowledge_base)):
         await asyncio.sleep(1.3)  # a little over one interval, at 50 ticks/s

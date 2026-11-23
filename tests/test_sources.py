@@ -5,8 +5,8 @@ import os
 import pytest
 
 from kubed.mcp_kb.plugins import Fetch
-from kubed.mcp_kb.sources import SourceError, fingerprint, materialise
-from kubed.mcp_kb.sources.file import fingerprint_file
+from kubed.mcp_kb.sources import SourceError
+from kubed.mcp_kb.sources.file import fingerprint_file, materialise_file
 
 
 def _fetch(path):
@@ -15,20 +15,20 @@ def _fetch(path):
 
 
 def test_a_file_fetch_is_served_in_place(tmp_path):
-    assert materialise(_fetch(tmp_path), tmp_path / "cache") == tmp_path
+    assert materialise_file(_fetch(tmp_path), tmp_path / "cache") == tmp_path
     assert not (tmp_path / "cache").exists()
 
 
 def test_a_missing_directory_is_a_source_error_naming_the_fetch(tmp_path):
     with pytest.raises(SourceError, match=f"file://{tmp_path / 'nope'}: .*nope"):
-        materialise(_fetch(tmp_path / "nope"), tmp_path / "cache")
+        materialise_file(_fetch(tmp_path / "nope"), tmp_path / "cache")
 
 
 def test_a_fingerprint_counts_files_bytes_and_newest_mtime(tmp_path):
     (tmp_path / "a.txt").write_text("hi")
     (tmp_path / "b.txt").write_text("hello")
     source = _fetch(tmp_path)
-    fp = fingerprint(source, tmp_path / "cache", tmp_path)
+    fp = fingerprint_file(source, tmp_path / "cache", tmp_path)
     assert fp["files"] == 2
     assert fp["bytes"] == len("hi") + len("hello")
     assert fp["newest"] == max(
@@ -41,11 +41,11 @@ def test_a_fingerprint_changes_when_a_file_gets_a_newer_mtime(tmp_path):
     target = tmp_path / "a.txt"
     target.write_text("hi")
     source = _fetch(tmp_path)
-    before = fingerprint(source, tmp_path / "cache", tmp_path)
+    before = fingerprint_file(source, tmp_path / "cache", tmp_path)
 
     later_ns = before["newest"] + 5_000_000_000
     os.utime(target, ns=(later_ns, later_ns))
-    after = fingerprint(source, tmp_path / "cache", tmp_path)
+    after = fingerprint_file(source, tmp_path / "cache", tmp_path)
 
     assert after["newest"] > before["newest"]
     assert after["files"] == before["files"]
@@ -55,10 +55,10 @@ def test_a_fingerprint_changes_when_a_file_gets_a_newer_mtime(tmp_path):
 def test_a_fingerprint_changes_when_a_file_is_added(tmp_path):
     (tmp_path / "a.txt").write_text("hi")
     source = _fetch(tmp_path)
-    before = fingerprint(source, tmp_path / "cache", tmp_path)
+    before = fingerprint_file(source, tmp_path / "cache", tmp_path)
 
     (tmp_path / "b.txt").write_text("more")
-    after = fingerprint(source, tmp_path / "cache", tmp_path)
+    after = fingerprint_file(source, tmp_path / "cache", tmp_path)
 
     assert after["files"] == before["files"] + 1
     assert after["bytes"] == before["bytes"] + len("more")
@@ -67,7 +67,7 @@ def test_a_fingerprint_changes_when_a_file_is_added(tmp_path):
 def test_a_fingerprint_is_unchanged_when_nothing_changed(tmp_path):
     (tmp_path / "a.txt").write_text("hi")
     source = _fetch(tmp_path)
-    assert fingerprint(source, tmp_path / "cache", tmp_path) == fingerprint(
+    assert fingerprint_file(source, tmp_path / "cache", tmp_path) == fingerprint_file(
         source, tmp_path / "cache", tmp_path
     )
 
@@ -80,7 +80,7 @@ def test_a_fingerprint_skips_hidden_directories_except_conventional_ones(tmp_pat
     (skill_dir / "SKILL.md").write_text("---\nname: a\n---\n")
 
     source = _fetch(tmp_path)
-    fp = fingerprint(source, tmp_path / "cache", tmp_path)
+    fp = fingerprint_file(source, tmp_path / "cache", tmp_path)
 
     assert fp["files"] == 1
 
@@ -94,10 +94,10 @@ def test_a_fingerprint_does_not_follow_a_symlink_out_of_the_tree(tmp_path):
     outside.write_text("a much longer file that lives somewhere else")
 
     source = _fetch(root)
-    before = fingerprint(source, tmp_path / "cache", root)
+    before = fingerprint_file(source, tmp_path / "cache", root)
 
     (root / "link.txt").symlink_to(outside)
-    after = fingerprint(source, tmp_path / "cache", root)
+    after = fingerprint_file(source, tmp_path / "cache", root)
 
     assert after == before
 

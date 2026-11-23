@@ -69,7 +69,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `index.py` | `Index`, `FetchRecord`, `PluginRecord` — the on-disk `index.json` a cold start reads |
 | ⤷ `snapshot.py` | `Snapshot`, `build_snapshot` — the immutable view every request reads |
 | ⤷ `refresh.py` | when a fetch is due to be looked at again, bounded to the shortest configured interval, and what a failure does to the last good one |
-| `kubed/mcp_kb/sources/` | where bytes come from, one `Fetch` at a time — `file.py`, `git.py`, `webdav.py`, the shared per-version `export.py`, `errors.py`, and `live.py`, because revalidation is a source concern |
+| `kubed/mcp_kb/sources/` | where bytes come from, one `Fetch` at a time — a kubed-mcp `PluginLoader` per source in `__init__.py`, over `file.py`, `git.py`, `webdav.py`, the shared per-version `export.py`, `errors.py`, and `live.py`, because revalidation is a source concern |
 | `kubed/mcp_kb/mcp/` | what an agent sees |
 | ⤷ `skill_catalogue.py` | `SkillCatalogue` — the skills, served by FastMCP's skills provider (through kubed-mcp) from a catalogue built per scope and prefix |
 | ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `ReadTheAddress`, `HideMirrorTools` |
@@ -120,7 +120,8 @@ names with a prefix, and these names are the agent's API.
   how the two merge, per kind. The rule is Claude Code's: a plugin means here
   what it means there.
 - **A new backend** → a module in `sources/` taking a `Fetch`, its scheme in
-  `config.BACKENDS`, and `sources/__init__.py`'s dispatch. Everything above it
+  `config.BACKENDS`, and a `SourceLoader` for it in `sources/__init__.py`'s
+  `LOADERS`. Everything above it
   sees a directory and nothing else, so nothing in `catalogue/` or `plugins/`
   should need a line.
 - **Changing who may see one** → `catalogue/skills.py` for the rule,
