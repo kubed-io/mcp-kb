@@ -127,9 +127,6 @@ def build_fetch(
 ) -> FetchRecord:
     """Materialise one fetch from scratch and fingerprint it: the blocking part.
 
-    From scratch: ``loader`` forgets the tree it holds for the key first, so a
-    rebuild fetches again, and every address read after it gets this tree.
-
     The fingerprint is taken here, *before* any plugin reads the tree, so a
     file written mid-harvest lands outside the recorded fingerprint and the
     next pass rebuilds. Taken after, that write would look already-accounted-for
@@ -144,7 +141,6 @@ def build_fetch(
     that: see ``KnowledgeBase._cold_start``.
     """
     try:
-        loader.forget(fetch.key)
         root = loader.materialise(fetch.key)
         stamp = loader.fingerprint(fetch, root)
     except AccessRefused as exc:

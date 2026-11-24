@@ -16,10 +16,9 @@ library or a credential.
 
 Each declared source, and the built-in ``file``, is read through a loader: a
 kubed-mcp ``PluginLoader`` answering the addresses whose scheme is the source's
-name. A loader materialises a fetch key once, and every address with that key
-is the same tree, its subdir inside it. Deciding when a fetch has moved and
-rebuilding it stays kb's: it fingerprints through the loader, and ``forget``
-is how a rebuild asks for the tree again.
+name. ``materialise(address)`` is the fetch's tree with the subdir inside it.
+Deciding when a fetch has moved and rebuilding it stays kb's: it fingerprints
+through the loader too.
 
 A fetch that cannot be materialised is an error *value*, not an exception
 that escapes: one bad fetch must not take the others down, and ``/health``
@@ -28,7 +27,7 @@ reports it instead.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -57,30 +56,32 @@ __all__ = [
 ]
 
 
-class SourceLoader:
+class SourceLoader(ABC):
     """One source's fetches, as a ``PluginLoader`` for the source's name.
 
     The source, with the credentials it declares, and the cache directory are
     given here; None is the built-in ``file://``. ``materialise(address)`` is
     the folder the address names: its fetch's tree, then the subdir inside it.
+    A subclass names its backend's ``build`` and ``stamp``.
     """
-
-    build: Callable[[Fetch, Path], Path]
-    stamp: Callable[[Fetch, Path, Path], dict]
 
     def __init__(self, source: SourceConfig | None, cache: Path) -> None:
         self.source = source
         self.cache = cache
         self.schemes = BUILTIN_SCHEMES if source is None else (source.name,)
-        self._trees: dict[str, Path] = {}
+
+    @staticmethod
+    @abstractmethod
+    def build(fetch: Fetch, cache: Path) -> Path: ...
+
+    @staticmethod
+    @abstractmethod
+    def stamp(fetch: Fetch, cache: Path, root: Path) -> dict: ...
 
     def materialise(self, address: str) -> Path:
         parsed = parse_address(address)
         fetch = source_fetch(self.source, parsed)
-        tree = self._trees.get(fetch.key)
-        if tree is None:
-            tree = self._trees[fetch.key] = self.build(fetch, self.cache)
-        root = plugin_root(tree, parsed.subdir)
+        root = plugin_root(self.build(fetch, self.cache), parsed.subdir)
         if root is None:
             raise SourceError(not_in(parsed.subdir, fetch))
         return root
@@ -88,10 +89,6 @@ class SourceLoader:
     def fingerprint(self, fetch: Fetch, root: Path) -> dict:
         """What the tree at ``root`` is, and what its remote is now."""
         return self.stamp(fetch, self.cache, root)
-
-    def forget(self, key: str) -> None:
-        """Drop the tree of fetch ``key``, so the next address fetches it again."""
-        self._trees.pop(key, None)
 
 
 class FileLoader(SourceLoader):

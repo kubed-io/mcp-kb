@@ -416,35 +416,15 @@ def _loader(origin, cache):
 
 
 @pytest.mark.unit
-def test_every_address_in_one_fetch_is_read_from_one_fetch(origin, tmp_path):
-    """Seven marketplace entries in one repository are one clone and one export
-    (SRC-53, SRC-54):
-    an address read after its fetch is materialised gets that tree, even when the
-    remote has moved since, and its subdir is inside it."""
+def test_an_address_is_its_fetchs_tree_with_the_subdir_inside_it(origin, tmp_path):
+    """Two plugins in one repository at one commit are one export (SRC-53)."""
     loader = _loader(origin, tmp_path)
     name = origin.path.name
     root = loader.materialise(f"lab://{name}?ref=main")
-    _advance(origin)
 
-    docs = loader.materialise(f"lab://{name}//docs?ref=main")
-
-    assert docs == root / "docs"
-    assert "second" in _body(loader.materialise(f"lab://{name}?ref=main"))
+    assert loader.materialise(f"lab://{name}//docs?ref=main") == root / "docs"
     with pytest.raises(SourceError, match=f"nope is not a directory in lab://{name}"):
         loader.materialise(f"lab://{name}//nope?ref=main")
-
-
-@pytest.mark.unit
-def test_a_forgotten_fetch_is_fetched_again(origin, tmp_path):
-    """What a rebuild does: the next address reads the remote as it is now."""
-    loader = _loader(origin, tmp_path)
-    key = f"lab://{origin.path.name}?ref=main"
-    loader.materialise(key)
-    _advance(origin)
-
-    loader.forget(key)
-
-    assert "third" in _body(loader.materialise(key))
 
 
 @pytest.mark.unit
@@ -797,6 +777,29 @@ def test_a_wrong_credential_fails_without_naming_the_secret(
         materialise_git(_private(private), tmp_path)
 
     assert "the credentials were refused" in str(raised.value)
+    assert "wrong-" not in str(raised.value)
+
+
+@pytest.mark.unit
+def test_the_loader_carries_its_sources_credential(private, tmp_path, monkeypatch):
+    """The source handed to the loader is what authenticates, and a refusal
+    names no secret."""
+    host, _, repo = private.url.rpartition("/")
+    config = Config.model_validate(
+        {
+            "sources": [{"name": "private", "url": host, "auth": CREDENTIAL}],
+            "plugins": [{"name": "library", "source": f"private://{repo}"}],
+            "libraries": [{"name": "library", "plugins": ["library"]}],
+        }
+    )
+    loader = loaders(config, tmp_path)["private"]
+
+    monkeypatch.setenv("GIT_TOKEN", PASSWORD)
+    assert "second" in _body(loader.materialise(f"private://{repo}?ref=main"))
+
+    monkeypatch.setenv("GIT_TOKEN", "wrong-" + PASSWORD)
+    with pytest.raises(AccessRefused, match="the credentials were refused") as raised:
+        loader.materialise(f"private://{repo}?ref=main")
     assert "wrong-" not in str(raised.value)
 
 

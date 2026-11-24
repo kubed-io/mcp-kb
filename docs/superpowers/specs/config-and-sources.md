@@ -123,10 +123,9 @@ scheme is the source's name, made with the source (its URL and `auth`) and the c
 `materialise(address)` is the folder holding the plugin, the fetch's tree with the subdir inside
 it ([SRC-8](#addresses-and-fetches)); a subdir that is not a directory in it fails with
 `<subdir> is not a directory in <key>`. A failure is a `ValueError`, which kubed-mcp's
-`add_plugin` reports as the plugin's refusal.
-
-**SRC-54.** A loader materialises a fetch key once. Every address with that key is answered from
-that tree until the fetch is rebuilt (SRC-44, SRC-51), and a rebuild materialises it again.
+`add_plugin` reports as the plugin's refusal. kb's `file` loader cannot be registered with
+kubed-mcp, which has its own `LocalLoader` for `file` built in. That one is no substitute: it
+guards no subdir symlink out of the tree and ignores `?ref=`.
 
 ## git
 
