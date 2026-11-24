@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 
 from ..config import redact
 from ..plugins import Fetch
-from ..sources import SourceError, fingerprint
+from ..sources import SourceError, SourceLoader
 from .index import FetchRecord
 from .snapshot import SERVABLE, stale
 
@@ -96,7 +96,7 @@ def tick_seconds(shortest_refresh: int | None) -> float:
     return min(TICK_SECONDS, shortest_refresh)
 
 
-def moved(fetch: Fetch, cache: Path, record: FetchRecord) -> bool:
+def moved(fetch: Fetch, loader: SourceLoader, record: FetchRecord) -> bool:
     """Whether ``fetch`` has moved on since ``record`` was built.
 
     Anything not ``"ok"`` is due unconditionally, a record already marked stale
@@ -110,7 +110,7 @@ def moved(fetch: Fetch, cache: Path, record: FetchRecord) -> bool:
     if not root.is_dir():
         return True
     try:
-        return fingerprint(fetch, cache, root) != record.fingerprint
+        return loader.fingerprint(fetch, root) != record.fingerprint
     except SourceError:
         return True
 

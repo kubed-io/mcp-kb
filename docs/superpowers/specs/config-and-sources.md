@@ -118,6 +118,15 @@ address has no auth, `cache: snapshot` and no `refresh`.
 **SRC-10.** A failure to materialise or fingerprint a fetch is recorded on that fetch alone, and
 its error names the fetch key, never a cache path.
 
+**SRC-53.** Each declared source, and `file`, has one loader: a kubed-mcp `PluginLoader` whose
+scheme is the source's name, made with the source (its URL and `auth`) and the cache directory.
+`materialise(address)` is the folder holding the plugin, the fetch's tree with the subdir inside
+it ([SRC-8](#addresses-and-fetches)); a subdir that is not a directory in it fails with
+`<subdir> is not a directory in <key>`. A failure is a `ValueError`, which kubed-mcp's
+`add_plugin` reports as the plugin's refusal. kb's `file` loader cannot be registered with
+kubed-mcp, which has its own `LocalLoader` for `file` built in. That one is no substitute: it
+guards no subdir symlink out of the tree and ignores `?ref=`.
+
 ## git
 
 **SRC-11.** A git fetch is cloned bare, with no working copy, into `<cache>/git/<slug>`. A remote

@@ -13,9 +13,8 @@ import pytest
 import yaml
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.catalogue import snapshot
 from kubed.mcp_kb.config import Config
-from kubed.mcp_kb.sources import SourceError
+from kubed.mcp_kb.sources import SourceError, SourceLoader
 from kubed.mcp_kb.spec import build_spec
 from tests.conftest import key_of, make_config, server_of
 
@@ -69,15 +68,15 @@ def every_status(skills_dir, cache, monkeypatch):
     (skills_dir / "deepsource" / "_index.md").write_text("not an index\n")
     knowledge_base = KnowledgeBase(Config.model_validate(raw), cache)
 
-    real = snapshot.materialise
+    real = SourceLoader.materialise
     key = key_of(config, "flatsource")
 
-    def broken(fetch, cache_dir):
-        if fetch.key == key:
+    def broken(loader, address):
+        if address == key:
             raise SourceError(f"{key}: the remote is unreachable")
-        return real(fetch, cache_dir)
+        return real(loader, address)
 
-    monkeypatch.setattr(snapshot, "materialise", broken)
+    monkeypatch.setattr(SourceLoader, "materialise", broken)
     knowledge_base.refresh(force=True, only=[key])
     return knowledge_base
 

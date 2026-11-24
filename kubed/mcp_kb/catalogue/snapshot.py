@@ -46,7 +46,7 @@ from ..plugins.manifest import (
     read_manifest,
 )
 from ..plugins.select import select
-from ..sources import AccessRefused, SourceError, fingerprint, materialise
+from ..sources import AccessRefused, SourceError, SourceLoader
 from ..sources.live import Revalidator, is_live
 from . import harvest
 from .agents import Agent, AgentRoster, ParsedAgent, parse_agent
@@ -123,7 +123,7 @@ class Snapshot:
 
 
 def build_fetch(
-    fetch: Fetch, cache: Path, *, refusal_is_fatal: bool = False
+    fetch: Fetch, loader: SourceLoader, *, refusal_is_fatal: bool = False
 ) -> FetchRecord:
     """Materialise one fetch from scratch and fingerprint it: the blocking part.
 
@@ -141,8 +141,8 @@ def build_fetch(
     that: see ``KnowledgeBase._cold_start``.
     """
     try:
-        root = materialise(fetch, cache)
-        stamp = fingerprint(fetch, cache, root)
+        root = loader.materialise(fetch.key)
+        stamp = loader.fingerprint(fetch, root)
     except AccessRefused as exc:
         if refusal_is_fatal:
             raise

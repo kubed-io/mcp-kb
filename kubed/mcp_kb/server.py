@@ -44,7 +44,6 @@ from collections.abc import AsyncIterator, Iterable
 from pathlib import Path
 from typing import Any
 
-from .catalogue.harvest import inside
 from .catalogue.index import (
     INDEX_VERSION,
     FetchRecord,
@@ -73,6 +72,7 @@ from .catalogue.uris import Catalogue
 from .config import Config
 from .plugins import Fetch, Plugin, declared_plugins, marketplace_fetches
 from .plugins.marketplace import find_marketplace, read_marketplace
+from .sources import SourceLoader, loaders, not_in, plugin_root
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +90,7 @@ class KnowledgeBase:
         self.config = config
         self.cache = cache
         self.index_path = cache / INDEX_FILE
+        self.loaders = loaders(config, cache)
         # Every write of the records and self.snapshot happens under this, so
         # two refreshes triggered at once still swap in a single order.
         self._lock = threading.Lock()
@@ -222,9 +223,9 @@ class KnowledgeBase:
             if not _serving(record):
                 errors[name] = record.error or "the marketplace could not be fetched"
                 continue
-            root = _root(Path(record.root or ""), address.subdir)
+            root = plugin_root(Path(record.root or ""), address.subdir)
             if root is None:
-                errors[name] = _not_in(address.subdir, fetch)
+                errors[name] = not_in(address.subdir, fetch)
                 continue
             if find_marketplace(root) is None:
                 errors[name] = f"no marketplace.json under {address.subdir or '/'}"
@@ -279,9 +280,14 @@ class KnowledgeBase:
         """The record for ``fetch``, built now if there is none in hand."""
         record = fetches.get(fetch.key)
         if record is None:
-            record = build_fetch(fetch, self.cache, refusal_is_fatal=refusal_is_fatal)
+            record = build_fetch(
+                fetch, self._loader(fetch), refusal_is_fatal=refusal_is_fatal
+            )
             fetches[fetch.key] = record
         return record
+
+    def _loader(self, fetch: Fetch) -> SourceLoader:
+        return self.loaders[fetch.scheme]
 
     def _plugin_record(
         self, plugin: Plugin, fetch: FetchRecord, reusable: dict[str, PluginRecord]
@@ -294,9 +300,9 @@ class KnowledgeBase:
         """
         if not _serving(fetch):
             return plugin, failed_plugin(plugin, fetch.error or "the fetch failed")
-        root = _root(Path(fetch.root or ""), plugin.subdir)
+        root = plugin_root(Path(fetch.root or ""), plugin.subdir)
         if root is None:
-            return plugin, failed_plugin(plugin, _not_in(plugin.subdir, plugin.fetch))
+            return plugin, failed_plugin(plugin, not_in(plugin.subdir, plugin.fetch))
         try:
             plugin, globs = with_manifest(plugin, root)
         except ValueError as exc:
@@ -385,10 +391,10 @@ class KnowledgeBase:
                 if (
                     not force
                     and current is not None
-                    and not moved(fetch, self.cache, current)
+                    and not moved(fetch, self._loader(fetch), current)
                 ):
                     continue
-                built = build_fetch(fetch, self.cache)
+                built = build_fetch(fetch, self._loader(fetch))
                 fresh = keep_last_good(current, built)
                 if same_failure(current, fresh):
                     continue
@@ -437,38 +443,6 @@ class KnowledgeBase:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-
-
-def _root(fetch_root: Path, subdir: str) -> Path | None:
-    """The plugin or marketplace root inside a materialised fetch, or None.
-
-    ``inside`` is the guard the harvest and every read use, and it belongs
-    here too: a subdir that is a *symlink* out of the fetch makes ``is_dir()``
-    true for an arbitrary directory, which then becomes the harvest's base --
-    so everything under it is "contained" relative to the escaped root and is
-    served. ``..`` never gets this far (``parse_address`` refuses it), and a
-    link inside the fetch still resolves, which is what makes a ConfigMap
-    mount -- every path of which is a symlink -- servable.
-
-    The path handed back is the one that was asked for rather than its
-    target, because that is what a ``skill://`` address and an index row are
-    built from; containment is decided on the resolved one and nothing else.
-    """
-    root = fetch_root / subdir
-    if inside(root, fetch_root.resolve()) is None or not root.is_dir():
-        return None
-    return root
-
-
-def _not_in(subdir: str, fetch: Fetch) -> str:
-    """Why a root was refused: the subdir and the fetch, and no cache path.
-
-    One message for both refusals, because from outside they are one thing --
-    the fetch holds no directory this plugin or marketplace can be served
-    from, whether because there is nothing there or because what is there
-    leads out of the tree.
-    """
-    return f"{subdir or '/'} is not a directory in {fetch.key}"
 
 
 def _serving(record: FetchRecord | PluginRecord) -> bool:

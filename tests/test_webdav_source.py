@@ -20,9 +20,16 @@ import pytest
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.plugins import Fetch, fetch_for
-from kubed.mcp_kb.sources import AccessRefused, SourceError, fingerprint, materialise
+from kubed.mcp_kb.sources import AccessRefused, SourceError
 from kubed.mcp_kb.sources import export as exports
-from kubed.mcp_kb.sources.webdav import ETAGS_FILE, VERSION_FILE, client, fetch_file
+from kubed.mcp_kb.sources.webdav import (
+    ETAGS_FILE,
+    VERSION_FILE,
+    client,
+    fetch_file,
+    fingerprint_webdav,
+    materialise_webdav,
+)
 from tests.conftest import served
 from tests.webdav_server import FOLDER, PASSWORD, USERNAME
 
@@ -81,7 +88,7 @@ def _body(root):
 
 def test_a_webdav_folder_is_copied_into_the_cache(webdav, tmp_path):
     fetch = _fetch(webdav)
-    root = materialise(fetch, tmp_path)
+    root = materialise_webdav(fetch, tmp_path)
 
     assert root.parent == tmp_path / "src" / fetch.slug
     assert "first" in _body(root)
@@ -100,10 +107,10 @@ def test_an_unchanged_folder_is_listed_again_but_never_downloaded_again(
     writing over it.
     """
     source = _fetch(webdav)
-    first = materialise(source, tmp_path)
+    first = materialise_webdav(source, tmp_path)
     webdav.requests.clear()
 
-    again = materialise(source, tmp_path)
+    again = materialise_webdav(source, tmp_path)
 
     assert again == first
     assert webdav.method("GET") == []
@@ -113,10 +120,10 @@ def test_an_unchanged_folder_is_listed_again_but_never_downloaded_again(
 def test_an_edited_folder_is_exported_beside_the_one_being_served(webdav, tmp_path):
     """E3's rule: a refresh adds a tree, it never rewrites the one in use."""
     source = _fetch(webdav)
-    old = materialise(source, tmp_path)
+    old = materialise_webdav(source, tmp_path)
     webdav.skill("x", "second version")
 
-    new = materialise(source, tmp_path)
+    new = materialise_webdav(source, tmp_path)
 
     assert new != old
     assert "first" in _body(old)
@@ -132,10 +139,10 @@ def test_a_truncated_export_is_rebuilt_beside_the_one_being_served(webdav, tmp_p
     deleting it under a reader.
     """
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
     (root / SKILL).unlink()
 
-    again = materialise(source, tmp_path)
+    again = materialise_webdav(source, tmp_path)
 
     assert again != root, "the repair must not be published over the served tree"
     assert again.name.startswith(root.name), "still the same version, a later name"
@@ -151,7 +158,7 @@ def test_a_rebuild_never_interrupts_a_reader_of_the_served_tree(webdav, tmp_path
     with its stamp, and the next pass rebuilds a version that has not moved.
     """
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
     served = root / SKILL
     errors: list[str] = []
     stop = threading.Event()
@@ -171,7 +178,7 @@ def test_a_rebuild_never_interrupts_a_reader_of_the_served_tree(webdav, tmp_path
         current = root
         for round_ in range(4):
             (current / "skills" / "x" / f".tmp-{round_}").write_text("killed")
-            current = materialise(source, tmp_path)
+            current = materialise_webdav(source, tmp_path)
             time.sleep(0.05)
     finally:
         stop.set()
@@ -190,7 +197,7 @@ def test_a_crashed_export_leaves_nothing_at_a_version_path(webdav, tmp_path):
     half.mkdir(parents=True)
     (half / "leftover.md").write_text("never finished\n")
 
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
 
     assert not half.exists()
     assert not (root / "leftover.md").exists()
@@ -219,7 +226,7 @@ def test_the_wrong_credentials_are_a_source_error_naming_the_status_not_the_pass
     monkeypatch.setenv(ENV, "not-the-password")
 
     with pytest.raises(SourceError) as raised:
-        materialise(_fetch(webdav), tmp_path)
+        materialise_webdav(_fetch(webdav), tmp_path)
 
     message = str(raised.value)
     assert isinstance(raised.value, AccessRefused)
@@ -240,7 +247,7 @@ def test_a_missing_env_variable_fails_before_the_first_request(
     webdav.requests.clear()
 
     with pytest.raises(SourceError) as raised:
-        materialise(_fetch(webdav), tmp_path)
+        materialise_webdav(_fetch(webdav), tmp_path)
 
     assert ENV in str(raised.value)
     assert "401" not in str(raised.value)
@@ -264,14 +271,14 @@ def test_a_missing_username_variable_fails_only_its_own_source(
     webdav.requests.clear()
 
     with pytest.raises(SourceError) as raised:
-        materialise(source, tmp_path)
+        materialise_webdav(source, tmp_path)
 
     assert "WEBDAV_USER" in str(raised.value)
     assert webdav.requests == []
 
 
 def test_the_password_never_lands_under_the_cache(webdav, tmp_path):
-    materialise(_fetch(webdav), tmp_path)
+    materialise_webdav(_fetch(webdav), tmp_path)
 
     written = [p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()]
     assert written
@@ -284,20 +291,20 @@ def test_the_password_never_lands_under_the_cache(webdav, tmp_path):
 def test_the_fingerprint_is_a_digest_of_every_files_etag(webdav, tmp_path):
     """An edit moves the digest and an addition moves the count with it."""
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
 
-    before = fingerprint(source, tmp_path, root)
+    before = fingerprint_webdav(source, tmp_path, root)
     assert before["remote"] == root.name, "the copy is level with the folder"
     assert before["remote_files"] == 2
-    assert fingerprint(source, tmp_path, root) == before, "an idle folder must compare equal"
+    assert fingerprint_webdav(source, tmp_path, root) == before, "an idle folder must compare equal"
 
     webdav.skill("x", "an edit that is longer than the first")
-    edited = fingerprint(source, tmp_path, root)
+    edited = fingerprint_webdav(source, tmp_path, root)
     assert edited != before
     assert edited["remote_files"] == 2
 
     webdav.skill("y", "another skill")
-    assert fingerprint(source, tmp_path, root)["remote_files"] == 3
+    assert fingerprint_webdav(source, tmp_path, root)["remote_files"] == 3
 
 
 def test_the_fingerprint_carries_the_digest_and_not_the_map(webdav, tmp_path):
@@ -307,9 +314,9 @@ def test_the_fingerprint_carries_the_digest_and_not_the_map(webdav, tmp_path):
     it from -- not a thing to republish once per file per source.
     """
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
 
-    stamp = json.dumps(fingerprint(source, tmp_path, root))
+    stamp = json.dumps(fingerprint_webdav(source, tmp_path, root))
 
     assert SKILL not in stamp and "docs/guide.md" not in stamp
     assert len(stamp) < 200
@@ -320,12 +327,12 @@ def test_the_fingerprint_moves_when_the_export_loses_a_file(webdav, tmp_path):
     """The remote has not changed, but what is being served has -- and a
     fingerprint that ignored that would report `ok` over a gutted tree."""
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
-    before = fingerprint(source, tmp_path, root)
+    root = materialise_webdav(source, tmp_path)
+    before = fingerprint_webdav(source, tmp_path, root)
 
     (root / SKILL).unlink()
 
-    assert fingerprint(source, tmp_path, root) != before
+    assert fingerprint_webdav(source, tmp_path, root) != before
 
 
 # -- a live read's half: one file, revalidated ---------------------------------
@@ -335,7 +342,7 @@ def test_fetch_file_returns_the_etag_unchanged_when_the_file_has_not_moved(
     webdav, tmp_path
 ):
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
     recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
     webdav.requests.clear()
 
@@ -345,7 +352,7 @@ def test_fetch_file_returns_the_etag_unchanged_when_the_file_has_not_moved(
 
 def test_fetch_file_replaces_the_local_copy_when_the_etag_moved(webdav, tmp_path):
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
     recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
     webdav.skill("x", "edited in nextcloud, longer than before")
 
@@ -358,7 +365,7 @@ def test_fetch_file_replaces_the_local_copy_when_the_etag_moved(webdav, tmp_path
 
 def test_a_missing_upstream_file_leaves_the_local_copy(webdav, tmp_path):
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
     (webdav.root / SKILL).unlink()
 
     assert fetch_file(source, root, SKILL) is None
@@ -372,7 +379,7 @@ def test_a_live_fetch_replaces_the_local_copy_rather_than_rewriting_it(
     the bytes it opened all the way to the end -- which a rename gives it and a
     write over the same inode takes away."""
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
     recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
     webdav.skill("x", "edited in nextcloud, and very much longer than it was")
 
@@ -390,7 +397,7 @@ def test_a_live_fetch_stages_its_download_outside_the_export(webdav, tmp_path):
     extent, so the tree looks truncated for good -- and ``collect`` walks the
     source's home, so it could never reach one buried in a skill directory."""
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
     recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
     webdav.skill("x", "edited in nextcloud, and longer than before")
     staged = []
@@ -418,10 +425,10 @@ def test_a_live_fetch_stages_its_download_outside_the_export(webdav, tmp_path):
 
 def test_a_temp_file_a_killed_fetch_left_does_not_truncate_the_export(webdav, tmp_path):
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
     (exports.workspace(root.parent) / ".tmp-killed").write_text("half a download")
 
-    assert materialise(source, tmp_path) == root, "the export is still whole"
+    assert materialise_webdav(source, tmp_path) == root, "the export is still whole"
 
 
 # -- names a URL has to carry --------------------------------------------------
@@ -440,7 +447,7 @@ def test_a_folder_whose_names_need_encoding_is_copied_whole(webdav, tmp_path):
         webdav.write(f"docs/{name}", f"body of {name}\n")
     webdav.write("docs/deep#dir/note?.md", "in a folder that needs it too\n")
 
-    root = materialise(_fetch(webdav), tmp_path)
+    root = materialise_webdav(_fetch(webdav), tmp_path)
 
     for name in AWKWARD:
         assert (root / "docs" / name).read_text() == f"body of {name}\n"
@@ -452,7 +459,7 @@ def test_a_name_that_needs_encoding_is_revalidated_like_any_other(webdav, tmp_pa
     rel = "docs/hash#and?both.md"
     webdav.write(rel, "first\n")
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
     webdav.write(rel, "edited upstream, and rather longer than before\n")
 
     assert fetch_file(source, root, rel) is not None
@@ -461,7 +468,7 @@ def test_a_name_that_needs_encoding_is_revalidated_like_any_other(webdav, tmp_pa
 
 def test_fetch_file_refuses_a_path_that_leaves_the_export(webdav, tmp_path):
     source = _fetch(webdav)
-    root = materialise(source, tmp_path)
+    root = materialise_webdav(source, tmp_path)
 
     with pytest.raises(SourceError, match="outside"):
         fetch_file(source, root, "../escaped.md")
@@ -535,7 +542,7 @@ def test_a_folder_that_does_not_exist_is_named_as_that(webdav, tmp_path):
     source = _fetch(webdav, folder="Agents")
 
     with pytest.raises(SourceError) as raised:
-        materialise(source, tmp_path)
+        materialise_webdav(source, tmp_path)
 
     assert str(raised.value) == "notes://Agents: the folder /Agents does not exist"
     assert not isinstance(raised.value, AccessRefused)

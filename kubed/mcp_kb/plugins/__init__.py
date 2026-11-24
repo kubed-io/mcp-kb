@@ -23,7 +23,7 @@ from ..config import BUILTIN_SCHEMES
 from .address import Address, parse_address
 
 if TYPE_CHECKING:
-    from ..config import BasicAuth, Config, LibraryConfig, PluginConfig
+    from ..config import BasicAuth, Config, LibraryConfig, PluginConfig, SourceConfig
     from .manifest import CommandEntry, Components
 
 
@@ -55,6 +55,11 @@ class Fetch:
     @property
     def live(self) -> bool:
         return self.cache == "live"
+
+    @property
+    def scheme(self) -> str:
+        """The address scheme, which names the loader that materialises it."""
+        return self.key.partition("://")[0]
 
 
 @dataclass(frozen=True)
@@ -130,12 +135,17 @@ class Plugin:
 
 def fetch_for(config: Config, address: Address) -> Fetch:
     """The fetch an address resolves to, through the source that names it."""
-    if address.scheme in BUILTIN_SCHEMES:
+    builtin = address.scheme in BUILTIN_SCHEMES
+    return source_fetch(None if builtin else config.source(address.scheme), address)
+
+
+def source_fetch(source: SourceConfig | None, address: Address) -> Fetch:
+    """The fetch an address resolves to through ``source``, None for ``file://``."""
+    if source is None:
         return Fetch(
             key=address.key, backend="file", url=address.path, ref=address.ref
         )
 
-    source = config.source(address.scheme)
     backend = source.backend
     if backend == "git":
         base = source.url.removeprefix("git+")

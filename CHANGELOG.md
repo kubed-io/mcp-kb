@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** A skill that fails the Agent Skills checks (strict frontmatter, at most 512 files and 16 MiB), or that sits inside another skill, is no longer served at all; the log says why.
 - A skill's `_manifest` gives the size and hash of the bytes a read returns, the same as its `skills/get` entry.
 - `skills/get` of a skill that is not served answers `Unknown skill URI: <uri>`.
+- Plugin sources (git, WebDAV, `file://`) load through kubed-mcp plugin loaders.
 
 ### Fixed
 
