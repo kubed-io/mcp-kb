@@ -54,9 +54,9 @@ the name.
 **AGT-6.** An agent file is YAML frontmatter and a Markdown body. The plugin layer reads each
 agent file as its plugin is added, and is the only reader that decides whether it serves: kb's
 harvest records where each file is (AGT-5) and reads none. The frontmatter MUST parse into a
-non-empty mapping that converts to JSON, and carry `name` and `description` as non-empty strings,
-the `description` not whitespace alone. A file whose frontmatter has no `name` is served under its
-file's stem, and is not listed as skipped. The name an agent is served under MUST be a usable name:
+non-empty mapping that converts to JSON, and carry a `description` that is a non-empty string, not
+whitespace alone. A `name`, when present, MUST be a non-empty string; a file whose frontmatter has
+no `name` is served under its file's stem, and is not listed as skipped. The name an agent is served under MUST be a usable name:
 no whitespace, control or other invisible character, `/`, `@` or `:`, so no file can take the
 `<name>@<plugin name>` a rename gives (AGT-8). Two files of one plugin that take the same name
 (AGT-7): the first in path order is served and the rest are skipped. A file the plugin layer refuses
@@ -68,7 +68,7 @@ plugin:
 | No frontmatter, or frontmatter that is not YAML | `no YAML frontmatter` |
 | Frontmatter that is not a non-empty mapping | `its frontmatter is not a non-empty mapping` |
 | Frontmatter with no JSON form: a date, `.nan`, a key that is not a string | `its frontmatter is not representable as JSON` |
-| A `name` that is not a non-empty string | `its name must be a non-empty string` |
+| A `name` that is present but not a non-empty string | `its name must be a non-empty string` |
 | No `description`, or one that is blank | `its description must be a non-empty string` |
 | A name that is not usable | `agent name '<name>' is not a usable name`, the served name, library prefix and folders included, quoted escaped |
 | A later file of one plugin taking a name already taken in it | `agent <name> is already served by <path>`, the served name and the first file's path |
@@ -79,17 +79,18 @@ parser, so a file the layer serves parses for kb too unless it changed between t
 kb cannot read is skipped with `agent_meta failed: kb cannot read agent file <path>`: one that is not
 a regular file inside its plugin root, by the path kb resolves, or is not UTF-8 text. A file that no
 longer parses when kb reads it is skipped with `agent_meta failed: agent file <path>: <reason>`, the
-reason one of the table's, but for a name that is not usable, whose reason quotes the frontmatter
-name, or else the stem, with no library prefix or folders. An agent file the plugin layer
+reason one of the table's. For a name that is not usable, that reason quotes the frontmatter name,
+or else the stem, with no library prefix or folders. An agent file the plugin layer
 finds that kb's harvest did not is not served either, and is not listed under `skipped`: kb logs
 `agent file <path> of plugin <id> is not served: kb's harvest did not find it` once, and the plugin
 layer logs its own refusal each time the plugin is added.
 
 ## The roster: `agents/list`
 
-**AGT-7.** `agents/list` is kubed-mcp's agents extension (kubed-mcp's PLUG-30), serving
-the plugins kb adds to its plugin set (SKL-58) under kb's view (PLUG-53). It takes no params but an
-optional `cursor`, and returns a card for every agent in the caller's scope (AGT-15), in name order:
+**AGT-7.** `agents/list` belongs to kubed-mcp's agents extension, which declares
+`io.modelcontextprotocol/agents` and binds `agents/list` and `agents/get` (kubed-mcp's PLUG-27).
+The list (kubed-mcp's PLUG-30) serves the plugins kb adds to its plugin set (SKL-58) under kb's
+view (PLUG-53). It takes no params but an optional `cursor`, and returns a card for every agent in the caller's scope (AGT-15), in name order:
 
 | Card field | Value |
 |---|---|
@@ -160,21 +161,24 @@ An edit that no longer reads as an agent leaves the plugin serving the build it 
 and prompts and the agent under its name included. It no longer reads when kb cannot read it (it
 is not a regular file inside its plugin root, or not UTF-8 text) or when the plugin layer's parser
 refuses it for one of AGT-6's reasons: no YAML frontmatter, frontmatter that is not a non-empty
-mapping or has no JSON form, a `name` or a `description` that is not a non-empty string, or a
-frontmatter `name` that is not usable. The server logs one warning and reads the plugin again when
+mapping or has no JSON form, a `name` that is present but not a non-empty string, a `description`
+that is not a non-empty string, or a frontmatter `name` that is not usable. The server logs one warning and reads the plugin again when
 one of its files moves, as PRM-60 says for a prompt.
 
 An edit that gives an agent a name another agent file of the same plugin serves still reads, so
 nothing is kept: from the next request the first of the two files in path order is served under
-that name and the other is skipped (AGT-6), as a refresh of the same tree serves them. A refresh
-reads the plugin from its source and has no earlier build to keep.
+that name and the other is skipped (AGT-6), as a refresh of the same tree serves them. An edit
+whose new name is taken in its library, and whose `<name>@<plugin name>` is taken too, still reads
+as well: from the next request that agent is not served in that library and is listed under its
+`unserved` (AGT-8), as a refresh would leave it. A refresh reads the plugin from its source and has no earlier build to
+keep.
 
 **AGT-17.** `instructions` rewrites qualified skill names (SKL-54) as SKL-55 says, for the
 request's scope. The agent's plugin is the own plugin and its library is the library, and the
 rewrite runs before PRM-48. `_meta["io.kubed.mcp-kb/agent"]` adds `skills`, an object that maps
 entries of the frontmatter `skills` to the `SKILL.md` addresses they resolve to. It is decided once
 per generation, whatever the caller's scope, because the plugin layer's agent-meta hook runs as the
-agent enters the plugin set, never per build (kubed-mcp's PLUG-73); and from the agent's own plugin
+agent enters the plugin set, never on a read (kubed-mcp's PLUG-73); and from the agent's own plugin
 alone, which every scope that sees the agent also sees.
 
 - **Entries.** The frontmatter `skills` is a list, whose string items are the entries, or one

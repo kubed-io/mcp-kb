@@ -1316,6 +1316,67 @@ def test_a_kept_plugins_agents_are_not_read_again(webdav, tmp_path, monkeypatch)
     assert got["_meta"]["io.kubed.mcp-kb/agent"]["frontmatter"]["description"] == "Z."
 
 
+def test_a_kept_local_plugins_agents_are_not_read_again(webdav, tmp_path, caplog):
+    """A re-read keeps every plugin that is not live as its last add read it,
+    agents included: a ``file://`` agent edited in place serves what the layer
+    read, kb's ``frontmatter`` agreeing with the layer's, and one saved halfway
+    through stays listed, with no ``agent_meta`` failure (AGT-16)."""
+    webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
+    local = tmp_path / "kit"
+    (local / ".claude-plugin").mkdir(parents=True)
+    (local / ".claude-plugin/plugin.json").write_text(json.dumps({"name": "kit"}))
+    (local / "agents").mkdir()
+    agent = local / "agents/aide.md"
+    agent.write_text("---\nname: aide\ndescription: Aids.\n---\n\nKit's.\n")
+    knowledge_base = _live_config(
+        webdav,
+        tmp_path,
+        [
+            {"name": "notes", "source": KEY},
+            {"name": "kit", "source": f"file://{local}"},
+        ],
+        [
+            {"name": "notes", "plugins": ["notes"]},
+            {"name": "kit", "plugins": ["kit"]},
+        ],
+    )
+    name = "kit_aide"
+
+    async def go(client):
+        got = await ext_request(client, "agents/get", name=name)
+        listed = (await ext_request(client, "agents/list"))["agents"]
+        return got, {card["name"]: card for card in listed}
+
+    assert run_client(knowledge_base, go)[0]["instructions"] == "Kit's."
+
+    def reread(text: str, edit: str):
+        agent.write_text(text)
+        webdav.skill("x", edit)
+        read_served(knowledge_base, URI)
+        assert edit in read_served(knowledge_base, URI), "the live plugin re-read"
+        return run_client(knowledge_base, go)
+
+    with caplog.at_level("WARNING"):
+        got, listed = reread(
+            "---\nname: aide\ndescription: Aids, edited in place.\n---\n\nKit's, longer.\n",
+            "edited in nextcloud, and rather longer than before",
+        )
+        layer = got["_meta"]["io.kubed/agent"]["frontmatter"]
+        assert got["_meta"]["io.kubed.mcp-kb/agent"]["frontmatter"] == layer
+        assert layer["description"] == "Aids."
+        assert listed[name]["description"] == "Aids."
+
+        got, listed = reread(
+            "---\nname: aide\n---\n\nSaved halfway through.\n",
+            "edited in nextcloud a second time, and longer again than that",
+        )
+    assert name in listed, "AGT-16: a kept plugin's agent stays served"
+    assert got["_meta"]["io.kubed.mcp-kb/agent"]["frontmatter"]["description"] == (
+        "Aids."
+    )
+    assert "agent_meta failed" not in caplog.text
+
+
 def test_a_live_rename_renames_a_later_clashing_agent(webdav, tmp_path):
     """N6: a live edit of an agent's frontmatter ``name`` is served under the
     new name from the next request, without a refresh, and a later plugin's

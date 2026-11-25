@@ -20,6 +20,13 @@
 > under 0.3.0, and Task 4 cites kubed-mcp's rows at `v0.3.0`. Task 4 also found that kb's
 > `_meta.skills` named a skill SKL-3 does not serve, because the hook runs before the parity
 > guard. It is fixed in `agent_meta`.
+>
+> **Shipped 2026-11-25**, Tasks 0 to 5 and the whole-branch review. The review found one
+> regression from D6: kubed-mcp calls `agent_meta` again for every plugin a live re-read keeps,
+> and only a live plugin answered from its last read, so any other kept plugin re-read its agent
+> files from disk. Every added plugin's agent reads are now published (`_Published.agent_reads`)
+> and carried by `_keep`, so a kept plugin reads no file. The hidden-file check behind
+> `_meta.skills` runs once per publish.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -719,19 +726,19 @@ git commit -m "K5: pin agent rename order, one generation per read, and the pref
   - line 35 names kb's `io.kubed.mcp-kb/agent` beside kubed-mcp's `io.kubed/agent`;
   - line 55 adds "a live agent or prompt saved mid-edit goes on serving its last good version"
 
-- [ ] **Step 1: Update the wiki**
+- [x] **Step 1: Update the wiki**
 
 Make the pages say what the spec now says (A1 to A3). Run `python scripts/generate_wiki.py`, and
 commit whatever it moves on the wiki's `issue-83` branch.
 
-- [ ] **Step 2: Run every check**
+- [x] **Step 2: Run every check**
 
 Run: `ruff check .`, then `pytest`, then `python scripts/generate_wiki.py --check`, then
 `python scripts/generate_openapi.py` and `npx --yes @redocly/cli@2 lint openapi.yaml`.
 Expected: ruff is clean. pytest is green, with the K4 baseline's skips and its one xfail (N15).
 The wiki check and the lint are clean.
 
-- [ ] **Step 3: Commit, and write the PR body**
+- [x] **Step 3: Commit, and write the PR body**
 
 ```bash
 git add -A CHANGELOG.md wiki

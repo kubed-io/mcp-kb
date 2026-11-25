@@ -176,8 +176,6 @@ class _Watch:
     # The folder the plugin was added from: a refresh points its fetch at a
     # new export before it publishes, and a re-read must not add from that.
     root: Path | None = None
-    # Its agents' frontmatter as the add read it, by path from the root (N6).
-    read: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
     # Its selected prompt files, as paths under ``root`` (D7).
     commands: tuple[Path, ...] = ()
 
@@ -187,9 +185,10 @@ class _Published:
     """What one generation is served from: its snapshot, narrowed, and its table.
 
     ``hidden`` is the addresses of the skills holding a hidden path, which the
-    rewriter fails in every build (N13). ``source`` is the snapshot as it was
-    handed to ``publish``, which a re-read narrows again, and ``live`` each live
-    plugin's watch, by key.
+    rewriter fails in every build (N13): while the set is staged every skill
+    kb found that holds one, once published those the layer would serve.
+    ``source`` is the snapshot as it was handed to ``publish``, which a re-read
+    narrows again, and ``live`` each live plugin's watch, by key.
     """
 
     snapshot: Snapshot
@@ -200,6 +199,12 @@ class _Published:
     # What the reader made of each added plugin's prompt files as it entered
     # the set, by key and then root-relative path, in read order (D5).
     prompts: Mapping[Key, Mapping[str, FilePrompt]] = field(default_factory=dict)
+    # The frontmatter ``agent_meta`` read for each added plugin's agents as it
+    # entered the set, by key and then root-relative path: what a plugin kept
+    # unread answers from, live or not (D9, AGT-16).
+    agent_reads: Mapping[Key, Mapping[str, Mapping[str, object]]] = field(
+        default_factory=dict
+    )
 
 
 def holds_hidden(folder: Path) -> bool:
@@ -313,10 +318,10 @@ class SkillServing:
         self._lock = threading.Lock()
         # What the parity guard has said, so a refresh does not say it again.
         self._noted: set[str] = set()
-        # While a set is staged: the live watches of the plugins kept unread,
-        # and the agent frontmatter ``agent_meta`` read for those added, by key
-        # and path, and the prompts ``read_command`` read for them alike.
-        self._carried: dict[Key, _Watch] = {}
+        # While a set is staged: the agent frontmatter each plugin kept unread
+        # was published with, and what ``agent_meta`` read for those added, by
+        # key and path, and the prompts ``read_command`` read for them alike.
+        self._carried: dict[Key, Mapping[str, Mapping[str, object]]] = {}
         self._reads: dict[Key, dict[str, Mapping[str, object]]] = {}
         self._prompt_reads: dict[Key, dict[str, FilePrompt]] = {}
 
@@ -358,6 +363,13 @@ class SkillServing:
         for skill in catalogue.visible_skills():
             skills.setdefault((skill.library, skill.plugin), []).append(skill.address)
             found.setdefault((skill.library, skill.plugin), []).append(skill)
+        # Walked once a publish, before any plugin enters: ``agent_meta`` and
+        # the parity guard both read it (N13).
+        hidden = frozenset(
+            skill.address
+            for skill in catalogue.visible_skills()
+            if holds_hidden(skill.path)
+        )
 
         noted: set[str] = set()
         table: dict[tuple[str, str], _Row] = {}
@@ -365,7 +377,8 @@ class SkillServing:
         # What each plugin in the set was read as: this publish's reads for one
         # added, and what it was published with for one kept (D5).
         prompts: dict[Key, Mapping[str, FilePrompt]] = {}
-        entering = _ENTERING.set((self, _Published(snapshot, table)))
+        agent_reads: dict[Key, Mapping[str, Mapping[str, object]]] = {}
+        entering = _ENTERING.set((self, _Published(snapshot, table, hidden)))
         self._carried, self._reads, self._prompt_reads = {}, {}, {}
         staged = self._mcp.plugin_set()
         added: list[tuple[Library, Plugin, Served]] = []
@@ -421,6 +434,8 @@ class SkillServing:
                     before = table.get(key)
                     table[key] = _Row(lib.name, plugin, frozenset(lib.categories))
                     last = self._published.live.get(key)
+                    # What its agents were published with, if it is served now.
+                    read = self._published.agent_reads.get(key, {})
                     watch: _Watch | None = None
                     # Kept as served: what it was published with stands.
                     kept = True
@@ -429,7 +444,7 @@ class SkillServing:
                             # Not moved: carried as served, unread (D9), its
                             # agents as its last add read them.
                             watch = last
-                            served = self._keep(staged, key, served_now, last)
+                            served = self._keep(staged, key, served_now, read)
                         else:
                             if moved is not None and key in moved:
                                 watch = moved[key]
@@ -447,20 +462,13 @@ class SkillServing:
                                 key,
                                 plugin,
                                 served_now,
-                                last,
+                                read,
                                 lib,
                                 noted,
                                 commands,
                             )
                             if moved is not None and key in moved and not kept:
                                 readded.append((moved[key].root, served))
-                            if watch is not None:
-                                read = (
-                                    self._reads.get(key, {})
-                                    if not kept
-                                    else ({} if last is None else last.read)
-                                )
-                                watch = replace(watch, read=read)
                     except (PluginError, ValueError) as exc:
                         # A refused add leaves the set as it was, and the table.
                         if before is None:
@@ -479,6 +487,7 @@ class SkillServing:
                         if kept
                         else self._prompt_reads.get(key, {})
                     )
+                    agent_reads[key] = read if kept else self._reads.get(key, {})
                     added.append((lib, plugin, served))
         finally:
             _ENTERING.reset(entering)
@@ -489,14 +498,14 @@ class SkillServing:
                 # Read from another export than the one it was added from: a
                 # refresh moved the fetch under this re-read, and publishes it.
                 raise _Abandoned
-        published, hidden = self._narrowed(
-            snapshot, added, refused, skills, noted, prompts
+        published, served_hidden = self._narrowed(
+            snapshot, added, refused, skills, noted, prompts, hidden
         )
         # Before serve(): a build of the new set must find its own generation.
         # A serve that raises serves nothing new, so what was published stays.
         previous = self._published
         self._published = _Published(
-            published, table, hidden, snapshot, live, prompts
+            published, table, served_hidden, snapshot, live, prompts, agent_reads
         )
         try:
             self._mcp.serve(staged)
@@ -512,13 +521,14 @@ class SkillServing:
         key: Key,
         plugin: Plugin,
         served_now: Served | None,
-        last: _Watch | None,
+        read: Mapping[str, Mapping[str, object]],
         lib: Library,
         noted: set[str],
         commands: PluginCommands | None = None,
     ) -> tuple[Served, bool]:
         """``plugin`` read and added to ``staged``, and False. On a re-read, a
-        refused one is kept as served instead, said once, and True (D9)."""
+        refused one is kept as served instead, its agents as ``read`` gives
+        them, said once, and True (D9)."""
         try:
             if served_now is not None:
                 # A re-read: a file the plugin served that no longer reads would
@@ -545,7 +555,7 @@ class SkillServing:
                 f"plugin {plugin.id} in library {lib.name} was not read again, so"
                 f" it serves what it served: {self._clean(str(exc), plugin)}",
             )
-            return self._keep(staged, key, served_now, last), True
+            return self._keep(staged, key, served_now, read), True
 
     def _vet(
         self,
@@ -605,12 +615,16 @@ class SkillServing:
                 raise ValueError(f"agent {file.path}: {reason}") from exc
 
     def _keep(
-        self, staged: PluginSet, key: Key, served_now: Served, last: _Watch | None
+        self,
+        staged: PluginSet,
+        key: Key,
+        served_now: Served,
+        read: Mapping[str, Mapping[str, object]],
     ) -> Served:
         """``served_now`` carried into ``staged`` unread: ``agent_meta`` answers
-        its live agents from ``last``, what its last add read."""
-        if last is not None:
-            self._carried[key] = last
+        its agents from ``read``, what its last add read, never from disk -- a
+        ``file://`` tree is served in place, and an edit to it is a refresh's."""
+        self._carried[key] = read
         return staged.keep(served_now)
 
     def _root_of(self, plugin: Plugin) -> Path | None:
@@ -695,10 +709,12 @@ class SkillServing:
         skills: dict[tuple[str, str], list[str]],
         noted: set[str],
         reads: Mapping[Key, Mapping[str, FilePrompt]],
+        hidden: frozenset[str],
     ) -> tuple[Snapshot, frozenset[str]]:
         """``snapshot`` less what kubed-mcp does not serve, with its ``/health``
-        reading what it does: the parity guard (D3, D11). Also the skills
-        holding a hidden path, which kb does not let it serve (N13).
+        reading what it does: the parity guard (D3, D11). Also the skills it
+        would serve of those ``hidden`` gives, which hold a hidden path and
+        which kb does not let it serve (N13).
 
         Its prompts are what kb's reader read as each plugin entered the set,
         the first read of each name kubed-mcp serves (D5), and ``/health``
@@ -707,8 +723,7 @@ class SkillServing:
         ``/health`` counts them and gives a ``skipped`` row, with the layer's
         reason, for each agent file kb found that the layer skipped (AGT-14)."""
         catalogue = snapshot.catalogue
-        folders = {s.address: s.path for s in catalogue.visible_skills()}
-        hidden: set[str] = set()
+        served_hidden: set[str] = set()
         kept = {(lib.name, plugin.id) for lib, plugin, _ in added}
         gone: list[str] = []
         for (library, pid), addresses in skills.items():
@@ -738,8 +753,8 @@ class SkillServing:
             mine = set(skills.get((lib.name, plugin.id), ()))
             theirs = {_address_of(uri) for uri in served.skills}
             for address in sorted(mine & theirs):
-                if holds_hidden(folders[address]):
-                    hidden.add(address)
+                if address in hidden:
+                    served_hidden.add(address)
                     gone.append(address)
                     self._note(noted, HIDDEN.format(address))
             for address in sorted(mine - theirs):
@@ -817,7 +832,7 @@ class SkillServing:
                 "plugins": status_plugins,
             },
         )
-        return published, frozenset(hidden)
+        return published, frozenset(served_hidden)
 
     def _agents_of(
         self,
@@ -1108,7 +1123,11 @@ class SkillServing:
         Raises, so the set skips the agent (PLUG-73), for a file kb's harvest
         did not find (D4) -- every agent served is then one AGT-3's fallback
         refuses -- and for one kb cannot read (``_frontmatter``). ``frontmatter``
-        is what kubed-mcp's own parser makes of the file, so the two keys agree."""
+        is what kubed-mcp's own parser makes of the file, so the two keys agree:
+        read from the file when its plugin is added, and as that add read it
+        when the plugin is kept unread, live or not. ``skills`` is narrowed to
+        the skills the layer serves of its plugin, less any the parity guard
+        drops for a hidden path (N13)."""
         published, _ = self._reading()
         key = (plugin.namespace, plugin.address)
         row = published.table.get(key)
@@ -1121,10 +1140,10 @@ class SkillServing:
             # Fail closed, as the rewriter fails a skill kb never found (N13).
             raise ValueError(f"agent file {path} is not one kb found")
         catalogue = published.snapshot.catalogue
-        carried = self._carried.get(key) if is_live(row.plugin.fetch) else None
+        carried = self._carried.get(key)
         if carried is not None:
-            # Kept unread: as its last add read it.
-            read = carried.read.get(path)
+            # Kept unread: as its last add read it, whatever its file says now.
+            read = carried.get(path)
             if read is None:
                 # kb cannot say what this agent is, so the set skips it (PLUG-73).
                 raise ValueError(f"kb cannot read agent file {path}")
@@ -1132,8 +1151,7 @@ class SkillServing:
             # Added: what the file says now, which a live re-read is for (N6).
             # A file kb cannot read raises, so the set skips it (PLUG-73).
             read = _frontmatter(Path(plugin.root), path)
-            if is_live(row.plugin.fetch):
-                self._reads.setdefault(key, {})[path] = read
+            self._reads.setdefault(key, {})[path] = read
         value = catalogue.agent_meta(
             row.library, row.plugin.id, path, read, row.plugin.servers
         )
@@ -1143,8 +1161,10 @@ class SkillServing:
         def serves(uri: str) -> bool:
             # The parity guard runs after the set is staged, so a skill it drops
             # for a hidden path (N13) is still the layer's here: leave it out.
-            skill = index.get(_address_of(uri)) if uri in served else None
-            return skill is not None and not holds_hidden(skill.path)
+            address = _address_of(uri)
+            if uri not in served or index.get(address) is None:
+                return False
+            return address not in published.hidden
 
         value["skills"] = {k: v for k, v in value["skills"].items() if serves(v)}
         return {AGENT_META: value}

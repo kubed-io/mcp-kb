@@ -56,7 +56,7 @@ class _Served:
 
     @property
     def plugin(self) -> Plugin:
-        (plugin,) = self.mcp._plugins.served
+        (plugin,) = self.mcp.plugins
         return plugin
 
     async def request(self, method: str, **params: object) -> dict:
