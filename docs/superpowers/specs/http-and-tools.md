@@ -188,13 +188,14 @@ resources setting (DLV-2).
 
 | Tool | Mirrors | Listed when the request says |
 |---|---|---|
-| `list_resources` | `resources/list` | `Kb-Resources: off`, `X-MCP-Resources: off` or `?resources=off` |
-| `read_resource` | `resources/read` | `Kb-Resources: off`, `X-MCP-Resources: off` or `?resources=off` |
+| `list_resources` | `resources/list` | `Kb-Resources: off`, `X-MCP-Resources: off` or `?resources=off`, or the client is VS Code (TOOL-2) |
+| `read_resource` | `resources/read` | `Kb-Resources: off`, `X-MCP-Resources: off` or `?resources=off`, or the client is VS Code (TOOL-2) |
 | `list_prompts` | `prompts/list` | `Kb-Prompts: off`, `X-MCP-Prompts: off` or `?prompts=off` |
 | `get_prompt` | `prompts/get` | `Kb-Prompts: off`, `X-MCP-Prompts: off` or `?prompts=off` |
 
-**TOOL-2.** A request that declares neither sees no tools in `tools/list`. Each pair is listed
-independently of the other.
+**TOOL-2.** A request that declares neither sees no tools in `tools/list`, unless kubed-mcp knows
+its client: one whose `clientInfo.name` starts `Visual Studio Code` is taken to declare resources
+off, and sees the resource pair (DLV-15). Each pair is listed independently of the other.
 
 **TOOL-3.** `off`, `false`, `0`, `no` and `none` declare the feature absent, ignoring case and
 surrounding space. For prompts, any other value, or none, means the client has the feature. For
