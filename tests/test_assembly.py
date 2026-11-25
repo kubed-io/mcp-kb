@@ -832,6 +832,7 @@ async def test_nothing_under_claude_plugin_is_harvested_or_served(tmp_path):
     kb = KnowledgeBase(config, tmp_path / "cache")
 
     assert [s.name for s in kb.index.visible()] == ["real"]
+    server_of(kb)
     assert [p.name for p in kb.snapshot.prompts] == ["lib_ok"]
     assert kb.resources.files("lib") == ["prompts/ok.md"]
     assert ".claude-plugin" not in json.dumps(await _health(kb))

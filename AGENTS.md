@@ -61,7 +61,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `skills.py` | the domain — `Skill`, `SkillIndex`, and the scoping rules. Imports no FastMCP |
 | ⤷ `uris.py` | the `skill://` address space — `Catalogue`, the grammar |
 | ⤷ `agents.py` | a plugin's agent file, parsed — `parse_agent`, `routing_hint`, `Agent`, `AgentRoster`. Imports no FastMCP |
-| ⤷ `prompts/` | `FilePrompt`, the dialect seam, rendering — no FastMCP |
+| ⤷ `prompts/` | `FilePrompt`, `parse_prompt` (from text, never from disk), `dialect_of`, the dialect seam, rendering — no FastMCP |
 | ⤷⤷ `detect.py` | which dialect a file is, strongest signal first |
 | ⤷⤷ `mcpkb.py`, `claude.py`, `copilot.py` | one module per dialect: `parse` into `Parsed`, `substitute` back out |
 | ⤷ `placeholders.py` | the two `${CLAUDE_*}` placeholders this server is the authority on |
@@ -71,9 +71,9 @@ installer's, against whatever image tag it chooses.
 | ⤷ `refresh.py` | when a fetch is due to be looked at again, bounded to the shortest configured interval, and what a failure does to the last good one |
 | `kubed/mcp_kb/sources/` | where bytes come from, one `Fetch` at a time — a loader per source in `__init__.py`, over `file.py`, `git.py`, `webdav.py`, the shared per-version `export.py`, `errors.py`, and `live.py`, because revalidation is a source concern; and `ServedTrees`, the one loader kubed-mcp is handed, which answers a plugin's address with the tree kb is serving for it and never fetches |
 | `kubed/mcp_kb/mcp/` | what an agent sees |
-| ⤷ `skills.py` | `SkillServing` — the skills and agents, served by kubed-mcp's plugin layer: `publish` adds every plugin to a plugin set each generation, `view` is kb's scope, `rewrite` its one rewriter, `read_command` skips every command, `agent_meta` adds kb's `_meta` key, the parity guard narrows the catalogue to what is served, and the live re-read |
+| ⤷ `skills.py` | `SkillServing` — the skills, agents and prompts, served by kubed-mcp's plugin layer: `publish` adds every plugin to a plugin set each generation, its `commands` exactly kb's prompt files (`entry_for`), `view` is kb's scope, `rewrite` its one rewriter (a command's body included), `read_command` kb's dialect reader, `agent_meta` adds kb's `_meta` key, the parity guard narrows the catalogue to what is served, and the live re-read; `QuietSelection`, the log filter for a file kb left out |
 | ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `HideMirrorTools` |
-| ⤷ `tools.py`, `prompts.py` | `prompts.py` the prompt mirror pair; `tools.py` names kubed-mcp's resource pair (DLV-6) and holds the read-only annotations |
+| ⤷ `tools.py`, `prompts.py` | `prompts.py` `MCPFilePrompt` and `adapt`, the `Prompt` kb's reader hands the plugin layer, and the prompt mirror pair; `tools.py` names kubed-mcp's resource pair (DLV-6) and holds the read-only annotations |
 | ⤷ `request.py`, `scope.py` | what the current request says about itself, and the `Scope` it becomes |
 | ⤷ `instructions.py` | `ScopedInstructions` — sets the `instructions` on each `initialize` and `server/discover` answer |
 | ⤷ `announce.py` | `AnnounceChanges` — telling a session its listing moved |
@@ -136,12 +136,12 @@ names with a prefix, and these names are the agent's API.
 - **Adding a prompt** → a file matching a plugin's `prompts:` globs, its
   manifest's `commands`, or the convention; exposed as `<library>_<name>`
   (PLG-25): the folders below a commands directory then the stem
-  (`commands/db/migrate.md` is `<library>_db_migrate`), a `commands` map's key,
-  or else the file stem.
+  (`commands/db/migrate.md` is `<library>_db_migrate`), or else the file stem.
   No code. In this server's own dialect every placeholder must be a declared
   argument and a required argument cannot have a default; the server skips a
-  file that breaks either rule, and `tests/test_prompts.py` loads a broken one
-  to prove it.
+  file that breaks either rule, and `tests/test_prompts.py` serves a broken one
+  to prove it. A plugin declared `skills: []` is never added to the plugin
+  layer, so it serves no prompt either (LIB-33).
 - **A library referencing files outside its skills** → a plugin's `files:`.
   They are served at `skill://<library>/<path>` and listed under `_files.md`,
   never indexed as skills. A citation that misses inside a skill is tried once
@@ -227,7 +227,8 @@ one set of bytes:
 
 - **Rewrite when the build is made, never on read** (SKL-60). `SkillServing.rewrite`
   is kb's one rewriter: it renders a root `SKILL.md` (qualified names, then
-  placeholders: SKL-55, then SKL-25 and SKL-52) and an agent's body for the request's scope, and gives every
+  placeholders: SKL-55, then SKL-25 and SKL-52) and an agent's or a command's body
+  for the request's scope, and gives every
   text file of a skill LF line endings; kubed-mcp writes the gateway prefix after
   it. So the entry's digests, the `_manifest` and the read agree. A middleware
   that rewrote a `skill://` file on read would break every client that verifies a
@@ -244,8 +245,11 @@ one set of bytes:
   `skills` and `agent_files`, logging once anything either side has alone, and
   that narrowed catalogue is the `snapshot.catalogue` every other surface reads,
   prompts and the scope refusal included. So no index, hint or rewritten name
-  points at a skill that does not read. A plugin kubed-mcp refuses is a conflict
-  in its library (LIB-29). What it cannot cover is a skill that fails one view's
+  points at a skill that does not read. kb's `snapshot.prompts` are what kb's
+  reader read as the set was staged, kept to the names kubed-mcp serves, so
+  `/health`'s counts and the scope refusal read what is served. A plugin
+  kubed-mcp refuses is a conflict in its library (LIB-29), a prompt name an
+  earlier plugin serves included. What it cannot cover is a skill that fails one view's
   build alone (N15): that one is still named in kb's indexes under that view.
 
 kubed-mcp's own types and naming apply to a skill's files: a file that is not
@@ -266,7 +270,15 @@ unlisted `agents://<namespace>/<path>` (AGT-18), but never through the
 plugin-root fallback: one reads at a `skill://` address only when an operator's
 `files:` glob names it. No method takes a scope param; the connection's scope
 is the only filter, and out of scope is `Agent not found`, as absent is.
-Commands are kb's prompts until K4, so `read_command` skips every one.
+Commands are kb's prompts, and the plugin layer serves them through kb's
+`read_command`, kb's dialect reader. kb hands the layer exactly its selection
+of prompt files as each entry's `commands`, and the reader holds the layer to
+it: a file kb did not select is skipped (`NOT_SELECTED`, kept out of the log by
+`QuietSelection` and out of `/health`), and so is one the layer names otherwise
+than PLG-25 does (`RENAMED`). Every other file is parsed in the dialect
+`dialect_of` decides at the read, and a build re-reads it in that dialect.
+Names and `${CLAUDE_PLUGIN_ROOT}` are rendered into the body by `rewrite` when
+the build is made, so a render fills in the dialect's placeholders alone.
 
 A client declares it cannot read resources with `?resources=off`,
 `Kb-Resources: off` or `X-MCP-Resources: off`, and only then does kubed-mcp list
@@ -341,8 +353,9 @@ which generation is being served, and has a refresh picked up an edit yet.
   anything.
 - **A provider that stores a `Catalogue` serves the old generation forever** —
   read through the getter (the `catalogue()` `create_app` defines, which returns
-  `knowledge_base.snapshot.catalogue` and is handed to `resources.register`,
-  `ScopedInstructions` and the prompts), or take the container's `Catalogue` transient, never a captured reference. A
+  `knowledge_base.snapshot.catalogue` and is handed to `resources.register`
+  and `ScopedInstructions`), or take the container's `Catalogue` transient,
+  never a captured reference. A
   `Revalidator` has the same shape of bug and a nastier
   symptom: a refresh exports a source to a *new* directory, so one that outlives
   its snapshot goes on revalidating into a tree nothing is serving, and the edit
@@ -358,8 +371,8 @@ which generation is being served, and has a refresh picked up an edit yet.
   `index.json`. Whatever a new backend's fingerprint returns is a thing an
   operator reads and a thing rewritten to disk on every rebuild — a WebDAV
   source's whole `{path: etag}` map does not belong in either.
-- **A live read blocks the whole event loop.** The resource and prompt handlers
-  are `async` and `Catalogue.read` under them is synchronous, so ten concurrent
+- **A live read blocks the whole event loop.** The resource handlers are
+  `async` and `Catalogue.read` under them is synchronous, so ten concurrent
   reads of a source 300 ms away take 3.0 s, perfectly serialized, with nothing
   else on the loop running meanwhile — not another source's read and not
   `/health`. What is bounded is the *failure*: `REVALIDATE_TIMEOUT` caps one
@@ -367,10 +380,9 @@ which generation is being served, and has a refresh picked up an edit yet.
   first. **Making the read path async — a thread for the blocking call, or an
   async WebDAV client — is the outstanding follow-up**, and it is a change to
   `mcp/resources.py`, `catalogue/uris.py` (the library-file read, and
-  `Catalogue.live_stamp`), `mcp/skills.py` (`_stamp`, which the view calls to
-  revalidate a live plugin's skill and agent files before kubed-mcp builds) and
-  `catalogue/prompts/` (`FilePrompt.body()`, the live prompt read), not to
-  `sources/live.py`.
+  `Catalogue.live_stamp`) and `mcp/skills.py` (`_stamp`, which the view calls
+  to revalidate a live plugin's skill, agent and prompt files before kubed-mcp
+  builds), not to `sources/live.py`.
 - **A plugin named like one of its library's main plugin's skills is a
   conflict.** Its namespace, `<library>/<plugin>`, is that skill's own address,
   so its skills sit inside the skill: the later of the two in the library's order

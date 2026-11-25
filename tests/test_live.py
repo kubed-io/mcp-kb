@@ -25,11 +25,11 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from fastmcp import Client
 from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import BasicAuth, Config, EnvRef
-from kubed.mcp_kb.mcp.prompts import PromptProvider
 from kubed.mcp_kb.plugins import Fetch
 from kubed.mcp_kb.sources import live
 from tests.conftest import (
@@ -52,6 +52,10 @@ SKILL = "skill://notes/x"
 URI = f"{SKILL}/SKILL.md"
 GUIDE = "skill://notes/docs/guide.md"
 PROMPT = "---\ndescription: A prompt.\n---\n\n{body}\n"
+ARGUED = (
+    "---\ndescription: A prompt.\narguments:\n- name: who\n  description: Whom.\n"
+    "  required: true\n---\n\n{body}\n"
+)
 EDITED = "---\nname: x\ndescription: Edited upstream.\n---\n\nedited in nextcloud, and longer\n"
 OTHER = "skill://other/z/SKILL.md"
 AGENT = "---\nname: helper\ndescription: {description}\n---\n\n{body}\n"
@@ -169,13 +173,21 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
     a build no view pinned reads what is published now (N13)."""
     import contextvars
     from concurrent.futures import ThreadPoolExecutor
+    from dataclasses import replace
 
+    command = "---\ndescription: Cite.\n---\nUse notes:x.\n"
+    webdav.write("prompts/cite.md", command)
     knowledge_base = _knowledge_base(webdav, tmp_path)
     serving = serving_of(knowledge_base)
     text = (webdav.root / "skills/x/SKILL.md").read_text()
     pinned = contextvars.copy_context()
     view = pinned.run(serving.view)
     site = _skill_site(serving, view.key)
+    # The same build's command: its body cites x by its qualified name (D6).
+    cite = replace(
+        site, kind="command", path="prompts/cite.md", uri="prompts://notes/cite.md"
+    )
+    plugin = site.plugin
 
     webdav.write("skills/x/.draft.md", "draft\n")
     with ThreadPoolExecutor(1) as pool:
@@ -185,6 +197,16 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
     assert "first" in pinned.run(serving.rewrite, site, text)
     with pytest.raises(ValueError, match="hidden file"):
         contextvars.Context().run(serving.rewrite, site, text)
+
+    # The pinned build renders the command against its own generation's names,
+    # where x serves; the generation published since serves no x to name.
+    rendered = pinned.run(serving.rewrite, cite, command)
+    assert rendered.endswith("Use skill://notes/x/SKILL.md.\n")
+    assert contextvars.Context().run(serving.rewrite, cite, command) == command
+    prompt = pinned.run(
+        serving.read_command, rendered, "prompts/cite.md", "notes_cite", plugin
+    )
+    assert prompt.file.template == "Use skill://notes/x/SKILL.md.\n"
 
 
 def test_a_build_pinned_before_a_serve_that_raises_reads_its_own_generation(
@@ -249,70 +271,132 @@ def test_a_library_level_file_is_revalidated_too(webdav, tmp_path):
     assert "revised and lengthened" in read_served(knowledge_base, GUIDE)
 
 
-async def test_a_live_prompt_renders_the_edited_body(webdav, tmp_path):
-    """A prompt's body lives in memory, so live mode has to re-read it."""
+async def _rendered(client, name, **arguments) -> str:
+    got = await client.get_prompt(name, arguments)
+    return "".join(m.content.text for m in got.messages)
+
+
+async def test_a_live_prompt_edit_serves_from_the_next_request(webdav, tmp_path):
+    """PRM-58, PRM-59: the request that notices an edit still reads the old
+    build; the next one reads the edit, with its arguments."""
     webdav.write("prompts/p.md", PROMPT.format(body="the first body"))
-    knowledge_base = _knowledge_base(webdav, tmp_path)
-    provider = PromptProvider(lambda: knowledge_base.snapshot)
+    kb = _knowledge_base(webdav, tmp_path)
+    async with Client(server_of(kb)) as client:
+        assert "the first body" in await _rendered(client, "notes_p")
+        webdav.write(
+            "prompts/p.md", ARGUED.format(body="the second, longer body {{ who }}")
+        )
+        assert "the first body" in await _rendered(client, "notes_p")  # noticed here
+        assert "the second, longer body you" in await _rendered(
+            client, "notes_p", who="you"
+        )
+        (listed,) = [p for p in await client.list_prompts() if p.name == "notes_p"]
+        assert [a.name for a in listed.arguments] == ["who"]
 
-    prompt = await provider.get_prompt("notes_p")
-    assert "the first body" in await prompt.render({})
 
-    webdav.write("prompts/p.md", PROMPT.format(body="the second body, much longer"))
+async def _keeps_the_last_good_build(webdav, tmp_path, caplog, broken, reason):
+    webdav.write("prompts/p.md", PROMPT.format(body="the first body"))
+    kb = _knowledge_base(webdav, tmp_path)
+    async with Client(server_of(kb)) as client:
+        assert "the first body" in await _rendered(client, "notes_p")
+        webdav.write("prompts/p.md", broken)
+        with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
+            assert "the first body" in await _rendered(client, "notes_p")
+            assert "the first body" in await _rendered(client, "notes_p")
+        warned = [
+            r.getMessage() for r in caplog.records if "not read again" in r.getMessage()
+        ]
+        assert len(warned) == 1 and "prompts/p.md" in warned[0], warned
+        assert reason in warned[0], warned
+        assert str(tmp_path) not in warned[0], warned
+        webdav.write(
+            "prompts/p.md", PROMPT.format(body="the third body, longest of all")
+        )
+        assert "the first body" in await _rendered(client, "notes_p")  # noticed here
+        assert "the third body" in await _rendered(client, "notes_p")
 
-    prompt = await provider.get_prompt("notes_p")
-    assert "the second body" in await prompt.render({})
 
-
-async def test_a_live_prompt_saved_mid_edit_serves_the_last_good_body(
+async def test_a_live_prompt_saved_mid_edit_keeps_the_last_good_build(
     webdav, tmp_path, caplog
 ):
-    """A frontmatter block that does not parse raises `yaml.YAMLError`, which
-    is not a `ValueError`: left out of the fallback, a file somebody is
-    halfway through saving turns `prompts/get` into an internal error instead
-    of serving the body last harvested, which is what live mode promises."""
-    webdav.write("prompts/p.md", PROMPT.format(body="the harvested body"))
-    knowledge_base = _knowledge_base(webdav, tmp_path)
-    provider = PromptProvider(lambda: knowledge_base.snapshot)
-
-    # An unquoted `[a] [b]` is two flow sequences in a row, which no YAML
-    # parser accepts -- the mistake `wiki/Prompts.md` warns about, and exactly
-    # what a half-typed hint looks like.
-    webdav.write(
-        "prompts/p.md",
+    """PRM-60: an unquoted `[a] [b]` is no YAML at all."""
+    await _keeps_the_last_good_build(
+        webdav,
+        tmp_path,
+        caplog,
         "---\ndescription: A prompt.\nargument-hint: [a] [b]\n---\n\nthe edited body\n",
+        "did not find expected key",
     )
 
-    # `get_prompt` is what revalidates, so the invalid file is on disk by the
-    # time `render` re-reads it -- the shape the test above establishes.
-    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.catalogue.prompts"):
-        prompt = await provider.get_prompt("notes_p")
-        rendered = await prompt.render({})
 
-    assert "the harvested body" in rendered
-    assert "re-reading prompt" in caplog.text
-
-
-async def test_a_live_prompt_saved_too_deep_serves_the_last_good_body(
+async def test_a_live_prompt_saved_too_deep_keeps_the_last_good_build(
     webdav, tmp_path, caplog, frontmatter_out_of_stack
 ):
-    """Frontmatter nested past the parser's stack raises `RecursionError`,
-    which is neither of the above: it too falls back to the harvested body."""
-    webdav.write("prompts/p.md", PROMPT.format(body="the harvested body"))
-    knowledge_base = _knowledge_base(webdav, tmp_path)
-    provider = PromptProvider(lambda: knowledge_base.snapshot)
-
-    webdav.write(
-        "prompts/p.md",
+    await _keeps_the_last_good_build(
+        webdav,
+        tmp_path,
+        caplog,
         f"---\ndescription: A prompt.\nx: {DEEP_YAML}\n---\n\nthe edited body\n",
+        "nested too deeply",
     )
 
-    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.catalogue.prompts"):
-        prompt = await provider.get_prompt("notes_p")
-        rendered = await prompt.render({})
 
-    assert "the harvested body" in rendered
-    assert "nested too deeply" in caplog.text
+def test_a_prompt_broken_by_a_refresh_does_not_block_a_live_skill_edit(
+    webdav, tmp_path, caplog
+):
+    """PRM-60: a refresh that finds the plugin's only prompt broken adds the
+    plugin with no prompt read, so a later re-read has no prompt to vet, and a
+    skill's edit serves from the next request."""
+    webdav.write("prompts/p.md", PROMPT.format(body="the first body"))
+    kb = _knowledge_base(webdav, tmp_path)
+    assert "first" in read_served(kb, URI)
+    webdav.write("prompts/p.md", "no frontmatter here at all, and longer than before\n")
+    kb.refresh(force=True)
+    assert [p.name for p in kb.prompts] == []
+    webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
+        assert "first" in read_served(kb, URI), "N6: the re-adding read"
+        assert "edited in nextcloud" in read_served(kb, URI)
+    assert not [r for r in caplog.records if "not read again" in r.getMessage()]
+
+
+def test_a_broken_edit_to_a_file_that_lost_its_name_does_not_block_a_reread(
+    webdav, tmp_path, caplog
+):
+    """PRM-60 vets what the plugin served: a file the layer refused for a name
+    another file took serves nothing, so breaking it blocks no re-read."""
+    config = Config.model_validate(
+        {
+            "sources": [
+                {
+                    "name": "notes",
+                    "url": webdav.url,
+                    "auth": {"username": USERNAME, "password": {"env": ENV}},
+                    "cache": "live",
+                }
+            ],
+            "plugins": [
+                {
+                    "name": "notes",
+                    "source": KEY,
+                    # Both are notes_p: a/p.md is read first and claims it.
+                    "prompts": ["prompts/a/*.md", "prompts/b/*.md"],
+                }
+            ],
+            "libraries": [{"name": "notes", "plugins": ["notes"]}],
+        }
+    )
+    webdav.write("prompts/a/p.md", PROMPT.format(body="the served body"))
+    webdav.write("prompts/b/p.md", PROMPT.format(body="the losing body"))
+    kb = KnowledgeBase(config, tmp_path / "cache")
+    assert "first" in read_served(kb, URI)
+    assert [p.template for p in kb.prompts] == ["the served body\n"]
+    webdav.write("prompts/b/p.md", "no frontmatter here, and longer than before\n")
+    webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
+        assert "first" in read_served(kb, URI), "N6: the re-adding read"
+        assert "edited in nextcloud" in read_served(kb, URI)
+    assert not [r for r in caplog.records if "not read again" in r.getMessage()]
 
 
 # -- and what it does not ------------------------------------------------------

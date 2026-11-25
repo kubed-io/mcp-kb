@@ -29,7 +29,6 @@ from typing import TYPE_CHECKING
 from kubed.mcp import Middleware
 from kubed.mcp.protocol import INVALID_PARAMS, MCPError
 
-from .prompts import PromptProvider
 from .request import requested_scope
 from .scope import EVERYTHING, Scope
 
@@ -159,7 +158,7 @@ def _serving(snapshot: Snapshot, scope: Scope) -> bool:
     served = snapshot.catalogue
     if served.entries(scope):
         return True
-    if PromptProvider(lambda: snapshot).visible(scope):
+    if snapshot.visible_prompts(scope):
         return True
     return bool(served.agents.visible(scope))
 

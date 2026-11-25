@@ -51,6 +51,9 @@ from pydantic import (
 if TYPE_CHECKING:  # the one direction that would be a cycle at runtime
     from .plugins.address import Address
 
+SERVER_NAME = "mcp-kb"
+"""The MCP server's own name, which ``create_app`` hands to ``QuickMCP``."""
+
 NAME = r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$"
 
 BACKENDS: dict[str, str] = {  # source url scheme -> the backend that reads it
@@ -353,6 +356,17 @@ class LibraryConfig(Strict):
     )
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @field_validator("name")
+    @classmethod
+    def _not_the_servers_name(cls, name: str) -> str:
+        if name == SERVER_NAME:
+            msg = (
+                f"library name {name!r} is the server's own name, whose prompts "
+                "the plugin layer would not prefix"
+            )
+            raise ValueError(msg)
+        return name
 
     @field_validator("categories")
     @classmethod

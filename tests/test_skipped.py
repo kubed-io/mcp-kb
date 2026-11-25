@@ -259,7 +259,7 @@ async def test_a_second_prompt_with_one_name_in_a_plugin_is_skipped(tmp_path):
 
     assert health["plugins"]["src"]["prompts"] == 1
     assert _skipped(health)["prompts/sub/debug.md"] == (
-        "prompt debug is already served by prompts/debug.md"
+        "prompt lib_debug is already served by prompts/debug.md"
     )
     async with Client(server_of(kb)) as client:
         prompts = await client.list_prompts()

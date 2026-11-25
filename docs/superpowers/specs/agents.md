@@ -13,12 +13,13 @@ plugin's agents mean in kb what they mean there.
 
 ## Negotiation
 
-**AGT-1.** Once the server serves a plugin with a skill or an agent, it declares
+**AGT-1.** Once the server serves a plugin with a skill, an agent or a prompt file, it declares
 `io.modelcontextprotocol/agents` with `{"listChanged": false}` on both `server/discover` and
-legacy `initialize`, beside `io.modelcontextprotocol/skills` (SKL-44, HTTP-27), and goes on
-declaring it for the life of the process. Until then (a deployment serving only prompts, or a
-cold start with every source down) neither answer declares it, and `agents/list` and `agents/get`
-answer `-32601` `Method not found`. The server sends no `notifications/agents/list_changed`.
+legacy `initialize`, beside `io.modelcontextprotocol/skills` as SKL-44 declares it (HTTP-27), and
+goes on declaring it for the life of the process. A plugin with only prompt files brings it too,
+with no agent to list. Until then (a cold start with every source down, or a config whose plugins
+have none of the three) neither answer declares it, and `agents/list` and `agents/get` answer
+`-32601` `Method not found`. The server sends no `notifications/agents/list_changed`.
 
 **AGT-2.** `agents/list` and `agents/get` answer any caller, whether or not it
 declared the extension, as the Skills extension does (SKL-44). Declaring it, or not, changes
@@ -52,7 +53,7 @@ the name.
 
 **AGT-6.** An agent file is YAML frontmatter and a Markdown body. Its frontmatter MUST parse into
 a non-empty mapping with string keys, convert to JSON, and carry `name` and `description` as
-non-empty strings. The `name` MUST be a usable name, as a `commands` map key is (PLG-21): no
+non-empty strings. The `name` MUST be a usable name, as a name PLG-25 builds is: no
 whitespace, control or other invisible character, `/` or `@`, so no file can take the
 `<name>@<plugin name>` a rename gives (AGT-8); one that is not is skipped with
 `agent frontmatter name is not a usable name`. A file that breaks any of these, that cannot be read, or that is not UTF-8 is

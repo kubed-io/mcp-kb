@@ -606,6 +606,9 @@ def test_a_conflicting_plugin_serves_no_agents(tmp_path):
     )
 
     knowledge_base = tree.knowledge_base(tmp_path / "cache")
+    # The prompt clash is the plugin layer's refusal, made as the set is
+    # published (LIB-29).
+    server_of(knowledge_base)
 
     library = knowledge_base.status["libraries"]["drawio"]
     assert "copy@drawio" in library["conflicts"]

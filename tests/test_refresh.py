@@ -350,22 +350,6 @@ def test_a_cross_repository_entry_whose_subdir_changed_is_harvested_again(
     assert _served(knowledge_base, "tools@up") == ["beta"]
 
 
-@pytest.mark.unit
-def test_a_cross_repository_entrys_changed_inline_command_is_served(
-    cross_repo, tmp_path
-):
-    """An object-map command's body rides in the entry, not in either tree."""
-    market, config = cross_repo
-    _publish(market, commands={"about": {"content": "Before."}})
-    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
-
-    _publish(market, commands={"about": {"content": "After."}})
-    knowledge_base.refresh()
-
-    (prompt,) = [p for p in knowledge_base.prompts if p.name == "up_about"]
-    assert "After." in prompt.body()
-
-
 # -- refresh ------------------------------------------------------------------
 
 
@@ -644,18 +628,20 @@ async def test_a_rebuild_is_visible_to_a_connected_client(skills_dir, cache):
         assert "skill://deepsource/plugin-c/_index.md" not in [
             str(r.uri) for r in await client.list_resources()
         ]
-        assert "deepsource_extra" not in [p.name for p in await client.list_prompts()]
+        assert "flatsource_extra" not in [p.name for p in await client.list_prompts()]
 
         _add_skill(
             skills_dir / "deepsource" / "skills" / "plugin-c" / "epsilon",
             "epsilon",
             "New.",
         )
-        _add_prompt(skills_dir / "deepsource" / "prompts" / "extra.md")
+        # flatsource's plugin: deepsource's own serves no skill, so no prompt
+        # either (LIB-33).
+        _add_prompt(skills_dir / "flatsource" / "prompts" / "extra.md")
         knowledge_base.refresh()
 
         assert "skill://deepsource/plugin-c/_index.md" in [str(r.uri) for r in await client.list_resources()]
-        assert "deepsource_extra" in [p.name for p in await client.list_prompts()]
+        assert "flatsource_extra" in [p.name for p in await client.list_prompts()]
 
 
 async def _until(predicate, seconds=5.0):
@@ -1101,8 +1087,9 @@ def test_a_skipped_path_is_logged_when_first_skipped_and_not_on_every_rebuild(
 def test_a_prompt_that_does_not_parse_is_skipped_once_in_the_log_and_in_health(
     tmp_path, caplog
 ):
-    """It is a skip like any other: listed under the plugin, logged when first
-    seen and not on every rebuild, and named by its path in the plugin."""
+    """It is a skip like any other: listed under the plugin, logged by kb when
+    first seen and not on every rebuild, and named by its path in the plugin.
+    The plugin layer reads it, and logs its own line on every read (P8)."""
     caplog.set_level(logging.INFO)
     root = tmp_path / "src"
     (root / "prompts").mkdir(parents=True)
@@ -1115,14 +1102,17 @@ def test_a_prompt_that_does_not_parse_is_skipped_once_in_the_log_and_in_health(
         }
     )
     knowledge_base = KnowledgeBase(config, tmp_path / "cache")
+    server_of(knowledge_base)
+
+    def kbs(records):
+        return [r for r in records if r.name.startswith("kubed.mcp_kb")]
 
     skipped = knowledge_base.status["plugins"]["lib"]["skipped"]
-    assert [row["path"] for row in skipped] == ["prompts/bad.md"]
-    assert str(tmp_path) not in skipped[0]["reason"]
+    assert skipped == [{"path": "prompts/bad.md", "reason": "no YAML frontmatter"}]
     assert [p.name for p in knowledge_base.prompts] == ["lib_good"]
-    everything = [r.getMessage() for r in caplog.records]
+    everything = [r.getMessage() for r in kbs(caplog.records)]
     assert sum("bad.md" in m for m in everything) == 1
 
     caplog.clear()
     knowledge_base.refresh(force=True)
-    assert not [r for r in caplog.records if "bad.md" in r.getMessage()]
+    assert not [r for r in kbs(caplog.records) if "bad.md" in r.getMessage()]

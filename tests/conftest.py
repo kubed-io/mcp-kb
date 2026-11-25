@@ -9,7 +9,7 @@ import pytest
 
 from kubed.mcp_kb.app import create_app
 from kubed.mcp_kb.catalogue import harvest
-from kubed.mcp_kb.catalogue.prompts import load_prompts
+from kubed.mcp_kb.catalogue.prompts import parse_prompt, stem
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, load_skills
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.plugins import Fetch, Globs, Plugin
@@ -48,8 +48,6 @@ def library_plugins(library: str, nested=tuple(NESTED)) -> dict[str, Globs]:
         },
     }
 
-
-PROMPT_GLOBS = Globs(skills=(), prompts=("*.md",))
 
 # What each synthetic library's plugins declare about themselves. A tag per
 # library, so a tag scope can tell the two apart the way a library scope can.
@@ -300,23 +298,6 @@ def build_library_files(root):
     return resources
 
 
-def load_library_prompts(root, library):
-    """The prompts harvested from one library's own prompt root under ``root``."""
-    library_root = root / library
-    if not library_root.is_dir():
-        return []
-    files = harvest.prompt_files(library_root, PROMPT_GLOBS)
-    return load_prompts(files, library=library, plugin=f"{library}-prompts")
-
-
-def load_all_prompts(root):
-    """Every library's prompts under ``root``, combined."""
-    prompts = []
-    for library in PLUGIN_TAGS:
-        prompts += load_library_prompts(root, library)
-    return prompts
-
-
 def make_config(
     skills_dir=None, prompts_dir=None, libraries=None, refresh=None, nested=None
 ):
@@ -353,7 +334,6 @@ def make_config(
                     {
                         "name": f"{name}-prompts",
                         "source": source,
-                        "skills": [],
                         "prompts": ["*.md"],
                     }
                 ]
@@ -489,3 +469,14 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.get_closest_marker("live"):
             item.add_marker(skip)
+
+
+def read_prompt(path: Path, library: str = "lib", **kwargs):
+    """A prompt file parsed from its text, named ``<library>_<stem>``."""
+    return parse_prompt(
+        path.read_text(encoding="utf-8"),
+        path,
+        name=f"{library}_{stem(path)}",
+        library=library,
+        **kwargs,
+    )

@@ -4,10 +4,11 @@
 space, the resources, the prompts, the middleware and the routes, around one
 ``KnowledgeBase`` that ``main`` has already cold-started.
 
-The skills and agents are kubed-mcp's to serve, from the plugin set
-``SkillServing`` publishes each generation, with kb's scope as its view and
-kb's text rewriting as its rewriter. kb serves the rest of the ``skill://``
-space: the indexes, ``_files.md``, library files and the fallbacks. The
+The skills, agents and prompts are kubed-mcp's to serve, from the plugin set
+``SkillServing`` publishes each generation, with kb's scope as its view, kb's
+text rewriting as its rewriter and kb's dialect reader as its command reader.
+kb serves the rest of the ``skill://`` space: the indexes, ``_files.md``,
+library files and the fallbacks. The
 resource mirror tools are kubed-mcp's too (DLV-6), shown to a client that says
 it cannot read resources; the prompt mirror is kb's.
 """
@@ -20,13 +21,13 @@ from kubed.mcp.skills import SkillsExtension
 
 from . import routes
 from .catalogue.uris import Catalogue
-from .config import BUILTIN_SCHEMES
+from .config import BUILTIN_SCHEMES, SERVER_NAME
 from .mcp import prompts, resources
 from .mcp.announce import AnnounceChanges
 from .mcp.instructions import ScopedInstructions
 from .mcp.pins import RefuseEmptyScope, what_is_wrong
 from .mcp.request import client_uses_prompts
-from .mcp.skills import SkillServing
+from .mcp.skills import QuietSelection, SkillServing
 from .server import KnowledgeBase
 from .sources import ServedTrees
 from .spec import package_version
@@ -37,7 +38,7 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
     config = knowledge_base.config
     ttl = config.min_refresh_seconds
     mcp = QuickMCP(
-        "mcp-kb",
+        SERVER_NAME,
         config=config,
         header_prefix="Kb",
         version=package_version(),
@@ -76,6 +77,9 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
     # layer's skills provider comes before kb's whenever the boot generation
     # has a skill, and before any tool, so no tool kb registers can take a
     # name the plugin layer serves (DLV-7).
+    # The plugin layer's line for a file kb's selection leaves out, kept out
+    # of the log; once per process, however many apps it builds (P8).
+    QuietSelection.install()
     serving = SkillServing(mcp, knowledge_base)
     serving.attach()
     mcp.singleton(SkillServing, instance=serving)
@@ -89,7 +93,7 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
         )
     )
     mcp.add_middleware(ScopedInstructions(catalogue))
-    prompt_tools = prompts.register(mcp, lambda: knowledge_base.snapshot, catalogue)
+    prompt_tools = prompts.register(mcp)
     mcp.add_middleware(
         RefuseEmptyScope(
             lambda scope: what_is_wrong(scope, config, knowledge_base.snapshot)

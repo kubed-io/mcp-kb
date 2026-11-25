@@ -273,7 +273,6 @@ async def test_a_library_with_no_skills_is_absent(tmp_path, mode):
                 {
                     "name": "b",
                     "source": f"file://{bare}",
-                    "skills": [],
                     "prompts": ["prompts/*.md"],
                 },
             ],

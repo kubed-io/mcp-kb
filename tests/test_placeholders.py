@@ -7,9 +7,12 @@ as written.
 """
 
 import pytest
+from fastmcp import Client
 
+from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import placeholders
-from kubed.mcp_kb.catalogue.prompts import load_prompt
+from kubed.mcp_kb.config import Config
+from tests.conftest import server_of
 
 pytestmark = pytest.mark.unit
 
@@ -42,34 +45,40 @@ def test_without_a_skill_dir_the_skill_placeholder_stays_literal():
     assert placeholders.substitute(text, plugin_root="skill://lib") == text
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_rendering_resolves_the_plugin_root_in_every_dialect(tmp_path, dialect):
-    path = write(
-        tmp_path / f"{dialect}.md",
-        "description: d\n",
-        "Read ${CLAUDE_PLUGIN_ROOT}/shared/x.md.",
+async def _rendered(tmp_path, dialect: str, body: str) -> str:
+    """``body`` as a prompt of ``dialect`` renders, served by a real server
+    whose plugin also ships the skill ``w``: the plugin root and a skill's
+    path are rendered when the plugin layer's build is made."""
+    root = tmp_path / "kit"
+    (root / "skills" / "w").mkdir(parents=True)
+    (root / "skills" / "w" / "SKILL.md").write_text(
+        "---\nname: w\ndescription: W.\n---\nW.\n"
     )
-    prompt = load_prompt(path, "lib", dialect=dialect)
-    assert prompt.render(plugin_root="skill://lib") == "Read skill://lib/shared/x.md."
-    # No plugin root to substitute is the loader's own case: the text stands.
-    assert prompt.render() == "Read ${CLAUDE_PLUGIN_ROOT}/shared/x.md."
+    (root / "prompts").mkdir()
+    write(root / "prompts" / "p.md", "description: d\n", body)
+    config = Config.model_validate(
+        {
+            # The library's main plugin, so ``w`` is at ``skill://lib/w``.
+            "plugins": [{"name": "lib", "source": f"file://{root}", "dialect": dialect}],
+            "libraries": [{"name": "lib", "plugins": ["lib"]}],
+        }
+    )
+    kb = KnowledgeBase(config, tmp_path / "cache")
+    async with Client(server_of(kb)) as client:
+        got = await client.get_prompt("lib_p", {})
+    return got.messages[0].content.text
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
-def test_rendering_resolves_a_skill_path_in_every_dialect(tmp_path, dialect):
-    path = write(
-        tmp_path / f"{dialect}.md",
-        "description: d\n",
-        "Read ${CLAUDE_PLUGIN_ROOT}/skills/w/a.md.",
-    )
-    prompt = load_prompt(path, "lib", dialect=dialect)
-    skills = {"skills/w": "skill://lib/w"}
-    assert (
-        prompt.render(plugin_root="skill://lib", skills=skills)
-        == "Read skill://lib/w/a.md."
-    )
-    # Without the map the path is the plugin root's, as before.
-    assert prompt.render(plugin_root="skill://lib") == "Read skill://lib/skills/w/a.md."
+async def test_rendering_resolves_the_plugin_root_in_every_dialect(tmp_path, dialect):
+    body = "Read ${CLAUDE_PLUGIN_ROOT}/shared/x.md."
+    assert await _rendered(tmp_path, dialect, body) == "Read skill://lib/shared/x.md."
+
+
+@pytest.mark.parametrize("dialect", DIALECTS)
+async def test_rendering_resolves_a_skill_path_in_every_dialect(tmp_path, dialect):
+    body = "Read ${CLAUDE_PLUGIN_ROOT}/skills/w/a.md."
+    assert await _rendered(tmp_path, dialect, body) == "Read skill://lib/w/a.md."
 
 
 SKILLS = {"skills/writing": "skill://kit/writing"}

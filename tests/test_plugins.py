@@ -17,9 +17,9 @@ from kubed.mcp_kb.plugins import (
 )
 from kubed.mcp_kb.plugins.address import parse_address
 from kubed.mcp_kb.plugins.manifest import (
-    CommandEntry,
     Components,
     Manifest,
+    read_components,
     read_manifest,
 )
 from kubed.mcp_kb.plugins.select import matches, parse_groups, select
@@ -386,47 +386,11 @@ def test_listed_command_files_alone_still_set_the_key(tmp_path):
 
 
 @pytest.mark.unit
-def test_an_object_map_of_commands_loads(tmp_path):
-    commands = {
-        "brief": {
-            "source": "./cmds/brief.md",
-            "description": "Write a brief.",
-            "argumentHint": "<topic>",
-        },
-        "about": {"content": "Say what this plugin does."},
-        "bad": {"source": "./x.md", "content": "y"},
-    }
-    read = read_manifest(manifest(tmp_path, {"commands": commands})).components
+def test_an_object_map_serves_nothing_and_says_so(tmp_path):
+    read = read_components({"commands": {"brief": {"source": "./cmds/brief.md"}}})
 
-    assert read.command_map == (
-        CommandEntry(
-            name="brief",
-            source="cmds/brief.md",
-            content=None,
-            description="Write a brief.",
-            argument_hint="<topic>",
-        ),
-        CommandEntry(
-            name="about",
-            source=None,
-            content="Say what this plugin does.",
-            description=None,
-            argument_hint=None,
-        ),
-    )
-    assert read.commands == ()
-    assert len(read.notes) == 1
-    assert "bad" in read.notes[0]
-    assert "exactly one of source and content" in read.notes[0]
-
-
-@pytest.mark.unit
-def test_a_map_item_that_is_not_an_object_is_a_note(tmp_path):
-    read = read_manifest(manifest(tmp_path, {"commands": {"x": "y"}})).components
-
-    assert read.command_map == ()
-    assert len(read.notes) == 1
-    assert "'x'" in read.notes[0]
+    assert (read.commands, read.command_files, read.command_dirs) == ((), (), ())
+    assert read.notes == ("commands object map is not served",)
 
 
 @pytest.mark.unit

@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from kubed.mcp_kb.config import (
     BasicAuth,
@@ -603,3 +604,10 @@ def test_a_library_lists_a_category_once_in_the_order_given():
         }
     )
     assert config.library("x").categories == ["b", "a"]
+
+
+def test_a_library_named_like_the_server_is_refused():
+    with pytest.raises(ValidationError, match="the server's own name"):
+        Config.model_validate(
+            {"libraries": [{"name": "mcp-kb", "source": "file:///x"}]}
+        )

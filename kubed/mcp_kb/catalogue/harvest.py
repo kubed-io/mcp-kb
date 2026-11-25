@@ -332,6 +332,36 @@ def prompt_files(root: Path, globs: Globs) -> list[Path]:
     )
 
 
+def command_entries(
+    selected: Sequence[str], command_dirs: Sequence[str]
+) -> tuple[str, ...]:
+    """The ``commands`` paths the plugin layer reads ``selected`` through (D1).
+
+    ``selected`` is a plugin's prompt files, root-relative and in path order.
+    A file under a command folder -- a convention's or one of ``command_dirs``,
+    the deepest that contains it, as ``prompts.prompt_name`` decides, and
+    ``"."`` containing every path -- brings that folder in, so the layer names
+    it by the folders below it (PLG-25); any other file is an entry of its own,
+    named by its stem. Each entry comes once, at its first file, so the layer
+    reads in kb's order and the first of two same-named files is the one served.
+    """
+    folders = [PurePosixPath(d).parts for d in (*COMMAND_DIRS, *command_dirs)]
+    entries: dict[str, None] = {}
+    for rel in selected:
+        parts = PurePosixPath(rel).parts
+        depth = max(
+            (
+                len(prefix)
+                for prefix in folders
+                if len(prefix) < len(parts) and parts[: len(prefix)] == prefix
+            ),
+            default=None,
+        )
+        entry = rel if depth is None else PurePosixPath(*parts[:depth]).as_posix()
+        entries.setdefault(entry, None)
+    return tuple(entries)
+
+
 def library_files(root: Path, globs: Globs, skill_dirs: Sequence[Path]) -> list[str]:
     """Library-level files as root-relative posix paths, never one inside a skill."""
     base = root.resolve()

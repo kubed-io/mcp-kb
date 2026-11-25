@@ -299,11 +299,12 @@ prefix (SKL-41) and without `skill://`.
 
 **SKL-37.** When a file read belongs to a `cache: live` source
 ([config-and-sources.md](config-and-sources.md)), the read first revalidates that one file against
-the server: library files and both fallbacks alike. A request that reads skills or agents first
-revalidates every file of each live skill, and each agent file, of the plugins its scope admits. A
+the server: library files and both fallbacks alike. A request that reads skills, agents or prompts
+first revalidates every file of each live skill, and each agent and prompt file, of the plugins its
+scope admits. A
 file that moved re-reads that plugin and serves it again, every other plugin kept as it is served,
 and from the next request on a skill's files, its `_manifest`, its extension entry and the
-plugin's agents describe the new bytes: the request that re-reads still reads what it began with.
+plugin's agents and prompts describe the new bytes: the request that re-reads still reads what it began with.
 A request that arrives while a refresh is publishing re-reads nothing.
 
 **SKL-38.** A revalidated file is trusted for 2 seconds. A revalidation that fails, including a
@@ -312,9 +313,12 @@ request that takes over 1 second, serves the copy on disk, and that source is no
 
 **SKL-39.** A live read changes only the bytes of files already harvested. What the plugin layer
 serves follows a live re-read (SKL-37): a skill's files, its `_manifest`, its extension entry and
-the plugin's agents. kb's own listing rows, index lines and their descriptions, and files added or
-removed upstream, follow the next refresh, except that a skill a re-read leaves unserved drops out
-of them, and comes back when it serves again (SKL-45).
+the plugin's agents and prompts. kb's own listing rows, index lines and their descriptions, and
+files added or removed upstream, follow the next refresh, except that a skill a re-read leaves
+unserved drops out of them, and comes back when it serves again (SKL-45). Only files already
+harvested are watched, served or not: a prompt file skipped as broken serves from the request after
+the one that notices its fix, and a skill or a prompt file added to a live plugin is served from the
+next refresh.
 
 ## Addresses behind a gateway
 
@@ -336,11 +340,12 @@ letter, digit, `+`, `-` or `.` (`kb+skill://` and `myskill://` stay as they are)
 
 | Written by | Where |
 |---|---|
-| the plugin layer | a skill's files, the indexes inside a skill and an agent's card (GW-5), and `list_resources`, which writes the prefix into each row's `uri` (DLV-6, GW-5) |
-| kb, through the plugin layer's writer (GW-11) | everything else: resource bodies and listing descriptions outside a skill, read hints, the template's description, instructions, rendered prompts |
+| the plugin layer | a skill's files, the indexes inside a skill and an agent's card (GW-5), rendered prompts (GW-7), and `list_resources`, which writes the prefix into each row's `uri` (DLV-6, GW-5) |
+| kb, through the plugin layer's writer (GW-11) | everything else: resource bodies and listing descriptions outside a skill, read hints, the template's description, instructions |
 
 A prompt's description, in `prompts/list` and in `list_prompts`, is written as its library wrote
-it, with no prefix. *(proposed: it is written with the prefix, as every other description is.)*
+it, with no prefix: the plugin layer prefixes the text a prompt renders, and a prompt's
+frontmatter is served as its file wrote it.
 
 **SKL-42.** An incoming address (`resources/read`, `read_resource`, `skills/get`,
 `resources/directory/read`) MAY be `skill://…` or `<prefix>skill://…` for the request's own prefix.
@@ -356,9 +361,10 @@ the URI the client sent.
 `io.modelcontextprotocol/skills` (value `{"directoryRead": true}`) on `server/discover` and on
 `initialize`, whether or not the client declared it (HTTP-27), and goes on declaring it for the
 life of the process. The extension is FastMCP's, through kubed-mcp's plugin layer (SKL-58), and
-adds nothing to `resources/list`. Until then (a deployment serving only prompts or only agents,
-or a cold start with every source down) `server/discover` does not declare it, and `skills/list`
-and `skills/get` answer `-32601` `Method not found`; legacy `initialize` declares it all the same.
+adds nothing to `resources/list`. Until then (a deployment whose plugins serve only prompts or
+agents, or a cold start with every source down) `server/discover` does not declare it, and
+`skills/list` and `skills/get` answer `-32601` `Method not found`; legacy `initialize` declares it
+all the same.
 
 **SKL-45.** Every served skill passes FastMCP's checks: strict YAML frontmatter that converts to
 JSON, a `name` matching its address's last segment, a `description` of 1 to 1024 characters,
