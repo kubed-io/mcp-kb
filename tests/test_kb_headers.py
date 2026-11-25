@@ -2,7 +2,7 @@
 
 Served by the ``test_library_categories`` catalogue: ``alpha`` and ``beta`` list
 the category ``dev``, ``alpha``'s plugin carries the tag ``x``, ``gamma`` has
-neither.
+neither, and both ``alpha`` and ``gamma`` serve ``shared`` in a folder of its name.
 """
 
 import pytest
@@ -11,10 +11,15 @@ from tests.test_library_categories import _client, _uris, server_url  # noqa: F4
 
 pytestmark = pytest.mark.integration
 
-GAMMA = ["skill://gamma/_files.md", "skill://gamma/_index.md"]
+GAMMA = [
+    "skill://gamma/_files.md",
+    "skill://gamma/_index.md",
+    "skill://gamma/shared/_index.md",
+]
 DEV = [
     "skill://alpha/_files.md",
     "skill://alpha/_index.md",
+    "skill://alpha/shared/_index.md",
     "skill://beta/_index.md",
 ]
 ALPHA = ["skill://alpha/_files.md", "skill://alpha/_index.md"]

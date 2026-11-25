@@ -84,10 +84,25 @@ async def test_resources_off_reveals_the_mirror(server_url):
 
 
 @pytest.mark.integration
-async def test_the_header_declares_it_too(server_url):
+@pytest.mark.parametrize("header", ["X-MCP-Resources", "Kb-Resources"])
+async def test_the_header_declares_it_too(server_url, header):
     """A header can be set in a credential where a URL cannot."""
-    names = await tool_names(server_url, headers={"X-MCP-Resources": "off"})
+    names = await tool_names(server_url, headers={header: "off"})
     assert names == ["list_resources", "read_resource"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("header", ["X-MCP-Prompts", "Kb-Prompts"])
+async def test_a_prompts_header_reveals_the_prompt_mirror(server_url, header):
+    names = await tool_names(server_url, headers={header: "off"})
+    assert names == ["get_prompt", "list_prompts"]
+
+
+@pytest.mark.integration
+async def test_kbs_prompts_header_wins_over_x_mcps(server_url):
+    """DLV-16's order for kb's own input: ``Kb-`` first, as kubed-mcp reads."""
+    headers = {"Kb-Prompts": "on", "X-MCP-Prompts": "off"}
+    assert await tool_names(server_url, headers=headers) == []
 
 
 @pytest.mark.integration
@@ -128,12 +143,15 @@ async def test_skills_full_reaches_the_mirror_too(server_url):
     drops it for ``list_resources()`` hands that client the indexes and no
     ``/SKILL.md`` at all, with no error to notice.
     """
+    # N4: kubed-mcp's list_resources answers {"resources": rows}.
     rows = json.loads(
         await call(f"{server_url}?resources=off&skills=full", "list_resources")
-    )
+    )["resources"]
     assert "skill://flatsource/alpha/SKILL.md" in [row["uri"] for row in rows]
     assert sum(1 for row in rows if row["uri"].endswith("/SKILL.md")) == 4
-    cheap = json.loads(await call(f"{server_url}?resources=off", "list_resources"))
+    cheap = json.loads(await call(f"{server_url}?resources=off", "list_resources"))[
+        "resources"
+    ]
     assert not any(row["uri"].endswith("/SKILL.md") for row in cheap)
 
 
@@ -183,7 +201,8 @@ async def test_the_pin_blocks_the_mirror_too(server_url):
         headers={"Kb-Library": "flatsource"},
         uri="skill://deepsource/plugin-a/gamma/SKILL.md",
     )
-    assert "No resource" in out
+    # N4: kubed-mcp's read_resource words a miss as resources/read does.
+    assert "Resource not found" in out
 
 
 @pytest.mark.integration
@@ -194,7 +213,7 @@ async def test_the_pin_narrows_the_mirrors_listing(server_url):
             "list_resources",
             headers={"Kb-Library": "flatsource"},
         )
-    )
+    )["resources"]
     assert [row["uri"] for row in rows] == ["skill://flatsource/_index.md"]
 
 

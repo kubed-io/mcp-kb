@@ -6,7 +6,7 @@ the server project, which keeps the scoping rules in one testable place instead
 of repeated in every handler.
 
 ``harvest.py`` decides *which* directories and files belong to the catalogue --
-that is where the globs, the dotfile rules and the skill-root conventions live.
+that is where the globs, the dotfile rules and the rule for a skill folder live.
 This module only turns what harvest already found into ``Skill`` records and a
 place to read library-level files from; it never walks a tree on its own.
 
@@ -54,12 +54,13 @@ def naming_problem(name: str) -> str | None:
 class Skill:
     """One skill on disk, as one library serves it.
 
-    ``folder`` is where it sits below its plugin's skill root (see
-    ``harvest.folder_of``), ``path`` is its directory on disk and ``root`` the
-    plugin root it was harvested from. A skill is identified by ``address`` --
-    library, folder and name -- never by its name alone: two skills called
-    ``testing`` in different folders are two skills, and one plugin served by
-    two libraries is two skills at two addresses.
+    ``folder`` is its plugin's place in the library: empty for the library's
+    main plugin, the plugin's name for any other (``snapshot.folder_for``).
+    ``path`` is its directory on disk and ``root`` the plugin root it was
+    harvested from. A skill is identified by ``address`` -- library, folder and
+    name -- never by its name alone: two plugins' skills called ``testing`` are
+    two skills, and one plugin served by two libraries is two skills at two
+    addresses, maybe in two folders.
 
     ``category`` and ``tags`` are the plugin's, copied here so a scope is a
     question the skill answers by itself. ``live`` is whether its fetch is
@@ -100,22 +101,31 @@ def _frontmatter(skill_md: Path) -> dict:
 
 
 def load_skills(
-    dirs: Sequence[Path], *, library: str, plugin: Plugin, root: Path
+    dirs: Sequence[Path],
+    *,
+    library: str,
+    plugin: Plugin,
+    root: Path,
+    folder: str = "",
 ) -> list[Skill]:
     """Build ``Skill`` records for the skill directories ``harvest`` already found.
 
-    ``library`` is the library the skills join, ``root`` the plugin root the
-    folders are taken below, and every skill carries the plugin's id, category
-    and labels -- nothing implicit: a library or a plugin name is not a tag.
+    ``library`` is the library the skills join and ``folder`` the plugin's
+    place in it, both the library's to decide (the harvest passes neither),
+    ``root`` is the plugin root, and every skill carries the plugin's id,
+    category and labels -- nothing implicit: a library or a plugin name is not
+    a tag.
+    The order is ``dirs``': harvest's claim order, so where two skills would
+    share an address the first claimed is the one kept, as in kubed-mcp.
     """
     skills: list[Skill] = []
-    for skill_dir in sorted(dirs):
+    for skill_dir in dirs:
         meta = _frontmatter(skill_dir / harvest.MAIN_FILE)
         skills.append(
             Skill(
                 name=str(meta.get("name") or skill_dir.name),
                 library=library,
-                folder=harvest.folder_of(skill_dir, root),
+                folder=folder,
                 description=" ".join(str(meta.get("description", "")).split()),
                 path=skill_dir,
                 plugin=plugin.id,

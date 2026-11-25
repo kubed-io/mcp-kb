@@ -1,6 +1,8 @@
 """The server ``create_app`` builds: the knowledge base and the catalogue it injects."""
 
 import json
+import logging
+import sys
 
 import pytest
 from fastmcp import Client
@@ -9,34 +11,28 @@ from kubed.mcp import Inject
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.app import create_app
 from kubed.mcp_kb.catalogue.uris import Catalogue
-from kubed.mcp_kb.mcp.scope import EVERYTHING
+from kubed.mcp_kb.config import Config
 from tests.conftest import make_config
 
 pytestmark = pytest.mark.unit
 
 
-async def test_the_mirror_tools_take_the_catalogue_from_the_container(
-    skills_dir, tmp_path
-):
-    """What the container resolves is what the tools read, and no client can
-    pass it: the parameter is no part of either schema."""
-    flat = make_config(skills_dir, libraries=["flatsource"])
-    app = create_app(KnowledgeBase(flat, tmp_path / "flat"))
-    deep = make_config(skills_dir, libraries=["deepsource"])
-    other = KnowledgeBase(deep, tmp_path / "deep")
-    app.override(Catalogue, other.catalogue)
+async def test_the_resource_mirror_is_kubed_mcps_over_kbs_rows(skills_dir, tmp_path):
+    """N4: the resource tools are the plugin layer's (DLV-6), with no
+    parameter but ``uri``, and list what ``resources/list`` lists."""
+    app = create_app(KnowledgeBase(make_config(skills_dir), tmp_path / "cache"))
+    listing = await app.get_tool("list_resources")
+    reading = await app.get_tool("read_resource")
 
-    # Unfiltered: an in-memory client reads resources, so the mirror is hidden.
-    tools = {t.name: t for t in await app.server.list_tools(run_middleware=False)}
     async with Client(app.server) as client:
         listed = await client.call_tool("list_resources", {})
+        resources = {str(r.uri) for r in await client.list_resources()}
 
-    assert tools["list_resources"].parameters.get("properties", {}) == {}
-    assert set(tools["read_resource"].parameters["properties"]) == {"uri"}
-    rows = {row["uri"] for row in json.loads(listed.content[0].text)}
-    assert rows == {entry.uri for entry in other.catalogue.entries(EVERYTHING)}
+    assert listing.parameters.get("properties", {}) == {}
+    assert set(reading.parameters["properties"]) == {"uri"}
+    rows = {row["uri"] for row in json.loads(listed.content[0].text)["resources"]}
+    assert rows == resources
     assert "skill://deepsource/_index.md" in rows
-    assert not any(uri.startswith("skill://flatsource/") for uri in rows)
 
 
 async def test_a_call_reads_the_snapshot_serving_when_it_started(skills_dir, tmp_path):
@@ -63,3 +59,28 @@ async def test_a_call_reads_the_snapshot_serving_when_it_started(skills_dir, tmp
 
     assert seen == [(True, True, True, 0), (True, True, True, 1)]
 
+
+async def test_the_telemetry_section_reaches_the_server(
+    skills_dir, tmp_path, monkeypatch, caplog
+):
+    """The config is validated so that the section is the field's, not an
+    attribute set on the side."""
+    monkeypatch.setitem(sys.modules, "pyroscope", None)
+    base = make_config(skills_dir).model_dump(mode="json", by_alias=True)
+    config = Config.model_validate(
+        {**base, "telemetry": {"profiles": "http://pyroscope.example.com:4040"}}
+    )
+    app = create_app(KnowledgeBase(config, tmp_path / "cache"))
+    with caplog.at_level(logging.WARNING):
+        async with Client(app.server) as client:
+            assert await client.list_resources()
+    warned = [r for r in caplog.records if "kubed-mcp[telemetry]" in r.getMessage()]
+    assert len(warned) == 1
+
+
+async def test_no_telemetry_section_starts_no_signal(skills_dir, tmp_path, caplog):
+    app = create_app(KnowledgeBase(make_config(skills_dir), tmp_path / "cache"))
+    with caplog.at_level(logging.WARNING):
+        async with Client(app.server) as client:
+            assert await client.list_resources()
+    assert not [r for r in caplog.records if "kubed-mcp[telemetry]" in r.getMessage()]

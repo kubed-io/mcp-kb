@@ -42,10 +42,19 @@ MARKETPLACE_FILES = (
 
 @dataclass(frozen=True)
 class Marketplace:
+    """A catalog read as plugins: the ones installable here, and the skips.
+
+    ``entries`` is how many entries the catalog publishes, installable or not:
+    a library whose marketplace publishes exactly one makes that one its main
+    plugin, and counting the skipped ones is what keeps a skip from moving an
+    address.
+    """
+
     name: str
     plugins: tuple[Plugin, ...]
     skipped: tuple[dict[str, str], ...]
     description: str = ""
+    entries: int = 0
 
 
 class _Skip(ValueError):
@@ -119,6 +128,7 @@ def read_marketplace(
         name=_text(data.get("name")) or library.name,
         plugins=tuple(plugins),
         skipped=tuple(skipped),
+        entries=len(data["plugins"]),
     )
 
 
@@ -158,11 +168,7 @@ def _plugin(
         marketplace=library.name,
         entry=_components(raw),
         strict=raw.get("strict") is not False,
-        root_entry=(
-            isinstance(raw.get("source"), str)
-            and where == fetch
-            and subdir == _join(address.subdir, "")
-        ),
+        manifest_entry={k: v for k, v in raw.items() if k != "source"},
     )
 
 

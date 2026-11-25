@@ -112,7 +112,7 @@
     },
     "PluginConfig": {
       "additionalProperties": false,
-      "description": "A folder of skills and prompts: a path under a source, plus its metadata.\n\nThe metadata fields are Claude's marketplace-entry fields, so a plugin\ndeclared here and one read out of a ``marketplace.json`` carry the same\nshape and a selector cannot tell them apart. The glob lists are this\nserver's own: omitted, a kind is the conventions and the plugin's own\n``plugin.json`` and entry, merged per kind as Claude Code merges them.",
+      "description": "A folder of skills and prompts: a path under a source, plus its metadata.\n\nThe metadata fields are Claude's marketplace-entry fields, so a plugin\ndeclared here and one read out of a ``marketplace.json`` carry the same\nshape and a selector cannot tell them apart. ``prompts`` and ``files``\nare this server's own glob lists: omitted, a kind is the conventions and\nthe plugin's own ``plugin.json`` and entry, merged per kind as Claude Code\nmerges them. ``skills`` lists folders, added to ``skills/`` as Claude\nCode adds a manifest's.",
       "properties": {
         "name": {
           "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
@@ -179,6 +179,7 @@
             }
           ],
           "default": null,
+          "description": "Folders, not globs: each is a skill, or holds skills one level down, and adds to the skills/ folder every plugin is read from. [] serves no skill.",
           "title": "Skills"
         },
         "prompts": {
@@ -305,10 +306,57 @@
       ],
       "title": "SourceConfig",
       "type": "object"
+    },
+    "TelemetrySettings": {
+      "additionalProperties": false,
+      "description": "A ``telemetry`` section a server's config can embed.\n\n``profiles`` is the address of the Pyroscope server. Setting it turns profiles\non; there is no separate enabled flag. ``profile_cpu`` and ``profile_memory``\nchoose which profiles are sent. ``otel`` turns OpenTelemetry on, configured by\nthe standard ``OTEL_*`` variables. ``tags`` are labels added to every profile\nand resource attributes on every trace and metric. An unknown key is an error,\nso a typo stops the boot; a server's own section may subclass it to add keys.",
+      "properties": {
+        "profiles": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pyroscope server address; setting it turns profiles on.",
+          "title": "Profiles"
+        },
+        "profile_cpu": {
+          "default": true,
+          "description": "Sample CPU while profiles are on.",
+          "title": "Profile Cpu",
+          "type": "boolean"
+        },
+        "profile_memory": {
+          "default": true,
+          "description": "Sample allocations while profiles are on.",
+          "title": "Profile Memory",
+          "type": "boolean"
+        },
+        "otel": {
+          "default": false,
+          "description": "Run OpenTelemetry, configured by the standard OTEL_* variables.",
+          "title": "Otel",
+          "type": "boolean"
+        },
+        "tags": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Labels on every profile, and resource attributes on every trace and metric.",
+          "title": "Tags",
+          "type": "object"
+        }
+      },
+      "title": "TelemetrySettings",
+      "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "The whole config file: the sources, the plugins under them, the libraries.",
+  "description": "The whole config file: the sources, the plugins under them, the libraries,\nand the process's telemetry.",
   "properties": {
     "sources": {
       "items": {
@@ -330,6 +378,10 @@
       },
       "title": "Libraries",
       "type": "array"
+    },
+    "telemetry": {
+      "$ref": "#/$defs/TelemetrySettings",
+      "description": "What the process reports: kubed-mcp's profiles, traces and metrics. Absent, every signal is off."
     }
   },
   "title": "Config",

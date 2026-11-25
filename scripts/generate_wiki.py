@@ -67,8 +67,8 @@ FOOTER_LINKS = "[Home](Home) · [Installing](Installing) · [Deployment](Deploym
 
 # The config models, in the order a reader meets them: the file itself, then
 # its three lists, then the selector a library may carry, then the two small
-# things a source points at. `Config` is the schema's root; the rest are its
-# `$defs`.
+# things a source points at, then the telemetry section, which is kubed-mcp's.
+# `Config` is the schema's root; the rest are its `$defs`.
 MODELS = [
     "Config",
     "SourceConfig",
@@ -77,6 +77,7 @@ MODELS = [
     "Selector",
     "BasicAuth",
     "EnvRef",
+    "TelemetrySettings",
 ]
 
 
@@ -339,7 +340,14 @@ def _live_tools() -> list:
             }
         )
         app = create_app(KnowledgeBase(config, tmp / "cache"))
-        found = asyncio.run(app.server.list_tools(run_middleware=False))
+
+        async def tools():
+            # kubed-mcp's resource pair (DLV-6), which it lists only to a
+            # client that turned resources off, then kb's own.
+            found = [await app.get_tool(name) for name in tools_module.RESOURCE_TOOLS]
+            return found + await app.server.list_tools(run_middleware=False)
+
+        found = asyncio.run(tools())
         return [tool.to_mcp_tool() for tool in found]
 
 
@@ -353,14 +361,14 @@ def _reveals() -> dict[str, tuple[str, str, str]]:
     resources = (
         "Resource mirror",
         request_module.RESOURCES_PARAM,
-        request_module.RESOURCES_HEADER,
+        request_module.RESOURCES_KB_HEADER,
     )
     prompts = (
         "Prompt mirror",
         request_module.PROMPTS_PARAM,
-        request_module.PROMPTS_HEADER,
+        request_module.PROMPTS_KB_HEADER,
     )
-    pairs = dict.fromkeys(sorted(tools_module.MIRROR_TOOLS), resources)
+    pairs = dict.fromkeys(sorted(tools_module.RESOURCE_TOOLS), resources)
     pairs.update(dict.fromkeys(sorted(prompts_module.PROMPT_TOOLS), prompts))
     return pairs
 
@@ -419,12 +427,15 @@ def tools_page() -> str:
     sections = []
     for tool in found:
         _, param, header = reveals[tool.name]
+        listed = f"`?{param}=off` or `{header_name(header)}: off`"
+        if tool.name in tools_module.RESOURCE_TOOLS:
+            listed += ", or one kubed-mcp knows as VS Code"
         sections.append(
             f"""## `{tool.name}`
 
 {clean(tool.description)}
 
-Listed only for a client that sent `?{param}=off` or `{header_name(header)}: off`.
+Listed only for a client that sent {listed}.
 It is callable either way — hiding a tool from a listing is a presentation
 choice, not a refusal to run it.
 

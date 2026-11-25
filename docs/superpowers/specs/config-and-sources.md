@@ -48,6 +48,9 @@ is not YAML or fails validation exits with code 2 and `mcp-kb: <reason>` on stde
 
 **CFG-8.** A validation error that quotes a URL has its `user:password@` masked as `***@`.
 
+**CFG-14.** A plugin's `skills` item is a folder, never a glob. Loading the config refuses an item
+holding `*`, `?` or `[` with `skills item '<item>' is a folder, not a glob` (PLG-9).
+
 ## Credentials
 
 **CFG-9.** A source's `auth` is `{username, password}`. `password` MUST be an `{env: NAME}`
@@ -137,14 +140,16 @@ address has no auth, `cache: snapshot` and no `refresh`.
 **SRC-10.** A failure to materialise or fingerprint a fetch is recorded on that fetch alone, and
 its error names the fetch key, never a cache path.
 
-**SRC-53.** Each declared source, and `file`, has one loader: a kubed-mcp `PluginLoader` whose
-scheme is the source's name, made with the source (its URL and `auth`) and the cache directory.
-`materialise(address)` is the folder holding the plugin, the fetch's tree with the subdir inside
-it ([SRC-8](#addresses-and-fetches)); a subdir that is not a directory in it fails with
-`<subdir> is not a directory in <key>`. A failure is a `ValueError`, which kubed-mcp's
-`add_plugin` reports as the plugin's refusal. kb's `file` loader cannot be registered with
-kubed-mcp, which has its own `LocalLoader` for `file` built in. That one is no substitute: it
-guards no subdir symlink out of the tree and ignores `?ref=`.
+**SRC-53.** Each declared source, and `file`, has one fetcher: a loader whose scheme is the
+source's name, made with the source (its URL and `auth`) and the cache directory, which kb
+materialises and fingerprints its fetches through. kubed-mcp is never handed one. It reads every
+plugin through one loader of kb's, the **served-tree loader**, registered for `file` and for every
+declared source's name, in place of kubed-mcp's own `LocalLoader`. The served-tree loader is never
+a fetcher: it clones, exports and copies nothing. `materialise(address)` is the tree kb serves for
+the address's fetch now, the last good one included, with the subdir inside it
+([SRC-8](#addresses-and-fetches)). A fetch kb serves no tree for fails with
+`<key> is not materialised`, and a subdir that is not a directory in the tree fails with
+`<subdir> is not a directory in <key>`. kubed-mcp is handed kb's own address, never a cache path.
 
 ## git
 
@@ -194,15 +199,18 @@ revalidated like any other.
 
 **SRC-20.** A file fetch is served in place; nothing is copied. A path that is not a directory
 fails the fetch with `<path> is not a directory`. A skill's files are read once per generation,
-so an edit to one in place is served from the next refresh (or `POST /reindex`); a library file
-or a prompt is read off disk each time.
+so an edit to one in place is served from the next refresh (or `POST /reindex`); a prompt file is
+read when its plugin is added to the plugin layer, once per generation, like a skill's files; a
+library file is read off disk each time.
 
 ## `cache: live`
 
-**SRC-21.** On a live fetch, each read of one of its files (library file, prompt) first
-revalidates that file, and each request that reads skills first revalidates every file of the live
-skills in its scope (SKL-37): one request for its ETag, and a download only if the ETag differs
-from the local copy's.
+**SRC-21.** On a live fetch, each read of one of its library files first
+revalidates that file, and each request that reads skills, agents or prompts first revalidates
+every file of the live skills, and each agent and prompt file, of the plugins its scope admits
+(SKL-37): one request for its ETag, and a download only if the ETag differs from the local copy's.
+A skill's, an agent's or a prompt's edit found that way is served from the next request on, not to
+the request that found it.
 
 **SRC-22.** A download is staged in `<cache>/src/<slug>/.work/` and renamed over the local copy in
 one step, so a reader sees one whole version of the file.

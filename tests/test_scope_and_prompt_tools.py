@@ -5,8 +5,9 @@ its headers, and whether a mirror is shown depends on what the client declared
 there -- so these run the app on a loopback port, as test_header_scope does.
 
 The catalogue is shaped to make the rules visible: ``observe`` holds two
-plugins, one in category ``observability`` tagged ``ops`` with skills and a
-prompt, one in category ``tooling`` tagged ``extra`` and ``ops`` with a skill;
+plugins, its own -- the main one -- in category ``observability`` tagged ``ops``
+with skills and a prompt, and ``observe-extra``, in a folder of its name, in
+category ``tooling`` tagged ``extra`` and ``ops`` with a skill;
 ``design`` (category ``design``, tagged ``ui``) has skills only; and ``notes``
 (tagged ``ops``) has a prompt and no skills at all.
 """
@@ -81,7 +82,6 @@ def url(tmp_path_factory):
                     "name": "notes",
                     "source": f"file://{base / 'notes'}",
                     "tags": ["ops"],
-                    "skills": [],
                     "prompts": ["*.md"],
                 },
                 {"name": "blank", "source": f"file://{base / 'blank'}"},
@@ -202,11 +202,11 @@ async def test_a_prompt_tool_mistake_is_an_error_result_that_says_what_to_do(
 
 async def test_a_library_is_the_whole_library(url):
     _, resources, prompts = await _seen(url, "?library=observe")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
     assert prompts == ["observe_debug"]
     assert await _skills(url, "?library=observe") == [
-        "skill://observe/alerts/SKILL.md",
         "skill://observe/loki/SKILL.md",
+        "skill://observe/observe-extra/alerts/SKILL.md",
         "skill://observe/tempo/SKILL.md",
     ]
 
@@ -219,16 +219,20 @@ async def test_a_library_of_prompts_alone_is_visible_by_name(url):
 
 async def test_tags_select_across_libraries(url):
     _, resources, prompts = await _seen(url, "?tag=ops")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
     assert prompts == ["notes_standup", "observe_debug"]
 
 
 async def test_a_repeated_tag_parameter_means_any_of_them(url):
     _, resources, _ = await _seen(url, "?tag=ui&tag=extra")
-    assert resources == ["design/_index.md", "observe/_index.md"]
+    assert resources == [
+        "design/_index.md",
+        "observe/_index.md",
+        "observe/observe-extra/_index.md",
+    ]
     assert await _skills(url, "?tag=ui&tag=extra") == [
         "skill://design/palette/SKILL.md",
-        "skill://observe/alerts/SKILL.md",
+        "skill://observe/observe-extra/alerts/SKILL.md",
     ]
 
 
@@ -236,9 +240,9 @@ async def test_a_comma_in_a_tag_means_all_of_them(url):
     """`?tag=extra,ops` admits only a plugin carrying both: `observe-extra`,
     not `observe` (ops alone) and not `notes` (ops alone)."""
     _, resources, prompts = await _seen(url, "?tag=extra,ops")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
     assert prompts == []
-    assert await _skills(url, "?tag=extra,ops") == ["skill://observe/alerts/SKILL.md"]
+    assert await _skills(url, "?tag=extra,ops") == ["skill://observe/observe-extra/alerts/SKILL.md"]
 
 
 async def test_a_category_selects_the_plugins_declaring_it(url):
@@ -258,10 +262,10 @@ async def test_a_repeated_category_parameter_means_any_of_them(url):
 
 async def test_tags_narrow_within_a_library(url):
     _, resources, prompts = await _seen(url, "?library=observe&tag=extra")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
     assert prompts == []
     assert await _skills(url, "?library=observe&tag=extra") == [
-        "skill://observe/alerts/SKILL.md"
+        "skill://observe/observe-extra/alerts/SKILL.md"
     ]
 
 
@@ -356,7 +360,7 @@ async def test_a_header_beats_the_url_parameter(url):
     _, resources, prompts = await _seen(
         url, "?library=design", {"Kb-Library": "observe"}
     )
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
     assert prompts == ["observe_debug"]  # design has no prompts
 
 
@@ -377,8 +381,6 @@ def mixed(tmp_path):
     """One library fed by two differently-tagged plugins, and a prompts-only
     library named like a folder of another. The shapes the simple fixture
     above cannot express."""
-    from kubed.mcp_kb.mcp.prompts import PromptProvider
-
     def skill(root, *parts):
         d = root.joinpath("skills", *parts)
         d.mkdir(parents=True)
@@ -402,7 +404,7 @@ def mixed(tmp_path):
                  "prompts": [], "files": ["shared/**/*"]},
                 {"name": "alpha", "source": f"file://{tmp_path / 'alpha'}"},
                 {"name": "notes", "source": f"file://{tmp_path / 'notes'}",
-                 "skills": [], "prompts": ["*.md"]},
+                 "prompts": ["*.md"]},
             ],
             "libraries": [
                 {"name": "obs", "plugins": ["ops", "ui"]},
@@ -412,7 +414,9 @@ def mixed(tmp_path):
         }
     )
     knowledge_base = KnowledgeBase(config, tmp_path / "cache")
-    return knowledge_base, PromptProvider(lambda: knowledge_base.snapshot)
+    # Published, so the plugin layer has read the prompts the snapshot holds.
+    server_of(knowledge_base)
+    return knowledge_base
 
 
 def _tag(name):
@@ -425,7 +429,7 @@ def test_a_tag_scope_cannot_read_another_plugins_library_file(mixed):
     Admitting library files by library alone let an `ops` scope — which does
     see a skill in `obs` — read the `ui` plugin's file by guessing its URI.
     """
-    knowledge_base, _ = mixed
+    knowledge_base = mixed
     catalogue = knowledge_base.snapshot.catalogue
 
     assert catalogue.read("skill://obs/shared/tokens.md", _tag("ops")) is None
@@ -433,7 +437,7 @@ def test_a_tag_scope_cannot_read_another_plugins_library_file(mixed):
 
 
 def test_a_tag_scope_does_not_list_another_plugins_library_files(mixed):
-    knowledge_base, _ = mixed
+    knowledge_base = mixed
     catalogue = knowledge_base.snapshot.catalogue
 
     assert catalogue.read("skill://obs/_files.md", _tag("ops")) is None
@@ -447,9 +451,10 @@ def test_a_prompts_only_library_is_selected_by_its_name_alone(mixed):
     Only the library is a selector: `notes` gives the prompts-only library and
     never the folder, and the folder's spelling names nothing at all.
     """
-    knowledge_base, provider = mixed
+    knowledge_base = mixed
+    snapshot = knowledge_base.snapshot
 
-    assert [p.name for p in provider.visible(Scope("notes"))] == ["notes_n"]
+    assert [p.name for p in snapshot.visible_prompts(Scope("notes"))] == ["notes_n"]
     assert knowledge_base.index.visible(Scope("notes")) == []
     assert knowledge_base.index.visible(Scope("alpha/notes")) == []
-    assert provider.visible(Scope("alpha/notes")) == []
+    assert snapshot.visible_prompts(Scope("alpha/notes")) == []

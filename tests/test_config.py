@@ -1,9 +1,12 @@
 """The config file schema: sources, plugins, libraries, and what gets refused."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
+from kubed.mcp import TelemetrySettings
+from pydantic import ValidationError
 
 from kubed.mcp_kb.config import (
     BasicAuth,
@@ -39,7 +42,7 @@ plugins:
   category: engineering
   tags: [runbooks, oncall]
   source: github://my-team/my-repo//foo?ref=main
-  skills: [runbooks/*]
+  skills: [./runbooks]
   prompts: [prompts/*.md]
   files: [shared/**]
 - name: homelab-prompts
@@ -123,7 +126,7 @@ def test_a_plugin_carries_the_marketplace_entry_fields_and_its_globs(tmp_path):
 
     assert plugin.category == "engineering"
     assert plugin.tags == ["runbooks", "oncall"]
-    assert plugin.skills == ["runbooks/*"]
+    assert plugin.skills == ["./runbooks"]
     assert plugin.prompts == ["prompts/*.md"]
     assert plugin.files == ["shared/**"]
     assert plugin.dialect == "auto"
@@ -376,6 +379,40 @@ def test_a_glob_escaping_the_plugin_root_is_refused(tmp_path, patterns):
         load_config(write(tmp_path, text))
 
 
+@pytest.mark.parametrize("item", ["skills/*", "skills/?x", "skills/[ab]"])
+def test_a_glob_in_skills_is_refused(item):
+    """``skills:`` lists folders; a glob there is a config from before, not a path."""
+    with pytest.raises(ValueError, match=re.escape(repr(item))):
+        PluginConfig(name="p", source="file:///x", skills=["./ok", item])
+
+
+def test_a_glob_in_prompts_or_files_is_still_a_glob():
+    plugin = PluginConfig(
+        name="p", source="file:///x", prompts=["prompts/*.md"], files=["shared/**"]
+    )
+    assert (plugin.prompts, plugin.files) == (["prompts/*.md"], ["shared/**"])
+
+
+def test_skills_empty_serves_none(tmp_path):
+    """``skills: []`` validates, and serves no skill: not even ``skills/<name>/``."""
+    from kubed.mcp_kb.catalogue.snapshot import build_plugin, with_manifest
+    from kubed.mcp_kb.plugins import plugin_from_config
+
+    skill = tmp_path / "skills" / "a"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: a\ndescription: d\n---\nbody\n")
+    declared = PluginConfig(name="p", source=f"file://{tmp_path}", skills=[])
+    config = Config.model_validate({"plugins": [declared.model_dump()]})
+
+    completed, globs = with_manifest(plugin_from_config(config, declared), tmp_path)
+    record = build_plugin(completed, tmp_path, globs=globs)
+
+    assert declared.skills == []
+    assert globs.skills == ()
+    assert record.status == "ok"
+    assert record.skills == ()
+
+
 def test_an_unknown_dialect_is_refused(tmp_path):
     text = _sources() + "plugins:\n- name: p\n  source: gh://o/r\n  dialect: gemini\n"
     with pytest.raises(ConfigError, match="dialect"):
@@ -568,3 +605,52 @@ def test_a_library_lists_a_category_once_in_the_order_given():
         }
     )
     assert config.library("x").categories == ["b", "a"]
+
+
+def test_a_library_named_like_the_server_is_refused():
+    with pytest.raises(ValidationError, match="the server's own name"):
+        Config.model_validate(
+            {"libraries": [{"name": "mcp-kb", "source": "file:///x"}]}
+        )
+
+
+def test_no_telemetry_section_is_every_signal_off(tmp_path):
+    config = load_config(write(tmp_path, ""))
+    assert config.telemetry == TelemetrySettings()
+    assert config.telemetry.profiles is None and config.telemetry.otel is False
+
+
+def test_a_telemetry_section_parses(tmp_path):
+    config = load_config(
+        write(
+            tmp_path,
+            "telemetry:\n  profiles: http://pyroscope.example.com:4040\n"
+            "  otel: true\n  tags: {team: platform}\n",
+        )
+    )
+    assert config.telemetry.profiles == "http://pyroscope.example.com:4040"
+    assert config.telemetry.otel is True
+    assert config.telemetry.tags == {"team": "platform"}
+    assert config.telemetry.profile_cpu is True
+
+
+def test_a_typod_telemetry_key_is_refused(tmp_path):
+    text = "telemetry:\n  profile: http://pyroscope.example.com\n"
+    with pytest.raises(ConfigError, match="profile"):
+        load_config(write(tmp_path, text))
+
+
+def test_a_credential_in_the_profiles_address_is_refused(tmp_path):
+    text = "telemetry:\n  profiles: http://me:s3cret@pyroscope.example.com:4040\n"
+    with pytest.raises(ConfigError) as raised:
+        load_config(write(tmp_path, text))
+    assert "must not embed a credential" in str(raised.value)
+    assert "s3cret" not in str(raised.value)
+
+
+def test_the_schema_carries_the_telemetry_section():
+    published = schema()
+    assert published["properties"]["telemetry"]["$ref"].endswith("/TelemetrySettings")
+    model = published["$defs"]["TelemetrySettings"]
+    assert {"profiles", "otel", "tags"} <= set(model["properties"])
+    assert model["additionalProperties"] is False

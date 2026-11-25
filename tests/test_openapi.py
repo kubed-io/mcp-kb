@@ -43,8 +43,8 @@ def every_status(skills_dir, cache, monkeypatch):
     so its plugin entry carries `skipped`. `gone` names a directory that is
     not there, so it never had a tree and is `failed`, which carries `status`
     and `error` and nothing else, and its plugin fails with it. `clash` serves
-    `flatsource`'s tree again in the same library, so that library carries a
-    `conflicts` entry; `ghost` names a marketplace plugin that does not exist,
+    `flatsource`'s tree again in the same library, as files at the addresses of
+    `flatsource`'s skills, so that library carries a `conflicts` entry; `ghost` names a marketplace plugin that does not exist,
     so its library carries an `error`. A document checked against nothing but
     a healthy body says nothing about the shapes an operator actually goes to
     `/health` for.
@@ -56,7 +56,8 @@ def every_status(skills_dir, cache, monkeypatch):
         {
             "name": "clash",
             "source": f"file://{skills_dir / 'flatsource'}",
-            "skills": ["**/SKILL.md"],
+            "skills": [],
+            "files": ["**/*"],
             "version": "1",
         }
     )
@@ -65,7 +66,7 @@ def every_status(skills_dir, cache, monkeypatch):
     flatsource["plugins"].append("clash")
     raw["libraries"].append({"name": "ghost", "plugins": ["nope@ghost"]})
     # A file named like an index: `deepsource` serves on, and lists it skipped.
-    (skills_dir / "deepsource" / "_index.md").write_text("not an index\n")
+    (skills_dir / "deepsource" / "shared" / "_index.md").write_text("not an index\n")
     knowledge_base = KnowledgeBase(Config.model_validate(raw), cache)
 
     real = SourceLoader.materialise

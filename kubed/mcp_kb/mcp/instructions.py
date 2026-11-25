@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from kubed.mcp import Middleware
+from kubed.mcp.gateway import prefix, prefixed
 
 from ..catalogue.instructions import build_instructions
 from ..catalogue.uris import Catalogue
@@ -18,7 +19,6 @@ from .request import (
     client_reads_resources,
     declared_on_discover,
     declared_on_initialize,
-    requested_addressing,
     requested_scope,
 )
 
@@ -30,13 +30,13 @@ class ScopedInstructions(Middleware):
         self._catalogue = catalogue
 
     def _text(self, declared: bool) -> str:
-        return build_instructions(
+        text = build_instructions(
             self._catalogue(),
             requested_scope(),
             resources=client_reads_resources(),
             skills_extension=declared,
-            addressing=requested_addressing(),
         )
+        return prefixed(text, prefix())
 
     async def on_initialize(self, context, call_next):
         result = await call_next(context)

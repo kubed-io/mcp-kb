@@ -28,6 +28,7 @@ reports it instead.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,6 +48,7 @@ __all__ = [
     "AccessRefused",
     "FileLoader",
     "GitLoader",
+    "ServedTrees",
     "SourceError",
     "SourceLoader",
     "WebdavLoader",
@@ -83,7 +85,7 @@ class SourceLoader(ABC):
         fetch = source_fetch(self.source, parsed)
         root = plugin_root(self.build(fetch, self.cache), parsed.subdir)
         if root is None:
-            raise SourceError(not_in(parsed.subdir, fetch))
+            raise SourceError(not_in(parsed.subdir, fetch.key))
         return root
 
     def fingerprint(self, fetch: Fetch, root: Path) -> dict:
@@ -121,6 +123,32 @@ def loaders(config: Config, cache: Path) -> dict[str, SourceLoader]:
     return found
 
 
+class ServedTrees:
+    """The trees kb serves, as a kubed-mcp ``PluginLoader``.
+
+    The fetch memo and never a fetcher: it clones, exports and copies nothing.
+    ``served`` answers a fetch key with the tree the knowledge base is serving
+    for it now (the last good one included), or None. kubed-mcp is handed kb's
+    own address and gets back that tree, never a cache path of its own making.
+    """
+
+    def __init__(
+        self, schemes: tuple[str, ...], served: Callable[[str], Path | None]
+    ) -> None:
+        self.schemes = schemes
+        self.served = served
+
+    def materialise(self, address: str) -> Path:
+        parsed = parse_address(address)
+        tree = self.served(parsed.key)
+        if tree is None:
+            raise SourceError(f"{parsed.key} is not materialised")
+        root = plugin_root(tree, parsed.subdir)
+        if root is None:
+            raise SourceError(not_in(parsed.subdir, parsed.key))
+        return root
+
+
 def plugin_root(fetch_root: Path, subdir: str) -> Path | None:
     """The plugin or marketplace root inside a materialised fetch, or None.
 
@@ -142,7 +170,7 @@ def plugin_root(fetch_root: Path, subdir: str) -> Path | None:
     return root
 
 
-def not_in(subdir: str, fetch: Fetch) -> str:
+def not_in(subdir: str, key: str) -> str:
     """Why a root was refused: the subdir and the fetch, and no cache path.
 
     One message for both refusals, because from outside they are one thing --
@@ -150,4 +178,4 @@ def not_in(subdir: str, fetch: Fetch) -> str:
     from, whether because there is nothing there or because what is there
     leads out of the tree.
     """
-    return f"{subdir or '/'} is not a directory in {fetch.key}"
+    return f"{subdir or '/'} is not a directory in {key}"

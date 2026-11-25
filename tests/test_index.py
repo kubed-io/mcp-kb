@@ -1,5 +1,6 @@
 """Unit tests for the on-disk index: round trip, corruption, atomicity."""
 
+import hashlib
 import json
 import os
 import tempfile
@@ -13,7 +14,6 @@ from kubed.mcp_kb.catalogue.index import (
     FetchRecord,
     Index,
     PluginRecord,
-    PromptRow,
     SkillRow,
     config_hash,
     now,
@@ -21,7 +21,6 @@ from kubed.mcp_kb.catalogue.index import (
 from kubed.mcp_kb.catalogue.skills import Skill
 from kubed.mcp_kb.config import load_config
 from kubed.mcp_kb.plugins import Globs
-from kubed.mcp_kb.plugins.manifest import CommandEntry
 
 FETCH = "file:///skills/flatsource"
 
@@ -64,11 +63,8 @@ def _plugin_record(**overrides):
         "error": None,
         "built": now(),
         "skills": (SkillRow.from_skill(_skill()),),
-        "prompts": (
-            PromptRow(
-                path="/skills/flatsource/debug.md", dialect="claude", name="debug"
-            ),
-        ),
+        "prompts": ("commands/debug.md", "prompts/x.md"),
+        "claude_prompts": ("commands/debug.md",),
         "files": ("shared/logo.png",),
         "skill_dirs": ("/skills/flatsource/alpha",),
     }
@@ -97,6 +93,30 @@ def test_an_index_round_trips_through_json(tmp_path):
 
 
 @pytest.mark.unit
+def test_a_plugin_records_its_prompt_files_as_paths(tmp_path):
+    """A prompt is its file's path and nothing parsed: the plugin layer reads
+    it. The paths a ``commands`` declaration selects round-trip beside them."""
+    path = tmp_path / "index.json"
+    _index().write(path)
+    record = Index.read(path).plugins["flatsource"]
+    assert record.prompts == ("commands/debug.md", "prompts/x.md")
+    assert record.claude_prompts == ("commands/debug.md",)
+
+
+@pytest.mark.unit
+def test_a_prompt_row_of_the_old_shape_reads_as_none(tmp_path):
+    """A row object where a path belongs is a shape this reader does not know."""
+    path = tmp_path / "index.json"
+    _index().write(path)
+    raw = json.loads(path.read_text())
+    raw["plugins"]["flatsource"]["prompts"] = [
+        {"path": "/x/debug.md", "dialect": "claude", "name": "debug"}
+    ]
+    path.write_text(json.dumps(raw))
+    assert Index.read(path) is None
+
+
+@pytest.mark.unit
 def test_a_missing_or_corrupt_index_reads_as_none(tmp_path):
     missing = tmp_path / "missing.json"
     assert Index.read(missing) is None
@@ -107,7 +127,7 @@ def test_a_missing_or_corrupt_index_reads_as_none(tmp_path):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("version", [INDEX_VERSION + 1, 6, 5, 4, 3, 2, 1])
+@pytest.mark.parametrize("version", [INDEX_VERSION + 1, 9, 8, 7, 6, 5, 4, 3, 2, 1])
 def test_a_different_version_reads_as_none(tmp_path, version):
     """Older as well as newer, by literal and not only by offset.
 
@@ -115,7 +135,9 @@ def test_a_different_version_reads_as_none(tmp_path, version):
     the literals are the shapes before this one (1 on main, 2 part-way through
     the address-space work, 3 before a record carried `skipped`, 4 the
     per-source shape before plugins, 5 before a prompt row carried its name, 6
-    before a plugin record carried the globs it was harvested with):
+    before a plugin record carried the globs it was harvested with, 7 while a
+    plugin's skills were globs rather than the folders kubed-mcp reads, 8 and 9
+    while a prompt was a row of its path, dialect and name):
     lowering `INDEX_VERSION` back to any of them must fail here, which an
     offset from the current value alone never would.
     """
@@ -162,32 +184,15 @@ def test_a_v4_index_on_disk_is_discarded_whole(tmp_path):
 
 
 @pytest.mark.unit
-def test_an_inline_prompt_row_round_trips(tmp_path):
-    """A map command's body lives in the row: there is no file to re-read."""
-    row = PromptRow(
-        path="/skills/flatsource/.claude-plugin/plugin.json",
-        dialect="claude",
-        name="about",
-        content="Say what this plugin does.",
-        description="About.",
-        argument_hint="<topic>",
-    )
-    path = tmp_path / "index.json"
-    written = _index(plugins={"flatsource": _plugin_record(prompts=(row,))})
-    written.write(path)
-    assert Index.read(path) == written
-
-
-@pytest.mark.unit
 def test_a_v5_index_on_disk_is_discarded_whole(tmp_path):
     """Its prompt rows name no prompt: the name was the file stem, re-derived."""
     path = tmp_path / "index.json"
     _index().write(path)
     raw = json.loads(path.read_text(encoding="utf-8"))
     raw["version"] = 5
-    for row in raw["plugins"]["flatsource"]["prompts"]:
-        for key in ("name", "content", "description", "argument_hint"):
-            del row[key]
+    raw["plugins"]["flatsource"]["prompts"] = [
+        {"path": "/skills/flatsource/debug.md", "dialect": "claude"}
+    ]
     path.write_text(json.dumps(raw), encoding="utf-8")
     assert Index.read(path) is None
 
@@ -295,13 +300,16 @@ def test_config_hash_ignores_key_order_and_changes_with_content(tmp_path):
 
 @pytest.mark.unit
 def test_a_skill_row_round_trips_to_a_skill(tmp_path):
-    """The row carries the skill's own fields; the library and the plugin's
-    labels are put back on by whoever assigns the plugin to a library."""
+    """The row carries the skill's own fields; the library, the plugin's folder
+    in it and the plugin's labels are put back on by whoever assigns the
+    plugin to a library."""
     skill = _skill()
     row = SkillRow.from_skill(skill)
     assert not hasattr(row, "library")
+    assert not hasattr(row, "folder")
     back = row.to_skill(
         library=skill.library,
+        folder=skill.folder,
         plugin=skill.plugin,
         root=skill.root,
         category=skill.category,
@@ -309,9 +317,14 @@ def test_a_skill_row_round_trips_to_a_skill(tmp_path):
     )
     assert back == skill
     twice = row.to_skill(
-        library="other", plugin=skill.plugin, root=skill.root, category=None, tags=frozenset()
+        library="other",
+        folder="flatsource",
+        plugin=skill.plugin,
+        root=skill.root,
+        category=None,
+        tags=frozenset(),
     )
-    assert twice.address == "other/alpha"
+    assert twice.address == "other/flatsource/alpha"
 
 
 @pytest.mark.unit
@@ -346,15 +359,6 @@ def test_a_record_keeps_the_globs_it_was_harvested_with(tmp_path):
         agents=None,
         command_dirs=("commands",),
         command_files=("extra/run.md",),
-        command_map=(
-            CommandEntry(
-                name="about",
-                source=None,
-                content="Say what this plugin does.",
-                description=None,
-                argument_hint=None,
-            ),
-        ),
     )
     written = _index(plugins={"flatsource": _plugin_record(globs=globs)})
     written.write(path)
@@ -363,3 +367,14 @@ def test_a_record_keeps_the_globs_it_was_harvested_with(tmp_path):
 
     assert read == written
     assert read.plugins["flatsource"].globs == globs
+
+
+@pytest.mark.unit
+def test_config_hash_leaves_the_telemetry_section_out(tmp_path):
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("")
+    watched = tmp_path / "watched.yaml"
+    watched.write_text("telemetry:\n  profiles: http://pyroscope.example.com:4040\n")
+    before = json.dumps({"libraries": [], "plugins": [], "sources": []}, sort_keys=True)
+    assert config_hash(load_config(empty)) == hashlib.sha256(before.encode()).hexdigest()
+    assert config_hash(load_config(watched)) == config_hash(load_config(empty))

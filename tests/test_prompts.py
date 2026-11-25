@@ -1,32 +1,17 @@
 """Prompts: the files, how they render, and who may see them."""
 
 import logging
-import pathlib
-from types import SimpleNamespace
 
 import pytest
 from fastmcp import Client
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import harvest
-from kubed.mcp_kb.catalogue.prompts import (
-    FilePrompt,
-    PromptSource,
-    load_prompt,
-    load_prompts,
-    prompt_name,
-)
-from kubed.mcp_kb.catalogue.skills import SkillIndex
+from kubed.mcp_kb.catalogue.prompts import prompt_name
 from kubed.mcp_kb.config import Config
-from kubed.mcp_kb.mcp.prompts import PromptProvider
 from kubed.mcp_kb.mcp.scope import Scope
 from kubed.mcp_kb.plugins import Globs
-from tests.conftest import (
-    load_all_prompts,
-    load_library_prompts,
-    make_config,
-    server_of,
-)
+from tests.conftest import make_config, read_prompt, server_of
 
 pytestmark = pytest.mark.unit
 
@@ -35,31 +20,51 @@ def text(result):
     return result.messages[0].content.text
 
 
+def _served(config: Config, cache) -> KnowledgeBase:
+    """A knowledge base with its plugin set published, which reads the prompts."""
+    knowledge_base = KnowledgeBase(config, cache)
+    server_of(knowledge_base)
+    return knowledge_base
+
+
+def _kit(tmp_path, files: dict[str, str]) -> KnowledgeBase:
+    """One declared plugin ``kit`` in library ``kit``, over ``files``, served."""
+    root = tmp_path / "plugin"
+    for rel, body in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(body)
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "kit", "source": f"file://{root}"}],
+            "libraries": [{"name": "kit", "plugins": ["kit"]}],
+        }
+    )
+    return _served(config, tmp_path / "cache")
+
+
 # -- loading -------------------------------------------------------------------
 
 
-def test_the_name_is_library_qualified(prompts_dir):
+def test_the_name_is_library_qualified(prompts_dir, tmp_path):
     """A file outside a library folder is not a prompt at all."""
-    assert {p.name for p in load_all_prompts(prompts_dir)} == {
-        "flatsource_hello",
-        "deepsource_check",
-    }
+    kb = _served(make_config(prompts_dir=prompts_dir), tmp_path / "cache")
+    assert {p.name for p in kb.prompts} == {"flatsource_hello", "deepsource_check"}
 
 
-def test_libraries_hard_scope_the_prompts(prompts_dir):
-    names = {p.name for p in load_library_prompts(prompts_dir, "flatsource")}
-    assert names == {"flatsource_hello"}
+def test_libraries_hard_scope_the_prompts(prompts_dir, tmp_path):
+    config = make_config(prompts_dir=prompts_dir, libraries=["flatsource"])
+    kb = _served(config, tmp_path / "cache")
+    assert {p.name for p in kb.prompts} == {"flatsource_hello"}
 
 
 def test_an_undeclared_placeholder_is_skipped_loudly(tmp_path, caplog):
     """Rendered blank, a typo reads fine and asks the model for the wrong thing."""
-    (tmp_path / "flatsource").mkdir()
-    typo = tmp_path / "flatsource" / "typo.md"
-    typo.write_text(
-        "---\ndescription: typo\narguments:\n- name: name\n---\nHi {{ nmae }}\n"
-    )
+    typo = "---\ndescription: typo\narguments:\n- name: name\n---\nHi {{ nmae }}\n"
     with caplog.at_level(logging.WARNING):
-        assert load_prompts([typo], library="flatsource", plugin="flatsource") == []
+        kb = _kit(tmp_path, {"prompts/typo.md": typo})
+    assert kb.prompts == ()
+    [row] = kb.status["plugins"]["kit"]["skipped"]
+    assert row["path"] == "prompts/typo.md" and "nmae" in row["reason"]
     assert "nmae" in caplog.text
 
 
@@ -69,16 +74,16 @@ def test_a_required_argument_cannot_have_a_default(tmp_path):
         "---\narguments:\n- name: who\n  required: true\n  default: x\n---\n{{ who }}\n"
     )
     with pytest.raises(ValueError, match="cannot have a default"):
-        load_prompt(path, "flatsource")
+        read_prompt(path, "flatsource")
 
 
 def test_a_prompt_carries_its_plugins_labels_and_nothing_implicit(tmp_path):
     """No library name, plugin name or "prompt" smuggled in as a tag."""
     path = tmp_path / "hello.md"
     path.write_text("---\ndescription: hi\n---\nHi.\n")
-    bare = load_prompt(path, "flatsource")
+    bare = read_prompt(path, "flatsource")
     assert bare.tags == set()
-    labelled = load_prompt(
+    labelled = read_prompt(
         path, "flatsource", plugin="p", tags=["ops", "lgtm"], category="obs"
     )
     assert labelled.tags == {"ops", "lgtm"}
@@ -114,48 +119,11 @@ def test_a_resolved_path_under_an_unresolved_root_is_still_below_it(tmp_path):
     assert prompt_name(path, link, ()) == "db_x"
 
 
-def test_an_inline_source_is_a_body_with_optional_frontmatter(tmp_path):
-    manifest = tmp_path / "plugin.json"
-    bare = load_prompt(
-        PromptSource(path=manifest, name="about", content="Say !`ls` $ARGUMENTS."),
-        "lib",
-        dialect="claude",
-        live=True,
-    )
-    assert bare.name == "lib_about"
-    assert bare.path == manifest
-    assert not bare.live
-    assert bare.render({"arguments": "it"}) == "Say !`ls` it."
-
-    fronted = load_prompt(
-        PromptSource(
-            path=manifest,
-            name="brief",
-            content="---\ndescription: Own.\nargument-hint: own\n---\nDo it.\n",
-            description="Mapped.",
-            argument_hint="<topic>",
-        ),
-        "lib",
-        dialect="claude",
-    )
-    assert fronted.description == "Mapped."
-    assert [a.description for a in fronted.arguments] == ["<topic>"]
-    assert fronted.template == "Do it.\n"
-
-
-def test_a_sources_description_replaces_the_files_own(tmp_path):
-    path = tmp_path / "brief.md"
-    path.write_text("---\ndescription: Own.\n---\nDo $ARGUMENTS.\n")
-    prompt = load_prompt(
-        PromptSource(path=path, name="x", description="Mapped."), "lib"
-    )
-    assert (prompt.name, prompt.description) == ("lib_x", "Mapped.")
-
-
 def test_a_missing_directory_is_no_prompts(tmp_path):
-    """Harvest yields no files for a missing source; loading an empty list loads none."""
+    """Harvest yields no files for a missing source, so the layer reads none."""
     files = harvest.prompt_files(tmp_path / "nope", Globs())
-    assert load_prompts(files, library="flatsource", plugin="flatsource") == []
+    assert files == []
+    assert harvest.command_entries([], ()) == ()
 
 
 # -- splitting frontmatter from the body ---------------------------------------
@@ -166,7 +134,7 @@ def test_a_body_that_recurs_in_the_frontmatter_is_sliced_by_position(tmp_path):
     the frontmatter block when the description happens to repeat the body text."""
     path = tmp_path / "echo.md"
     path.write_text("---\ndescription: body\n---\nbody\n")
-    prompt = load_prompt(path, "flatsource")
+    prompt = read_prompt(path, "flatsource")
     assert prompt.template == "body\n"
 
 
@@ -174,7 +142,7 @@ def test_an_unterminated_frontmatter_block_is_refused(tmp_path):
     path = tmp_path / "broken.md"
     path.write_text("---\ndescription: d\nbody never closed\n")
     with pytest.raises(ValueError, match="no YAML frontmatter"):
-        load_prompt(path, "flatsource")
+        read_prompt(path, "flatsource")
 
 
 def test_a_body_starting_with_a_dashed_rule_still_parses(tmp_path):
@@ -182,7 +150,7 @@ def test_a_body_starting_with_a_dashed_rule_still_parses(tmp_path):
     ``---``, must not be mistaken for "no frontmatter at all"."""
     path = tmp_path / "rule.md"
     path.write_text("---\ndescription: d\n---\n---\nnot frontmatter, just text\n")
-    prompt = load_prompt(path, "flatsource")
+    prompt = read_prompt(path, "flatsource")
     assert prompt.template == "---\nnot frontmatter, just text\n"
 
 
@@ -223,6 +191,7 @@ async def test_a_missing_required_argument_is_refused(skills_dir, prompts_dir, c
     from kubed.mcp.protocol import INVALID_PARAMS, MCPError
 
     server = KnowledgeBase(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
+    server_of(server)  # publishing logs what the plugin layer notes; not a call
     caplog.clear()
     with caplog.at_level(logging.INFO):
         async with Client(server_of(server)) as client:
@@ -281,42 +250,26 @@ async def test_a_claude_command_and_a_copilot_prompt_serve_as_one_kind_of_prompt
     assert {p.dialect for p in server.prompts} == {"claude", "copilot"}
 
 
-async def test_the_index_row_decides_a_prompts_dialect(tmp_path):
-    """The dialect a row records is the authority at snapshot time, not the
-    path rule: a command under `commands/` whose row says `copilot` is read as
-    Copilot on the next start, `${input:app}` becoming its one argument."""
-    import json
-
-    root = tmp_path / "plugin"
-    (root / "commands").mkdir(parents=True)
-    (root / "commands" / "deploy.md").write_text(
+async def test_a_prompts_dialect_is_decided_at_every_read(tmp_path):
+    """No dialect is recorded: each read of the plugin decides it, by PRM-14.
+    A command under ``commands/`` is Claude's, ``${input:app}`` and all, on the
+    first start and on a cold start from the index alike."""
+    deploy = (
         "---\ndescription: Deploy.\narguments: [env]\n---\n"
         "Deploy ${input:app} to $env.\n"
     )
-    config = Config.model_validate(
-        {
-            "plugins": [{"name": "kit", "source": f"file://{root}"}],
-            "libraries": [{"name": "kit", "plugins": ["kit"]}],
-        }
-    )
-    cache = tmp_path / "cache"
-    harvested = KnowledgeBase(config, cache)
+    harvested = _kit(tmp_path, {"commands/deploy.md": deploy})
     assert [(p.dialect, [a.name for a in p.arguments]) for p in harvested.prompts] == [
         ("claude", ["env"])
     ]
+    assert harvested.snapshot.commands["kit"].selected == ("commands/deploy.md",)
 
-    index = json.loads((cache / "index.json").read_text())
-    (row,) = index["plugins"]["kit"]["prompts"]
-    row["dialect"] = "copilot"
-    (cache / "index.json").write_text(json.dumps(index))
-    restarted = KnowledgeBase(config, cache)
-
+    restarted = _served(harvested.config, tmp_path / "cache")
     (prompt,) = restarted.prompts
-    assert prompt.dialect == "copilot"
-    assert [a.name for a in prompt.arguments] == ["app"]
+    assert prompt.dialect == "claude"
     async with Client(server_of(restarted)) as client:
-        rendered = await client.get_prompt("kit_deploy", {"app": "api"})
-    assert text(rendered) == "Deploy api to $env.\n"
+        rendered = await client.get_prompt("kit_deploy", {"env": "prod"})
+    assert text(rendered) == "Deploy ${input:app} to prod.\n"
 
 
 async def test_a_prompts_title_is_published(tmp_path):
@@ -351,27 +304,12 @@ async def test_skill_libraries_scopes_prompts(skills_dir, prompts_dir):
 # -- reading the snapshot -------------------------------------------------------
 
 
-def test_visible_reads_the_snapshot_exactly_once():
-    """Two separate reads of `KnowledgeBase.snapshot` could straddle a swap and mix
-    generations (M6) -- `PromptProvider` must take one reference and derive
-    both the prompts and the index from it, the way `resources.py` and
-    `routes.py` already do.
-    """
-    calls = []
-    prompt = FilePrompt(
-        path=pathlib.Path("/x/hello.md"),
-        name="flatsource_hello",
-        library="flatsource",
-        plugin="flatsource",
-        template="hi",
-    )
-    snapshot = SimpleNamespace(prompts=(prompt,), index=SkillIndex([]))
-
-    def snapshot_getter():
-        calls.append(1)
-        return snapshot
-
-    provider = PromptProvider(snapshot_getter)
-    provider.visible(Scope("flatsource"))
-
-    assert len(calls) == 1
+def test_visible_prompts_hold_to_the_scope(skills_dir, prompts_dir):
+    """What ``RefuseEmptyScope`` counts: the prompts served, by their plugin's
+    library, category and tags."""
+    server = _served(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
+    snapshot = server.snapshot
+    names = [p.name for p in snapshot.visible_prompts(Scope("flatsource"))]
+    assert names == ["flatsource_hello"]
+    assert not snapshot.visible_prompts(Scope("nowhere"))
+    assert len(snapshot.visible_prompts()) == 2

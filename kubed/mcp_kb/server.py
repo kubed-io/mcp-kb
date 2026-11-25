@@ -40,7 +40,7 @@ import contextlib
 import logging
 import threading
 import time
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +102,10 @@ class KnowledgeBase:
         self._records: dict[str, PluginRecord] = {}
         self._plugins: list[Plugin] = []
         self._libraries: list[Library] = []
+        # What serves each snapshot before it is swapped in: the plugin layer's
+        # publisher, once ``serve_through`` is called. It returns the snapshot
+        # to swap in, narrowed to what it serves.
+        self._publish: Callable[[Snapshot], Snapshot] | None = None
         self._cold_start()
         self.snapshot: Snapshot = self._build(generation=0)
         log_changes({}, self.snapshot.status)
@@ -209,7 +213,10 @@ class KnowledgeBase:
 
         A marketplace's plugins are re-derived by re-reading its
         ``marketplace.json`` off the tree on disk every time: cheap, and the
-        only way a refresh of that fetch can serve an entry it gained.
+        only way a refresh of that fetch can serve an entry it gained. A stale
+        fetch is read off its last good tree, so its entry count -- what decides
+        a lone entry is its library's main plugin -- is still known; only a
+        marketplace that could not be read at all leaves it out.
         """
         declared = declared_plugins(self.config)
         markets = marketplace_fetches(self.config)
@@ -218,6 +225,7 @@ class KnowledgeBase:
         errors: dict[str, str] = {}
         skipped: dict[str, tuple[dict[str, str], ...]] = {}
         descriptions: dict[str, str] = {}
+        entries: dict[str, int] = {}
         for name, (library, fetch, address) in markets.items():
             record = self._fetch_record(fetches, fetch, refusal_is_fatal)
             if not _serving(record):
@@ -225,7 +233,7 @@ class KnowledgeBase:
                 continue
             root = plugin_root(Path(record.root or ""), address.subdir)
             if root is None:
-                errors[name] = not_in(address.subdir, fetch)
+                errors[name] = not_in(address.subdir, fetch.key)
                 continue
             if find_marketplace(root) is None:
                 errors[name] = f"no marketplace.json under {address.subdir or '/'}"
@@ -245,6 +253,7 @@ class KnowledgeBase:
                 continue
             derived += market.plugins
             descriptions[name] = market.description
+            entries[name] = market.entries
             if market.skipped:
                 skipped[name] = market.skipped
 
@@ -271,6 +280,7 @@ class KnowledgeBase:
             errors=errors,
             skipped=skipped,
             descriptions=descriptions,
+            entries=entries,
         )
         return completed, libraries, records
 
@@ -302,7 +312,8 @@ class KnowledgeBase:
             return plugin, failed_plugin(plugin, fetch.error or "the fetch failed")
         root = plugin_root(Path(fetch.root or ""), plugin.subdir)
         if root is None:
-            return plugin, failed_plugin(plugin, not_in(plugin.subdir, plugin.fetch))
+            refusal = not_in(plugin.subdir, plugin.fetch.key)
+            return plugin, failed_plugin(plugin, refusal)
         try:
             plugin, globs = with_manifest(plugin, root)
         except ValueError as exc:
@@ -416,15 +427,68 @@ class KnowledgeBase:
             # was built, so it belongs in what was rebuilt; otherwise
             # `/reindex` and the log both omit a clone that really happened.
             rebuilt += [key for key in fetches if key not in known]
+            # Assigned before the build and the publish, which read them: the
+            # publisher finds the new trees through ``served_tree``. A raise in
+            # either puts back the four it replaced, so nothing points at a
+            # generation that was never swapped in.
+            was = self._fetches, self._plugins, self._libraries, self._records
             self._fetches, self._plugins = fetches, plugins
             self._libraries, self._records = libraries, records
-            snapshot = self._build(generation=self.snapshot.generation + 1)
+            try:
+                snapshot = self._build(generation=self.snapshot.generation + 1)
+                if self._publish is not None:
+                    snapshot = self._publish(snapshot)
+            except BaseException:
+                self._fetches, self._plugins, self._libraries, self._records = was
+                raise
             log_changes(self.snapshot.status, snapshot.status)
             self.snapshot = snapshot
-            # Best-effort and therefore last: a raise here must not leave
-            # the records advanced while snapshot still holds the old generation.
+            # Best-effort and therefore last, after the swap: a raise here
+            # leaves the records and the snapshot one generation, the new one.
             self._write_index()
             return rebuilt
+
+    def serve_through(self, publish: Callable[[Snapshot], Snapshot]) -> None:
+        """Hand every snapshot to ``publish`` before it is swapped in.
+
+        The current one at once, then every rebuilt one, under the lock, so a
+        snapshot is served by the plugin layer before any request reads it and
+        two refreshes publish in the order they swap. ``publish`` returns the
+        snapshot to swap in: the one it was given, narrowed to what it serves.
+        """
+        with self._lock:
+            self._publish = publish
+            published = publish(self.snapshot)
+            log_changes(self.snapshot.status, published.status)
+            self.snapshot = published
+
+    def renarrowed(self, was: Snapshot, now: Snapshot) -> None:
+        """Swap in ``now``, the same generation as ``was`` narrowed again by the
+        publisher after a live re-read (D9), when ``was`` is still the one served.
+
+        Takes no lock, as ``served_tree`` does not: the publisher calls this
+        holding its own lock, which a refresh needs to publish before it swaps,
+        so no swap can land between the check and the assignment.
+        """
+        if self.snapshot is was:
+            self.snapshot = now
+
+    def served_tree(self, key: str) -> Path | None:
+        """The tree being served for fetch ``key``, or None.
+
+        The last good one counts: a fetch that went ``stale`` on a refresh still
+        answers its old root.
+
+        Takes no lock, and must not: ``refresh`` publishes while holding
+        ``_lock`` (a plain ``Lock``), and that publisher reaches this through the
+        plugin layer. Reading is safe because ``_fetches`` is replaced whole under
+        ``_lock`` and never changed once published; the one in-place mutation is
+        ``_cold_start`` inside ``__init__``, before any reader exists.
+        """
+        record = self._fetches.get(key)
+        if record is None or not _serving(record):
+            return None
+        return Path(record.root or "")
 
     async def refresh_async(self, **kwargs) -> list[str]:
         """``refresh`` off the event loop, because all of it blocks."""
