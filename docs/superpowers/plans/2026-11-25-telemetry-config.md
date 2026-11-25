@@ -17,7 +17,7 @@ pytest-asyncio.
 **Spec:** this file's Design section, [CFG-14](../specs/config-and-sources.md#telemetry) and
 [HTTP-42](../specs/http-and-tools.md#the-container), both *(proposed)* until Task 3. The brief is
 issue #78's notes and Dr K's rulings there (2026-11-24, 2026-11-25). There is no separate design
-doc.
+doc. Shipped as CFG-15 and HTTP-43: issue-80 had taken CFG-14 and HTTP-42 by the time Task 3 landed.
 
 ## Design
 

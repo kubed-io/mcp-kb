@@ -15,8 +15,10 @@ is [http-and-tools.md](http-and-tools.md).
 | `--config` | `CONFIG` | `/etc/mcp-kb/config.yaml` |
 | `--cache-dir` | `CACHE_DIR` | `/var/cache/mcp-kb` |
 
-**CFG-2.** The config file says what to serve; flags and environment say how to run. No setting
-exists in both. Transport, host and port are in [http-and-tools.md](http-and-tools.md).
+**CFG-2.** The config file says what to serve, and in its `telemetry` section what the process
+reports; flags and environment say how to run. No setting exists in both. The `OTEL_*`, `POD_NAME`
+and `POD_NAMESPACE` variables are read by kubed-mcp's telemetry and the OpenTelemetry SDK, never by
+kb, and are no kb setting. Transport, host and port are in [http-and-tools.md](http-and-tools.md).
 
 **CFG-3.** `mcp-kb schema` prints the config's JSON Schema and exits 0 without reading a config.
 `config.schema.json` in the repository is the same document.
@@ -24,7 +26,8 @@ exists in both. Transport, host and port are in [http-and-tools.md](http-and-too
 ## The config file
 
 **CFG-4.** The file is YAML with three optional top-level lists, `sources`, `plugins` and
-`libraries`. An empty file is a valid config with all three empty.
+`libraries`, and an optional `telemetry` mapping (CFG-15). An empty file is a valid config with all
+three lists empty and every telemetry signal off.
 
 ```yaml
 sources:
@@ -74,15 +77,15 @@ load time.
 
 ## Telemetry
 
-**CFG-14.** *(proposed; rewords CFG-2, CFG-4 and SRC-36)* The optional `telemetry` mapping is
-kubed-mcp's `TelemetrySettings`, which the server kubed-mcp builds reads off the config: `profiles`
-(a Pyroscope address; setting it turns profiles on), `profile_cpu` and `profile_memory` (both
-`true` by default), `otel` (`false` by default; OpenTelemetry traces and call metrics, configured
-by the standard `OTEL_*` variables) and `tags` (a string map of labels). Absent, every signal is
-off. An unknown key in it is a config error (CFG-5), and so is a `profiles` address carrying
-userinfo, as a source URL is (SRC-3). Profiles and traces carry the service name
-`OTEL_SERVICE_NAME`, else `mcp-kb`. Metrics leave as `OTEL_METRICS_EXPORTER` says: pushed over
-OTLP, or scraped from the exporter's own port with `prometheus`. The server adds no metrics route.
+**CFG-15.** The optional `telemetry` mapping is kubed-mcp's `TelemetrySettings`, which the server
+kubed-mcp builds reads off the config: `profiles` (a Pyroscope address; setting it turns profiles
+on), `profile_cpu` and `profile_memory` (both `true` by default), `otel` (`false` by default;
+OpenTelemetry traces and call metrics, configured by the standard `OTEL_*` variables) and `tags` (a
+string map of labels). Absent, every signal is off. An unknown key in it is a config error (CFG-5),
+and so is a `profiles` address carrying userinfo, as a source URL is (SRC-3). Profiles, traces and
+metrics carry the service name `OTEL_SERVICE_NAME`, else `mcp-kb`. Metrics leave as
+`OTEL_METRICS_EXPORTER` says: pushed over OTLP, or scraped from the exporter's own port with
+`prometheus`. The server adds no metrics route.
 
 ```yaml
 telemetry:
@@ -275,7 +278,8 @@ fingerprints like a plain tree.
 **SRC-35.** The catalogue is built before the server binds its port.
 
 **SRC-36.** Boot reuses `index.json` only when the server reads its format version and its config
-hash equals that of the parsed config, so formatting and comments do not count.
+hash equals that of the parsed config, so formatting and comments do not count. The hash leaves
+`telemetry` out, so editing that section costs no refetch.
 
 **SRC-37.** From a reused index, boot keeps each `ok` or `stale` fetch record whose tree is on
 disk, and the plugin records of those fetches while their lists and root still match (SRC-48). It

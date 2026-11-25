@@ -104,6 +104,9 @@ def redact(text: str, secrets: list[str]) -> str:
     return text
 
 
+CREDENTIAL_REFUSAL = "telemetry.profiles must not embed a credential"
+
+
 class ConfigError(ValueError):
     """The config file is unreadable or invalid."""
 
@@ -424,7 +427,7 @@ class Config(Strict):
         """
         parts = urlsplit(self.telemetry.profiles or "")
         if parts.username or parts.password:
-            raise ValueError("telemetry.profiles must not embed a credential")
+            raise ValueError(CREDENTIAL_REFUSAL)
         return self
 
     @model_validator(mode="after")
@@ -587,6 +590,12 @@ def load_config(path: Path) -> Config:
     except yaml.YAMLError as exc:
         raise ConfigError(f"{path} is not YAML: {exc}") from exc
     except ValidationError as exc:
+        if any(CREDENTIAL_REFUSAL in e["msg"] for e in exc.errors()):
+            # That validator runs on the whole Config, so pydantic echoes the whole
+            # input, truncated, and the cut can drop the "://" the mask keys on.
+            # Hiding inputs on Config would also hide the nested ones the other
+            # refusals quote, so only this one is reported without its input.
+            raise ConfigError(f"{path}: {CREDENTIAL_REFUSAL}") from None
         raise ConfigError(f"{path}: {USERINFO.sub('***@', str(exc))}") from exc
 
 

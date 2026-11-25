@@ -640,8 +640,10 @@ def test_a_typod_telemetry_key_is_refused(tmp_path):
         load_config(write(tmp_path, text))
 
 
-def test_a_credential_in_the_profiles_address_is_refused(tmp_path):
-    text = "telemetry:\n  profiles: http://me:s3cret@pyroscope.example.com:4040\n"
+@pytest.mark.parametrize("host", ["pyroscope.example.com:4040", "pyroscope:4040"])
+def test_a_credential_in_the_profiles_address_is_refused(tmp_path, host):
+    # A short host keeps the token's tail inside pydantic's truncated input repr.
+    text = f"telemetry:\n  profiles: http://me:s3cret@{host}\n"
     with pytest.raises(ConfigError) as raised:
         load_config(write(tmp_path, text))
     assert "must not embed a credential" in str(raised.value)

@@ -308,7 +308,7 @@ class Index:
 def config_hash(config: Config) -> str:
     """A stable fingerprint of the config, independent of key order.
 
-    The telemetry section is left out (D3): it says what the process reports,
+    The telemetry section is left out (SRC-36): it says what the process reports,
     not what it serves, so changing it must not discard a warm index.
     """
     payload = json.dumps(

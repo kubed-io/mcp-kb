@@ -427,7 +427,12 @@ def test_the_copied_venv_is_proved_to_work_at_build_time():
     """
     runner = dockerfile_stages()["runner"]
     assert any("kubed.mcp_kb.server" in ln for ln in runner)
-    assert any("import pyroscope" in ln and "kubed.mcp_kb.server" in ln for ln in runner)
+    assert any(
+        "import pyroscope" in ln
+        and "opentelemetry.sdk" in ln
+        and "kubed.mcp_kb.server" in ln
+        for ln in runner
+    )
 
 
 def test_the_project_install_resolves_its_dependencies():
