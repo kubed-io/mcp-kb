@@ -51,8 +51,13 @@ from ..sources.live import Revalidator, is_live
 from . import harvest
 from .agents import Agent, AgentRoster, ParsedAgent, parse_agent
 from .index import AgentRow, FetchRecord, PluginRecord, PromptRow, SkillRow, now
-from .prompts import FilePrompt, PromptSource, load_prompts, prompt_name
-from .prompts.detect import COPILOT_SUFFIX
+from .prompts import (
+    FilePrompt,
+    PromptSource,
+    dialect_of,
+    load_prompts,
+    prompt_name,
+)
 from .skills import LibraryFiles, Skill, SkillIndex, load_skills, naming_problem
 from .uris import RESERVED_NAMES, SCHEME, Catalogue, LibraryText, _count, uri_for
 
@@ -493,31 +498,17 @@ def _load_prompts(
 
 
 def _dialect(plugin: Plugin, path: Path, root: Path, declared: set[Path]) -> str:
-    """The dialect a harvested file is read in: the plugin's, else how it was found.
+    """The dialect a harvested file is read in; the rules are ``dialect_of``'s.
 
-    Decided here rather than in ``detect.py`` because these are the signals
-    ``detect`` cannot see: a ``commands/`` tree is Claude's convention, and a
-    file a *publisher* called a command is Claude's wherever it put it --
-    penpot declares seven under ``prompts/``, and left to the body a
-    description-only one reads as this server's own dialect. ``declared`` is
-    what the ``commands`` patterns matched; a config's own ``prompts:`` glob is
-    not a command declaration and puts nothing in it. ``"auto"`` leaves the
-    rest to ``detect``, and what it decides is what the row records.
-
-    A ``.prompt.md`` is the exception to both: a filename that names its own
-    dialect beats the directory it sits in and the field that selected it, so
-    the convention yields and ``detect`` reads it as Copilot's.
+    ``declared`` is what the plugin's ``commands`` patterns matched; a config's
+    own ``prompts:`` glob is not a command declaration and puts nothing in it.
+    What ``"auto"`` leaves to ``detect`` is what the row records.
     """
-    if plugin.dialect != "auto":
-        return plugin.dialect
-    if path.name.endswith(COPILOT_SUFFIX):
-        return "auto"
-    rel = _relative(path, root)
-    if any(rel.startswith(f"{d}/") for d in harvest.COMMAND_DIRS):
-        return "claude"
-    if path in declared:
-        return "claude"
-    return "auto"
+    return dialect_of(
+        _relative(path, root),
+        configured=plugin.dialect,
+        claude={_relative(p, root) for p in declared},
+    )
 
 
 # -- the cheap half: libraries, then the snapshot -------------------------------

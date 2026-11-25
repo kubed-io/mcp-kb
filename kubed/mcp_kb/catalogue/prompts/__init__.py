@@ -41,7 +41,7 @@ something FastMCP can serve.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -57,18 +57,24 @@ from .shape import Argument, Parsed
 
 log = logging.getLogger(__name__)
 
+# What a malformed prompt's text raises; a file's read adds OSError to it.
+READ_ERRORS = (ValueError, TypeError, yaml.YAMLError)
+
 DIALECTS = {module.NAME: module for module in (mcpkb, claude, copilot)}
 
 __all__ = [
     "DIALECTS",
     "PLACEHOLDER",
+    "READ_ERRORS",
     "Argument",
     "FilePrompt",
     "MissingArguments",
     "Parsed",
     "PromptSource",
+    "dialect_of",
     "load_prompt",
     "load_prompts",
+    "parse_prompt",
     "prompt_name",
     "stem",
 ]
@@ -366,14 +372,100 @@ def load_prompt(
         meta = {**meta, "description": source.description}
     if source.argument_hint is not None:
         meta = {**meta, "argument-hint": source.argument_hint}
+    return _build(
+        meta,
+        body,
+        path,
+        name=f"{library}_{source.name}",
+        library=library,
+        plugin=plugin,
+        tags=tags,
+        category=category,
+        library_categories=library_categories,
+        live=live,
+        dialect=dialect,
+    )
 
-    name = detect.dialect_for(path, meta, body, dialect)
-    if name is None:
+
+def parse_prompt(
+    text: str,
+    path: Path,
+    *,
+    name: str,
+    library: str,
+    plugin: str = "",
+    tags: Sequence[str] = (),
+    category: str | None = None,
+    library_categories: frozenset[str] = frozenset(),
+    dialect: str = detect.AUTO,
+) -> FilePrompt:
+    """Parse one prompt from its ``text``, which is never read from ``path``.
+
+    ``name`` is the full served name, ``<library>_<name below it>``. ``path``
+    only says where the text came from, and ``detect`` reads its suffix.
+    Raises what ``load_prompt`` does for a malformed one: see ``READ_ERRORS``.
+    """
+    meta, body = _split(text)
+    return _build(
+        meta,
+        body,
+        path,
+        name=name,
+        library=library,
+        plugin=plugin,
+        tags=tags,
+        category=category,
+        library_categories=library_categories,
+        live=False,
+        dialect=dialect,
+    )
+
+
+def dialect_of(rel: str, *, configured: str, claude: Collection[str]) -> str:
+    """The dialect a harvested file is read in: the plugin's, else how it was found.
+
+    ``rel`` is the file's path below its plugin root, in posix form (PRM-14,
+    rules 2 to 5). ``configured`` is the plugin's ``dialect``; ``claude`` holds
+    the paths a ``commands`` declaration matched. ``"auto"`` leaves the rest to
+    ``detect``.
+
+    A ``.prompt.md`` is the exception to the last two: a filename that names its
+    own dialect beats the directory it sits in, so ``detect`` reads it as
+    Copilot's.
+    """
+    if configured != detect.AUTO:
+        return configured
+    if rel.endswith(detect.COPILOT_SUFFIX):
+        return detect.AUTO
+    if any(rel.startswith(f"{d}/") for d in COMMAND_DIRS):
+        return "claude"
+    if rel in claude:
+        return "claude"
+    return detect.AUTO
+
+
+def _build(
+    meta: dict,
+    body: str,
+    path: Path,
+    *,
+    name: str,
+    library: str,
+    plugin: str,
+    tags: Sequence[str],
+    category: str | None,
+    library_categories: frozenset[str],
+    live: bool,
+    dialect: str,
+) -> FilePrompt:
+    """A ``FilePrompt`` from split text: the dialect decided, then read."""
+    chosen = detect.dialect_for(path, meta, body, dialect)
+    if chosen is None:
         raise ValueError(f"not a prompt: has `{detect.not_a_prompt(meta)}`")
-    if name not in DIALECTS:
-        raise ValueError(f"unknown dialect '{name}'")
+    if chosen not in DIALECTS:
+        raise ValueError(f"unknown dialect '{chosen}'")
 
-    parsed = DIALECTS[name].parse(meta, body)
+    parsed = DIALECTS[chosen].parse(meta, body)
     if parsed.dropped:
         log.debug(
             "prompt %s: ignoring %s (no meaning over MCP)",
@@ -384,7 +476,7 @@ def load_prompt(
     return FilePrompt(
         path=path,
         live=live,
-        name=f"{library}_{source.name}",
+        name=name,
         description=parsed.description,
         title=parsed.title,
         arguments=parsed.arguments,
@@ -395,7 +487,7 @@ def load_prompt(
         library_categories=library_categories,
         template=body,
         defaults=parsed.defaults,
-        dialect=name,
+        dialect=chosen,
     )
 
 
@@ -436,7 +528,7 @@ def load_prompts(
                     dialect=dialect,
                 )
             )
-        except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
+        except (OSError, *READ_ERRORS) as exc:
             if skipped is None:
                 log.warning("skipping prompt %s: %s", path, exc)
             else:

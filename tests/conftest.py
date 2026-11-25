@@ -9,7 +9,7 @@ import pytest
 
 from kubed.mcp_kb.app import create_app
 from kubed.mcp_kb.catalogue import harvest
-from kubed.mcp_kb.catalogue.prompts import load_prompts
+from kubed.mcp_kb.catalogue.prompts import load_prompts, parse_prompt, stem
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, load_skills
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.plugins import Fetch, Globs, Plugin
@@ -489,3 +489,14 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.get_closest_marker("live"):
             item.add_marker(skip)
+
+
+def read_prompt(path: Path, library: str = "lib", **kwargs):
+    """A prompt file parsed from its text, named as ``load_prompt`` names it."""
+    return parse_prompt(
+        path.read_text(encoding="utf-8"),
+        path,
+        name=f"{library}_{stem(path)}",
+        library=library,
+        **kwargs,
+    )

@@ -325,7 +325,7 @@ git commit -m "K4: check kubed-mcp's prompt naming and listing under the pinned 
   - `tests/conftest.py::read_prompt(path: Path, library: str = "lib", **kwargs) -> FilePrompt`:
     `parse_prompt(path.read_text(encoding="utf-8"), path, name=f"{library}_{stem(path)}", library=library, **kwargs)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_parse_prompt_reads_text_not_disk(tmp_path):
@@ -351,12 +351,12 @@ def test_dialect_of_is_prm14_rules_2_to_5(rel, configured, claude, expected):
     assert dialect_of(rel, configured=configured, claude=claude) == expected
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `pytest tests/test_dialects.py -v`
 Expected: the two new tests fail on the import.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `parse_prompt` is `load_prompt`'s body from `meta, body = …` on, over `_split(text)`, with
   `name` used as given.
@@ -365,12 +365,12 @@ Expected: the two new tests fail on the import.
   claude={_relative(p, root) for p in declared})`.
 - In `tests/test_dialects.py`, move the calls that only parse onto `read_prompt`.
 
-- [ ] **Step 4: Run the checks**
+- [x] **Step 4: Run the checks**
 
 Run: `ruff check .` then `pytest tests/test_dialects.py tests/test_prompts.py tests/test_placeholders.py -v`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add kubed/mcp_kb/catalogue tests/conftest.py tests/test_dialects.py

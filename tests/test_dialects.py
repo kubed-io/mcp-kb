@@ -13,8 +13,13 @@ import logging
 import pytest
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.catalogue.prompts import load_prompt, load_prompts
+from kubed.mcp_kb.catalogue.prompts import (
+    dialect_of,
+    load_prompts,
+    parse_prompt,
+)
 from kubed.mcp_kb.config import Config
+from tests.conftest import read_prompt
 
 pytestmark = pytest.mark.unit
 
@@ -35,6 +40,33 @@ def dropped(caplog):
         for r in caplog.records
         if "no meaning over MCP" in r.getMessage()
     ]
+
+
+def test_parse_prompt_reads_text_not_disk(tmp_path):
+    path = tmp_path / "gone.md"  # never written
+    prompt = parse_prompt(
+        "---\ndescription: D.\n---\nHi.\n", path, name="lib_gone", library="lib"
+    )
+    assert (prompt.name, prompt.dialect, prompt.template) == (
+        "lib_gone",
+        "mcp-kb",
+        "Hi.\n",
+    )
+
+
+@pytest.mark.parametrize(
+    ("rel", "configured", "claude", "expected"),
+    [
+        ("prompts/x.md", "copilot", (), "copilot"),
+        ("commands/x.prompt.md", "auto", (), "auto"),
+        ("commands/db/x.md", "auto", (), "claude"),
+        (".claude/commands/x.md", "auto", (), "claude"),
+        ("prompts/brief.md", "auto", ("prompts/brief.md",), "claude"),
+        ("prompts/x.md", "auto", (), "auto"),
+    ],
+)
+def test_dialect_of_is_prm14_rules_2_to_5(rel, configured, claude, expected):
+    assert dialect_of(rel, configured=configured, claude=claude) == expected
 
 
 # -- one prompt out of three files ---------------------------------------------
@@ -78,7 +110,7 @@ COPILOT = (
 def test_one_prompt_out_of_three_dialects(
     tmp_path, filename, frontmatter, body, descriptions, dialect
 ):
-    prompt = load_prompt(write(tmp_path / filename, frontmatter, body), "lib")
+    prompt = read_prompt(write(tmp_path / filename, frontmatter, body), "lib")
 
     assert prompt.dialect == dialect
     assert prompt.name == "lib_investigate"
@@ -102,7 +134,7 @@ def test_a_declared_dialect_beats_the_filename(tmp_path):
         "description: d\narguments:\n- name: app\n",
         "Hi {{ app }}.",
     )
-    assert load_prompt(path, "lib", dialect="mcp-kb").dialect == "mcp-kb"
+    assert read_prompt(path, "lib", dialect="mcp-kb").dialect == "mcp-kb"
 
 
 def test_the_prompt_md_suffix_beats_the_frontmatter_keys(tmp_path):
@@ -112,7 +144,7 @@ def test_the_prompt_md_suffix_beats_the_frontmatter_keys(tmp_path):
         "description: d\narguments:\n- name: app\n  description: The workload.\n",
         "Hi ${input:app}.",
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert prompt.dialect == "copilot"
     assert [a.name for a in prompt.arguments] == ["app"]
     assert prompt.render({"app": "you"}) == "Hi you."
@@ -123,7 +155,7 @@ def test_a_frontmatter_key_beats_the_body(tmp_path):
     path = write(
         tmp_path / "x.md", "description: d\nagent: copilot\n", "Do $ARGUMENTS."
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert prompt.dialect == "copilot"
     # Copilot has no `$ARGUMENTS`, so it is text like any other client-side form.
     assert prompt.render() == "Do $ARGUMENTS."
@@ -166,7 +198,7 @@ def test_a_dialect_nothing_here_reads_is_skipped_with_its_name(tmp_path):
 def test_a_description_and_a_body_are_this_servers_own_dialect(tmp_path):
     """Rung 5: nothing to go on means the dialect every dialect agrees with."""
     path = write(tmp_path / "bare.md", "description: d\n", "Just text.")
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert prompt.dialect == "mcp-kb"
     assert prompt.arguments == []
     assert prompt.render() == "Just text."
@@ -180,7 +212,7 @@ def test_arguments_cannot_be_names_and_objects_at_once(tmp_path):
         "Hi.",
     )
     with pytest.raises(ValueError, match="names or objects, not both"):
-        load_prompt(path, "lib")
+        read_prompt(path, "lib")
 
 
 # -- Claude's substitution forms -----------------------------------------------
@@ -188,7 +220,7 @@ def test_arguments_cannot_be_names_and_objects_at_once(tmp_path):
 
 def test_claude_publishes_everything_typed_after_the_command(tmp_path):
     path = write(tmp_path / "fix.md", "description: d\n", "Fix $ARGUMENTS now.")
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert prompt.dialect == "claude"
     assert [(a.name, a.description, a.required) for a in prompt.arguments] == [
         ("arguments", "Everything typed after the command.", False)
@@ -203,7 +235,7 @@ def test_claude_positionals_name_the_declared_arguments(tmp_path):
         "description: d\narguments: app env\n",
         "Deploy $0 to $1.",
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert [a.name for a in prompt.arguments] == ["app", "env", "arguments"]
     assert prompt.render({"app": "api", "env": "prod"}) == "Deploy api to prod."
     # A client that fills one of two positionals gets a blank, not an error:
@@ -213,7 +245,7 @@ def test_claude_positionals_name_the_declared_arguments(tmp_path):
 
 def test_claude_positionals_split_the_free_text_when_nothing_is_declared(tmp_path):
     path = write(tmp_path / "deploy.md", "description: d\n", "Deploy $0 to $1.")
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert [a.name for a in prompt.arguments] == ["arguments"]
     assert prompt.render({"arguments": "api prod"}) == "Deploy api to prod."
     assert prompt.render({"arguments": "api"}) == "Deploy api to ."
@@ -226,7 +258,7 @@ def test_claude_indexes_arguments_the_same_way(tmp_path):
         "description: d\n",
         "Deploy $ARGUMENTS[0], then $ARGUMENTS[1] and $1.",
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert prompt.render({"arguments": "api prod"}) == "Deploy api, then prod and prod."
 
 
@@ -238,7 +270,7 @@ def test_claude_appends_the_free_text_the_body_never_names(tmp_path):
     command is the `commands/` tree it came from, which the caller knows.
     """
     path = write(tmp_path / "review.md", "description: d\n", "Review the diff.")
-    prompt = load_prompt(path, "lib", dialect="claude")
+    prompt = read_prompt(path, "lib", dialect="claude")
     assert [a.description for a in prompt.arguments] == [
         "Everything typed after the command."
     ]
@@ -256,7 +288,7 @@ def test_an_argument_hint_describes_the_free_text(tmp_path):
         "description: Work on a Penpot file.\nargument-hint: '[file] [board]'\n",
         "Open the file named in the arguments.",
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert prompt.dialect == "claude"
     assert [(a.name, a.description, a.required) for a in prompt.arguments] == [
         ("arguments", "[file] [board]", False)
@@ -271,7 +303,7 @@ def test_a_dollar_amount_is_not_a_positional(tmp_path):
     path = write(
         tmp_path / "bill.md", "description: d\n", "Charge $5.00 for $ARGUMENTS."
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert prompt.render({"arguments": "the job"}) == "Charge $5.00 for the job."
 
 
@@ -283,7 +315,7 @@ def test_a_declared_argument_named_arguments_is_a_name_like_any_other(tmp_path):
         "description: d\narguments: [arguments, env]\n",
         "Deploy $0 to $1, all of it: $ARGUMENTS.",
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert [a.name for a in prompt.arguments] == ["arguments", "env"]
     assert (
         prompt.render({"arguments": "api", "env": "prod"})
@@ -297,7 +329,7 @@ def test_an_empty_argument_hint_describes_nothing(tmp_path):
         "description: d\nargument-hint: ''\n",
         "Review $ARGUMENTS.",
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert [a.description for a in prompt.arguments] == [
         "Everything typed after the command."
     ]
@@ -311,7 +343,7 @@ def test_an_argument_hint_written_as_a_list_is_one_line(tmp_path):
         "description: d\nargument-hint: [file, board]\n",
         "Open $ARGUMENTS.",
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert [a.description for a in prompt.arguments] == ["file board"]
 
 
@@ -322,7 +354,7 @@ def test_an_undeclared_name_is_left_as_written(tmp_path):
         "description: d\narguments: [app]\n",
         "Walk $dir for $app.",
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert prompt.render({"app": "api"}) == "Walk $dir for api."
 
 
@@ -338,7 +370,7 @@ def test_copilot_inputs_collapse_by_name_and_keep_the_first_placeholder(tmp_path
         "${input:app:The workload.} then ${input:app} and ${input:since}"
         " on ${input:env}, not ${input:env:Which cluster.}.",
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert [(a.name, a.description) for a in prompt.arguments] == [
         ("app", "The workload."),
         ("since", None),
@@ -357,7 +389,7 @@ def test_a_copilot_placeholder_may_contain_a_colon(tmp_path):
         "description: d\n",
         "Look at ${input:app:Which app: api or web?}.",
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert [(a.name, a.description) for a in prompt.arguments] == [
         ("app", "Which app: api or web?")
     ]
@@ -370,7 +402,7 @@ def test_copilot_appends_the_free_text_of_an_argument_hint(tmp_path):
         "description: d\nargument-hint: '[file]'\n",
         "Review the diff.",
     )
-    prompt = load_prompt(path, "lib")
+    prompt = read_prompt(path, "lib")
     assert [(a.name, a.description) for a in prompt.arguments] == [
         ("arguments", "[file]")
     ]
@@ -384,11 +416,11 @@ def test_only_this_servers_own_dialect_carries_a_title(tmp_path):
     own = write(
         tmp_path / "t.md", "description: d\ntitle: Investigate a service\n", "Text."
     )
-    assert load_prompt(own, "lib").title == "Investigate a service"
+    assert read_prompt(own, "lib").title == "Investigate a service"
     command = write(
         tmp_path / "c.md", "description: d\ntitle: t\narguments: [app]\n", "Hi $app."
     )
-    assert load_prompt(command, "lib").title is None
+    assert read_prompt(command, "lib").title is None
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
@@ -397,7 +429,7 @@ def test_nothing_in_a_body_is_ever_executed(tmp_path, dialect):
     from a repository it fetched would be a supply-chain hole."""
     body = "!`rm -rf /`\n\n!{echo hi}\n"
     path = write(tmp_path / f"{dialect}.md", "description: d\n", body)
-    assert load_prompt(path, "lib", dialect=dialect).render() == body
+    assert read_prompt(path, "lib", dialect=dialect).render() == body
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
@@ -405,7 +437,7 @@ def test_client_side_placeholders_render_verbatim(tmp_path, dialect):
     """They name things only the client has, so substituting them would be a lie."""
     body = "${selection} #file:x.py @src/a.py ${CLAUDE_PROJECT_DIR} ${file}\n"
     path = write(tmp_path / f"{dialect}.md", "description: d\n", body)
-    assert load_prompt(path, "lib", dialect=dialect).render() == body
+    assert read_prompt(path, "lib", dialect=dialect).render() == body
 
 
 def test_keys_with_no_mcp_meaning_are_logged_once(tmp_path, caplog):
@@ -415,7 +447,7 @@ def test_keys_with_no_mcp_meaning_are_logged_once(tmp_path, caplog):
         "Commit $message.",
     )
     with caplog.at_level(logging.DEBUG, logger="kubed.mcp_kb.catalogue.prompts"):
-        prompt = load_prompt(path, "lib")
+        prompt = read_prompt(path, "lib")
     assert len(dropped(caplog)) == 1
     assert "allowed-tools" in dropped(caplog)[0]
     assert "model" in dropped(caplog)[0]
@@ -428,7 +460,7 @@ def test_keys_with_no_mcp_meaning_are_logged_once(tmp_path, caplog):
 def test_a_file_with_nothing_to_drop_says_nothing(tmp_path, caplog):
     path = write(tmp_path / "plain.md", "description: d\n", "Text.")
     with caplog.at_level(logging.DEBUG, logger="kubed.mcp_kb.catalogue.prompts"):
-        load_prompt(path, "lib")
+        read_prompt(path, "lib")
     assert dropped(caplog) == []
 
 
