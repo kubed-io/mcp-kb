@@ -60,6 +60,11 @@ build = [
   # publish time. Used by .github/workflows/package.yml.
   "twine",
 ]
+# Profiles to Pyroscope, and traces and metrics over OpenTelemetry, switched on by
+# the config's `telemetry` section. The image installs it (the Dockerfile's
+# --extra telemetry) and nothing else does, so a pip install of kb carries no
+# profiler unless asked for. kubed-mcp owns the pins.
+telemetry = ["kubed-mcp[telemetry]"]
 test = [
   "pytest",
   "pytest-asyncio",
