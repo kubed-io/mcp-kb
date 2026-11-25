@@ -281,9 +281,10 @@ Names and `${CLAUDE_PLUGIN_ROOT}` are rendered into the body by `rewrite` when
 the build is made, so a render fills in the dialect's placeholders alone.
 
 A client declares it cannot read resources with `?resources=off`,
-`Kb-Resources: off` or `X-MCP-Resources: off`, and only then does kubed-mcp list
-the resource mirror (DLV-2); prompts work the same way with `?prompts=off` or
-`Kb-Prompts: off`, which kb reads itself. There is no protocol signal for either —
+`Kb-Resources: off` or `X-MCP-Resources: off`, and only then, or for a client
+kubed-mcp knows as VS Code (DLV-15), does kubed-mcp list the resource mirror
+(DLV-2); prompts work the same way with `?prompts=off` or `Kb-Prompts: off`,
+which kb reads itself. There is no protocol signal for either —
 prompts are a server capability, so a client cannot advertise using them. The
 tools stay callable either way: hiding one from a listing is presentation,
 refusing to run one would be a different and worse contract.

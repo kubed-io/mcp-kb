@@ -128,13 +128,11 @@ connection whose client declared form elicitation, as in [prompts.md](prompts.md
 `serverInfo` of a handshake-era `initialize` answer, and the `io.modelcontextprotocol/serverInfo`
 entry FastMCP stamps in a modern-era result's `_meta`. It is never FastMCP's own version.
 
-**HTTP-42.** *(proposed)* Both answers also carry `_meta["io.kubed/delivery"]`, which kubed-mcp
-writes from the delivery settings it resolves itself: the `X-MCP-*` headers, their query
-parameters, and its table of known clients. kb reads none of it. What kb lists, hides and prefixes
-is decided by TOOL-1 to TOOL-4 and the request settings in
-[scoping-and-instructions.md](scoping-and-instructions.md), so the echo can disagree with them. A
-`Kb-Resource-Prefix` is not echoed. A VS Code client that sends no header is echoed
-`resources: off`, although TOOL-2 lists it no tools.
+**HTTP-42.** Both answers also carry `_meta["io.kubed/delivery"]`: kubed-mcp's report of what it
+resolved for the request, from the `Kb-` and `X-MCP-` headers, their query parameters, kb's
+defaults and its table of known clients. Its `resources` is the setting that lists the resource
+pair (TOOL-2), and its `prefix` is the resource prefix every served address carries (GW-4, GW-11),
+or `null`.
 
 **HTTP-29.** Every cacheable result (`tools/list`, `prompts/list`, `resources/list`,
 `resources/templates/list`, `resources/read`, `server/discover`) carries `ttlMs` equal to the
@@ -195,12 +193,14 @@ resources setting (DLV-2).
 
 **TOOL-2.** A request that declares neither sees no tools in `tools/list`, unless kubed-mcp knows
 its client: one whose `clientInfo.name` starts `Visual Studio Code` is taken to declare resources
-off, and sees the resource pair (DLV-15). Each pair is listed independently of the other.
+off, and sees the resource pair (DLV-15). A resources setting the request sends beats the known
+client, in TOOL-4's order. Each pair is listed independently of the other.
 
 **TOOL-3.** `off`, `false`, `0`, `no` and `none` declare the feature absent, ignoring case and
 surrounding space. For prompts, any other value, or none, means the client has the feature. For
 resources, `on`, `true`, `1` and `yes` declare it present, any other value is passed over for the
-next source with a warning (DLV-2), and none means the client has the feature.
+next source with a warning (DLV-2), and none means the client has the feature, unless TOOL-2's
+known clients say otherwise.
 
 **TOOL-4.** The `Kb-` header beats the `X-MCP-` one, which beats the query parameter (SCP-3). Only
 the first value of the winning one counts, and an empty value counts as not sent.

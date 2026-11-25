@@ -9,6 +9,7 @@ import httpx
 import pytest
 from fastmcp import Client
 from kubed.mcp.protocol import types
+from mcp.types import Implementation
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
@@ -16,6 +17,10 @@ from tests.conftest import key_of, make_config, server_of
 from tests.test_skills_extension import request
 
 KB_INFO = {"name": "mcp-kb", "version": dist_version("kubed-mcp-kb")}
+# kubed-mcp's report of the delivery settings it resolved (HTTP-42).
+DELIVERY_META = "io.kubed/delivery"
+# A client kubed-mcp's table of known clients takes to declare resources off.
+VS_CODE = Implementation(name="Visual Studio Code", version="1.99.0")
 
 
 async def call(client, name, **args):
@@ -41,6 +46,30 @@ async def test_initialize_names_kb_and_its_version(skills_dir):
     async with Client(server_of(server), mode="legacy") as client:
         info = client.initialize_result.server_info
     assert {"name": info.name, "version": info.version} == KB_INFO
+
+
+async def delivery(client, mode):
+    """The echo, from the answer the client's era negotiated with."""
+    if mode == "legacy":
+        return client.initialize_result.meta[DELIVERY_META]
+    return (await request(client, "server/discover"))["_meta"][DELIVERY_META]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["legacy", "auto"])
+async def test_the_handshake_echo_matches_what_is_listed(skills_dir, mode):
+    """HTTP-42: the echo says what kubed-mcp lists, VS Code (DLV-15) included."""
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
+    async with Client(server_of(server), mode=mode) as client:
+        plain = await delivery(client, mode)
+        assert await client.list_tools() == []
+    assert plain["resources"] == "on"
+    assert plain["prefix"] is None
+    async with Client(server_of(server), mode=mode, client_info=VS_CODE) as client:
+        vs_code = await delivery(client, mode)
+        names = sorted(t.name for t in await client.list_tools())
+    assert vs_code["resources"] == "off"
+    assert names == ["list_resources", "read_resource"]
 
 
 # -- resources ----------------------------------------------------------------
@@ -150,6 +179,20 @@ async def test_the_mirrors_are_four_tools_whatever_the_catalogue_holds(skills_di
     assert sorted(t.name for t in registered) == ["get_prompt", "list_prompts"]
     for name in ("list_resources", "read_resource"):
         assert await mcp.get_tool(name) is not None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["legacy", "auto"])
+async def test_vs_code_lists_the_resource_pair_without_a_header(skills_dir, mode):
+    """TOOL-2: kubed-mcp takes VS Code to declare resources off (DLV-15)."""
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
+    async with Client(server_of(server), mode=mode, client_info=VS_CODE) as client:
+        names = sorted(t.name for t in await client.list_tools())
+        index = await call(client, "read_resource", uri="skill://flatsource/_index.md")
+    assert names == ["list_resources", "read_resource"]
+    assert "skill://flatsource/alpha/SKILL.md" in index
+    async with Client(server_of(server), mode=mode) as client:
+        assert await client.list_tools() == []
 
 
 @pytest.mark.unit

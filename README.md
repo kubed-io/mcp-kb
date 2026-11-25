@@ -50,7 +50,7 @@ Agent-aware clients can call `agents/list` and `agents/get` for the subagents yo
 
 ## 🪞 Resources first, tools as a mirror
 
-MCP already has a primitive for material an agent reads, and it is the **resource**. So resources are the interface, and a client that speaks them sees *no tools at all*.
+MCP already has a primitive for material an agent reads, and it is the **resource**. So resources are the interface, and a client that speaks them sees *no tools at all* (VS Code is listed the resource pair).
 
 Many clients only implement tools — n8n's MCP Client Tool above all — and to those a resource-only server looks empty. They get the same interface as up to four tools, revealed with `?resources=off`, `?prompts=off`, or both:
 
