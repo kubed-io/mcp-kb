@@ -51,8 +51,8 @@ from kubed.mcp.gateway import prefix, prefixed
 from kubed.mcp.protocol import INVALID_PARAMS, MCPError, Provider, VersionSpec, types
 from kubed.mcp.skills import FolderNotFound, NameTheIndex
 
-from ..catalogue.uris import INDEX_JSON, SCHEME, Catalogue, resolved
-from .request import full_listing, requested_addressing, requested_scope
+from ..catalogue.uris import INDEX_JSON, SCHEME, Catalogue, climbs, resolved
+from .request import full_listing, requested_scope
 
 TEMPLATE_URI = "skill://{library}/{+path}"
 
@@ -98,12 +98,12 @@ class CatalogueProvider(Provider):
 
     async def _list_resources(self) -> Sequence[Resource]:
         entries = self._catalogue().entries(requested_scope(), full=full_listing())
-        a = requested_addressing()
+        p = prefix()
         return [
             TextResource(
                 uri=entry.uri,
                 name=entry.name,
-                description=a.text(entry.description),
+                description=prefixed(entry.description, p),
                 mime_type=entry.mime_type,
                 tags=set(entry.tags),
                 # Listing rows are addresses, not content. The body is fetched
@@ -118,10 +118,9 @@ class CatalogueProvider(Provider):
         self, uri: str, version: VersionSpec | None = None
     ) -> Resource | None:
         catalogue = self._catalogue()
-        a = requested_addressing()
-        canonical = a.canonical(uri)
-        name = uri.removeprefix(a.prefix).removeprefix("skill://")
-        parent, _, last = canonical.rpartition("/")
+        p = prefix()
+        name = uri.removeprefix(SCHEME)
+        parent, _, last = uri.rpartition("/")
         if last == INDEX_JSON:
             children = await self.children(parent)
             if children is not None:
@@ -133,16 +132,16 @@ class CatalogueProvider(Provider):
                     # Text a client reads, so it carries the prefix, as this
                     # provider's _index.md and the plugin layer's own
                     # _index.json do (GW-5): one writer.
-                    text=a.text(json.dumps(children, indent=2)),
+                    text=prefixed(json.dumps(children, indent=2), p),
                 )
-        body = catalogue.read(canonical, requested_scope())
+        body = catalogue.read(uri, requested_scope())
         if body is None:
             return None
         return TextResource(
             uri=uri,
             name=name,
-            mime_type=catalogue.mime(canonical),
-            text=a.text(body),
+            mime_type=catalogue.mime(uri),
+            text=prefixed(body, p),
         )
 
     async def children(self, uri: str) -> list[dict] | None:
@@ -152,12 +151,12 @@ class CatalogueProvider(Provider):
         ``Catalogue.directory`` under the caller's scope; None for anything
         else, a skill's own folders included, which are the skill provider's.
         """
-        a = requested_addressing()
-        entries = self._catalogue().directory(a.canonical(uri), requested_scope())
+        p = prefix()
+        entries = self._catalogue().directory(uri, requested_scope())
         if entries is None:
             return None
         return [
-            {**entry.as_dict(), "description": a.text(entry.description)}
+            {**entry.as_dict(), "description": prefixed(entry.description, p)}
             for entry in entries
         ]
 
@@ -166,7 +165,7 @@ class CatalogueProvider(Provider):
             SkillTemplate(
                 uri_template=TEMPLATE_URI,
                 name="skill",
-                description=requested_addressing().text(TEMPLATE_DESCRIPTION),
+                description=prefixed(TEMPLATE_DESCRIPTION, prefix()),
                 # ResourceTemplate requires it; never matched against, because
                 # _get_resource_template below returns None.
                 parameters={
@@ -222,12 +221,18 @@ class NameTheFileToRead(Middleware):
         except (NotFoundError, FolderNotFound) as miss:
             uri = str(context.message.uri)
             p = prefix()
-            # Runs outside GW-4, which sees the URI as sent; its own strip is private.
+            # This sees the URI as sent, outside GW-4, whose own strip is private.
             sent = uri.removeprefix(p) if p and uri.startswith(f"{p}{SCHEME}") else uri
             address = resolved(sent)
             hint = None
-            # The hint mirrors GW-4's refusal: no address it sends nowhere is named.
-            if address is not None and "%2f" not in sent.lower():
+            # Named only where GW-4 would read the address as kb does: not one
+            # with an escaped slash, which it sends nowhere, and not one whose
+            # ".." climbs past the library, which it resolves to another address.
+            if (
+                address is not None
+                and "%2f" not in sent.lower()
+                and not climbs(sent)
+            ):
                 hint = self._catalogue().hint(address, requested_scope())
             if hint is not None:
                 # Naming the address as sent, dot segments and all, as kubed-mcp

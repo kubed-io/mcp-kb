@@ -416,7 +416,7 @@ which generation is being served, and has a refresh picked up an edit yet.
   a miss renames the plain address to the sent one throughout the error message.
   A hint kb had already prefixed inside it came out `kb+kb+skill://…`. So the
   hint middleware is inserted first in `mcp.server.middleware`, sees the URI as
-  sent and the error as renamed, and prefixes its hint once (`Addressing.text`
+  sent and the error as renamed, and prefixes its hint once (`prefixed`
   is idempotent). `tests/test_addressing_http.py` holds it, prefixed and plain,
   for resources and the `read_resource` tool.
 

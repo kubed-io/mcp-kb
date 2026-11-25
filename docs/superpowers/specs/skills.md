@@ -285,6 +285,10 @@ fails with `-32602` and `Resource not found: '<uri>'. <hint>`:
 | a folder of skills / of library files | the folder's `_index.md` / the library's `_files.md` |
 | a folder inside a skill | the folder's `_index.md` (`<uri> is a folder: read <uri>/_index.md to list it.`) |
 
+A hint is given only for an address the plugin layer would read as kb does: none for one holding
+`%2F` (SKL-13), and none when its `..` segments, resolved over the whole path as in SKL-13,
+climb past the library and name another address. A hint names the address as sent.
+
 **SKL-35.** A hint is worked out from the caller's scope. An out-of-scope address, directory or
 not, fails exactly as an absent one does. A read that fails for any other reason keeps its error.
 
@@ -314,19 +318,29 @@ of them, and comes back when it serves again (SKL-45).
 
 ## Addresses behind a gateway
 
-**SKL-40.** A request MAY name a **resource prefix** (`Kb-Resource-Prefix` or `?prefix=`, read as
-in SCP-3). A space in the query value reads as `+`. A valid prefix is a letter, then letters,
-digits, `+`, `-` or `.`, ending in `+` (`kb+`). An invalid prefix is ignored.
+**SKL-40.** A request MAY name a **resource prefix**. It is the plugin layer's input (GW-1 to
+GW-3), read with the server's header prefix `Kb` (DLV-16): `Kb-Resource-Prefix`, then
+`X-MCP-Resource-Prefix`, then `?prefix=`, as in SCP-3. A space in the query value reads as `+`. A
+valid prefix is a letter, then letters, digits, `+`, `-` or `.`, ending in `+` (`kb+`). An invalid
+prefix is ignored.
 
-**SKL-41.** With a prefix, every `skill://` in text a client reads is written `<prefix>skill://`,
-except where `skill://` follows a letter, digit, `+`, `-` or `.` (`kb+skill://` and `myskill://`
-stay as they are).
+**SKL-41.** With a prefix, every `skill://`, `prompts://` and `agents://` address in text a client
+reads is written with the prefix in front (`kb+skill://`), except where the scheme follows a
+letter, digit, `+`, `-` or `.` (`kb+skill://` and `myskill://` stay as they are).
 
 | Where | Prefixed |
 |---|---|
 | resource bodies, listing descriptions, read hints, an extension entry's `frontmatter`, an agent's card and its `io.kubed/agent` `frontmatter` (AGT-9), the template's description | yes |
 | tool results ([http-and-tools.md](http-and-tools.md)), instructions (INS-16), rendered prompts | yes |
 | a listing row's `uri` and `name`, an extension entry's `uri` and each file `uri`, the template's `uriTemplate`, an agent definition's `_meta…skills` values | never |
+
+| Written by | Where |
+|---|---|
+| the plugin layer | a skill's files, the indexes inside a skill and an agent's card (GW-5), and `list_resources`, which writes the prefix into each row's `uri` (DLV-6, GW-5) |
+| kb, through the plugin layer's writer (GW-11) | everything else: resource bodies and listing descriptions outside a skill, read hints, the template's description, instructions, rendered prompts |
+
+A prompt's description, in `prompts/list` and in `list_prompts`, is written as its library wrote
+it, with no prefix. *(proposed: it is written with the prefix, as every other description is.)*
 
 **SKL-42.** An incoming address (`resources/read`, `read_resource`, `skills/get`,
 `resources/directory/read`) MAY be `skill://…` or `<prefix>skill://…` for the request's own prefix.

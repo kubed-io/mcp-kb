@@ -12,9 +12,11 @@ import pytest
 import uvicorn
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
+from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
 from tests.conftest import make_config, server_of
+from tests.test_skills_extension import request
 
 PIN = {"Kb-Library": "flatsource"}
 PREFIX = {"Kb-Resource-Prefix": "kb+"}
@@ -335,7 +337,7 @@ def _served(knowledge_base):
 
 
 @pytest.mark.integration
-async def test_library_notes_are_addressed_in_the_instructions(tmp_path):
+async def test_every_served_scheme_is_prefixed_in_the_instructions(tmp_path):
     from kubed.mcp_kb.config import Config
 
     skill = tmp_path / "m" / "p" / "skills" / "s"
@@ -351,7 +353,10 @@ async def test_library_notes_are_addressed_in_the_instructions(tmp_path):
                 {
                     "name": "lib",
                     "source": f"file://{tmp_path / 'm'}",
-                    "notes": "Start at skill://lib/s/SKILL.md.",
+                    "notes": (
+                        "Start at skill://lib/s/SKILL.md. "
+                        "Ask agents://lib/agents/x.md or prompts://lib/p."
+                    ),
                 }
             ]
         }
@@ -363,8 +368,12 @@ async def test_library_notes_are_addressed_in_the_instructions(tmp_path):
 
         plain = await told({})
         both = await told({"Kb-Library": "lib", **PREFIX})
-    assert "Start at skill://lib/s/SKILL.md." in plain
-    assert "Start at kb+skill://lib/s/SKILL.md." in both
+    notes = "Start at skill://lib/s/SKILL.md. Ask agents://lib/agents/x.md or prompts://lib/p."
+    assert notes in plain
+    assert (
+        "Start at kb+skill://lib/s/SKILL.md. "
+        "Ask kb+agents://lib/agents/x.md or kb+prompts://lib/p."
+    ) in both
 
 
 @pytest.mark.integration
@@ -408,3 +417,80 @@ async def test_an_escaped_slash_before_a_dot_segment_is_hinted_nothing(server_ur
         message = await _missed(server_url, uri, BOTH, tools=True)
         assert "Resource not found" in message
         assert not _HINTED.findall(message), message
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("sent", ["prefixed", "plain"])
+async def test_a_dot_segment_past_the_library_is_hinted_nothing(server_url, sent):
+    # Resolved over the whole path, as the gateway does, these name another
+    # address than the one kb would hint, so no hint is given.
+    for path in ("flatsource/../../alpha", "flatsource/../alpha", "flatsource/.."):
+        uri = f"{'kb+' if sent == 'prefixed' else ''}skill://{path}"
+        message = await _missed(server_url, uri, BOTH, tools=True)
+        assert "Resource not found" in message
+        assert not _HINTED.findall(message), message
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("sent", ["prefixed", "plain"])
+async def test_a_dot_segment_inside_the_library_is_still_hinted(server_url, sent):
+    uri = f"{'kb+' if sent == 'prefixed' else ''}skill://flatsource/alpha/x/.."
+    message = await _missed(server_url, uri, BOTH, tools=True)
+    assert "kb+skill://flatsource/alpha/x/../SKILL.md" in message, message
+
+
+INPUTS = {
+    "kb-header": ({"Kb-Resource-Prefix": "kb+"}, ""),
+    "x-mcp-header": ({"X-MCP-Resource-Prefix": "kb+"}, ""),
+    "parameter": ({}, "?prefix=kb%2B"),
+}
+
+
+async def _written(url, headers):
+    """What each kb writer wrote under ``headers``, one string per writer."""
+    async with _client(url, headers) as client:
+        (template,) = await client.list_resource_templates()
+        with pytest.raises(MCPError) as hint:
+            await client.read_resource("skill://flatsource/alpha")
+        listed = await request(
+            client, "resources/directory/read", uri="skill://flatsource"
+        )
+        return {
+            "directory": json.dumps(listed["resources"]),
+            "instructions": client.instructions,
+            "index": (await client.read_resource("skill://flatsource/_index.md"))[0].text,
+            "children": (
+                await client.read_resource("skill://flatsource/_index.json")
+            )[0].text,
+            "template": template.description,
+            "prompt": (await client.get_prompt("flatsource_cite")).messages[0].content.text,
+            "hint": str(hint.value),
+        }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("sent", INPUTS.values(), ids=INPUTS.keys())
+async def test_every_kb_writer_follows_each_prefix_input(server_url, sent):
+    headers, query = sent
+    written = await _written(server_url + query, {**PIN, **headers})
+    assert "kb+skill://flatsource/_index.md" in written["instructions"]
+    assert "kb+skill://flatsource/alpha/SKILL.md" in written["index"]
+    assert '"uri": "kb+skill://flatsource/alpha"' in written["children"]
+    # A directory's children carry descriptions that cite an address.
+    assert ALPHA_DESCRIPTION in written["directory"]
+    assert "Start at kb+skill://{library}/_index.md;" in written["template"]
+    assert written["prompt"] == "Read kb+skill://flatsource/shared/x.md.\n"
+    assert "kb+skill://flatsource/alpha/SKILL.md" in written["hint"]
+    assert "kb+kb+" not in "".join(written.values())
+
+
+@pytest.mark.integration
+async def test_the_header_beats_the_parameter_in_every_writer(server_url):
+    for headers in (
+        {"Kb-Resource-Prefix": "kb+", "X-MCP-Resource-Prefix": "other+"},
+        {"X-MCP-Resource-Prefix": "kb+"},
+    ):
+        written = await _written(f"{server_url}?prefix=other%2B", {**PIN, **headers})
+        for writer, text in written.items():
+            assert "kb+skill://" in text, writer
+            assert "other+" not in text, writer

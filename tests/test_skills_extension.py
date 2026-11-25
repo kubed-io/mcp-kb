@@ -13,11 +13,11 @@ import json
 import pytest
 from fastmcp import Client
 from fastmcp.skills import SkillsClientExtension
+from kubed.mcp.gateway import prefixed
 from kubed.mcp.protocol import MCPError, RequestParams, types
 from pydantic import ConfigDict, TypeAdapter
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.catalogue.addressing import Addressing
 from kubed.mcp_kb.mcp.request import EXTENSION_ID
 from kubed.mcp_kb.mcp.scope import Scope
 from tests.conftest import DEEP_YAML, make_config, server_of
@@ -302,8 +302,10 @@ async def test_every_child_a_directory_names_is_readable(server_url, headers):  
             # An index is text, which kb and the plugin layer both write the
             # prefix into (GW-5, one writer); a directory listing's rows are
             # structured. So the index is the listing, as the prefix writes it.
-            written = Addressing.parse(headers.get("Kb-Resource-Prefix", ""))
-            assert index == json.loads(written.text(json.dumps(listed["resources"])))
+            written = prefixed(
+                json.dumps(listed["resources"]), headers.get("Kb-Resource-Prefix")
+            )
+            assert index == json.loads(written)
             for child in listed["resources"]:
                 seen += 1
                 if child["mimeType"] == "inode/directory":

@@ -11,6 +11,9 @@
 > - The PR takes `no changelog`.
 > - quick-mcp#46 asks GW-4 to resolve dots on all three methods and for a public `unprefixed()`.
 >   A later pin bump that carries it undoes G1, and D2's own strip moves onto `unprefixed()`.
+> - Code-stage rulings: kb keeps a `%2f` check in the hint only, and gives no hint for a `..` that
+>   climbs past the library, so a hint never names an address GW-4 refuses. Reads keep no `%2F`
+>   check (D1).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -137,8 +140,9 @@ The PR takes the `no changelog` label (Dr K).
 ## Review Focus
 
 1. **A directory address holding `%2F`** (`kb+skill://flatsource%2Falpha`,
-   `skill://flatsource/alpha%2Frefs`). GW-4 sends the read nowhere, and kb's hint, which no longer
-   guards `%2F`, must name nothing. *(Task 1: `test_an_escaped_slash_is_hinted_nothing`.)*
+   `skill://flatsource/alpha%2Frefs`). GW-4 sends the read nowhere, and kb's hint, which alone
+   keeps a `%2f` check (reads keep none, D1), must name nothing.
+   *(Task 1: `test_an_escaped_slash_is_hinted_nothing`.)*
 2. **A wrong prefix, or a prefixed address on a request with none** (`other+skill://…` under
    `kb+`; `kb+skill://…` with no prefix). Either one is a bare miss: no read and no hint. *(Task 1:
    `test_a_foreign_prefix_is_a_bare_miss`.)*

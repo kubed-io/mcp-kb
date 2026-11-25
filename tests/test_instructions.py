@@ -10,10 +10,10 @@ import uvicorn
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.skills import SkillsClientExtension
+from kubed.mcp.gateway import prefixed
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import harvest
-from kubed.mcp_kb.catalogue.addressing import DEFAULT, Addressing
 from kubed.mcp_kb.catalogue.instructions import build_instructions
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex, load_skills
 from kubed.mcp_kb.catalogue.uris import Catalogue, LibraryText
@@ -460,19 +460,16 @@ async def _none(_context):
     return None
 
 
-# -- instructions follow the addressing ---------------------------------------
+# -- instructions follow the prefix ---------------------------------------
 
 
 @pytest.mark.unit
 def test_prefixed_pointer_and_footer(tmp_path):
     text = LibraryText("flatsource")
     cat = _catalogue(tmp_path, {text: ["alpha", "beta"]})
-    out = build_instructions(
-        cat,
-        EVERYTHING,
-        resources=True,
-        skills_extension=False,
-        addressing=Addressing("kb+"),
+    out = prefixed(
+        build_instructions(cat, EVERYTHING, resources=True, skills_extension=False),
+        "kb+",
     )
     assert out.splitlines()[0] == (
         "Skills (kb+skill://flatsource/_index.md): alpha, beta"
@@ -487,12 +484,9 @@ def test_prefixed_pointer_and_footer(tmp_path):
 def test_prefixed_pointer_without_names_and_notes(tmp_path):
     a = LibraryText("a", "A.", "Start at skill://a/x/SKILL.md.")
     cat = _catalogue(tmp_path, {a: ["x"]})
-    out = build_instructions(
-        cat,
-        EVERYTHING,
-        resources=True,
-        skills_extension=False,
-        addressing=Addressing("kb+"),
+    out = prefixed(
+        build_instructions(cat, EVERYTHING, resources=True, skills_extension=False),
+        "kb+",
     )
     assert "Start at kb+skill://a/x/SKILL.md." in out.splitlines()
 
@@ -501,12 +495,9 @@ def test_prefixed_pointer_without_names_and_notes(tmp_path):
 def test_prefixed_multi_library_pointers(tmp_path):
     a, b = LibraryText("a", "A."), LibraryText("b", "B.")
     cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
-    out = build_instructions(
-        cat,
-        EVERYTHING,
-        resources=True,
-        skills_extension=False,
-        addressing=Addressing("kb+"),
+    out = prefixed(
+        build_instructions(cat, EVERYTHING, resources=True, skills_extension=False),
+        "kb+",
     )
     lines = out.splitlines()
     assert "Skills: kb+skill://a/_index.md" in lines
@@ -514,17 +505,22 @@ def test_prefixed_multi_library_pointers(tmp_path):
 
 
 @pytest.mark.unit
-def test_default_addressing_is_byte_identical(tmp_path):
+def test_the_text_is_built_unprefixed(tmp_path):
     a, b = LibraryText("a", "A.", "N."), LibraryText("b", "B.")
     cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
     for scope in (EVERYTHING, Scope(library="a")):
         for resources in (True, False):
             for ext in (True, False):
                 kw = {"resources": resources, "skills_extension": ext}
-                assert build_instructions(
-                    cat, scope, addressing=DEFAULT, **kw
-                ) == build_instructions(cat, scope, **kw)
+                assert "kb+" not in build_instructions(cat, scope, **kw)
     assert _build(cat, Scope(library="a")).endswith(RES_FOOTER)
+
+
+@pytest.mark.unit
+def test_prefixed_instructions_never_double_prefix(tmp_path):
+    a = LibraryText("a", "A.", "See kb+skill://a/x/SKILL.md and myskill://a.")
+    out = prefixed(_build(_catalogue(tmp_path, {a: ["x"]}), EVERYTHING), "kb+")
+    assert "See kb+skill://a/x/SKILL.md and myskill://a." in out.splitlines()
 
 
 @pytest.mark.integration
