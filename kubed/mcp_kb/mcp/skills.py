@@ -61,6 +61,7 @@ from kubed.mcp.plugins import Plugin as Served
 from kubed.mcp.plugins import PluginError, PluginSet, Site, View
 
 from ..catalogue.agents import Agent, AgentRoster, parse_agent
+from ..catalogue.harvest import readable
 from ..catalogue.names import split_frontmatter
 from ..catalogue.skills import Skill
 from ..catalogue.snapshot import Library, Snapshot, namespace_for, unrooted
@@ -772,7 +773,13 @@ def _read_agent(
 ) -> Agent | None:
     """An agent file kb's harvest did not read, read as its roster reads one,
     with the file's stem as the name its frontmatter does not give (N10); None
-    when kb cannot read it. Named by the plugin layer, whose name replaces it."""
+    when kb cannot read it. Named by the plugin layer, whose name replaces it.
+
+    Only a regular file inside ``root``, as kb's harvest reads one: a symlink
+    out of the plugin is refused here whatever the plugin layer lists, so
+    ``agent_meta`` raises and the set skips it (PLUG-73)."""
+    if readable(root, path) is None:
+        return None
     try:
         parsed = parse_agent(root / path, stem=Path(path).stem)
     except OSError:

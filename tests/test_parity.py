@@ -11,11 +11,13 @@ import logging
 from pathlib import Path
 
 import pytest
+from fastmcp import Client
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue.snapshot import effective_globs
 from kubed.mcp_kb.config import Config
-from tests.conftest import DEEP_YAML
+from kubed.mcp_kb.mcp.skills import _read_agent
+from tests.conftest import DEEP_YAML, ext_request, server_of
 
 pytestmark = pytest.mark.unit
 
@@ -648,6 +650,44 @@ def test_a_listed_agent_in_a_dot_folder_is_served_and_one_outside_is_not(tmp_pat
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [
         "agents entry 'agents/out.md' is not in the plugin"
     ]
+
+
+async def test_a_listed_agent_linked_out_of_the_root_is_not_served(tmp_path):
+    outside = tmp_path / "elsewhere.md"
+    outside.write_text("---\nname: out\ndescription: O.\n---\nGo.\n")
+    root = tmp_path / "kit"
+    _skill(root, "skills/a")
+    _write(root, "agents/in.md", "---\nname: in\ndescription: I.\n---\nGo.\n")
+    (root / "agents/out.md").symlink_to(outside)
+    _manifest(root, name="kit", agents=["./agents/in.md", "./agents/out.md"])
+    knowledge_base = _declared(tmp_path, root)
+
+    async with Client(server_of(knowledge_base)) as client:
+        listing = await ext_request(client, "agents/list")
+
+    assert [agent["name"] for agent in listing["agents"]] == ["kit_in"]
+    assert len(knowledge_base.snapshot.catalogue.agents) == 1
+
+
+def test_kb_reads_no_agent_file_linked_out_of_the_root(tmp_path):
+    # kb's own guard, whatever the plugin layer lists: agent_meta raising on
+    # a file kb cannot read is kb's veto (PLUG-73).
+    outside = tmp_path / "elsewhere.md"
+    outside.write_text("---\nname: out\ndescription: O.\n---\nGo.\n")
+    root = tmp_path / "kit"
+    (root / "agents").mkdir(parents=True)
+    (root / "agents/out.md").symlink_to(outside)
+    (root / "agents/dir.md").mkdir()
+    _write(root, "agents/in.md", "---\nname: in\ndescription: I.\n---\nGo.\n")
+    plugin = _declared(tmp_path, root)._plugins[0]
+
+    def read(path):
+        return _read_agent("kit", frozenset(), plugin, root, path)
+
+    assert read("agents/out.md") is None
+    assert read("agents/dir.md") is None
+    assert read("../elsewhere.md") is None
+    assert read("agents/in.md").name == "in"
 
 
 LISTED_COMMANDS = [
