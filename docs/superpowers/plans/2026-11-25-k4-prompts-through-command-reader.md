@@ -177,10 +177,16 @@ FastMCP through it, pytest + pytest-asyncio, uvicorn, wsgidav.
 - **P4. `/health` wording.** A prompt's skip reasons quote the full served name
   (`prompt lib_debug is already served by prompts/debug.md`, `prompt name 'lib_a b' is not a
   usable name`). A prompt clash between plugins of one library is the layer's refusal,
-  `conflict: prompt <name> is already served by plugin <owner>`, with no cache path.
+  `conflict: prompt <name> is already served by plugin <owner>`, with no cache path. *(Task 3:)*
+  `<owner>` is the layer's plugin name (`a`), where kb's own conflict rows quote kb's id
+  (`'a@lib'`); and every refusal the layer gives loses its `plugin <address> is not served: `
+  wrapper in `/health`, not only a prompt clash.
 - **P5. Which plugins' prompts serve.** A plugin the layer refuses serves no prompt in that
   library (LIB-29), and neither does a plugin declared `skills: []` (LIB-33). A plugin with prompts
-  and no skill or agent is now added. It serves as before.
+  and no skill or agent is now added. It serves as before. *(Task 3:)* a plugin refused over a
+  prompt name still serves its library files, where kb used to fail the whole plugin. And
+  `commands/prompts/x.md` beside `prompts/x.md` now claim one `prompts://` address in the layer,
+  so `lib_x` no longer serves (rare; the layer's address, not kb's names).
 - **P6. `prompts://`.** Recorded by Task 0 under rc2: a served command is never listed in
   `resources/list`, but it reads, unlisted, at `prompts://<namespace>/<place>`, where `<place>`
   is its path below the folder entry that read it (`commands/top.md` is
@@ -512,7 +518,7 @@ git commit -m "Object-map commands are not served (P1): CommandEntry and the inl
   - `NOT_SELECTED = "not one of the plugin's prompt files"` and
     `RENAMED = "named {name} by the plugin layer and {expected} by kb"` in `mcp/skills.py`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_prompt_serving.py` uses `market()` and `_write()` from `tests/test_plugin_serving.py`,
 and `server_of`, `serve_http` and `http_client` from `tests/conftest.py`. `CMD` is
@@ -608,14 +614,14 @@ def test_command_entries_follow_the_selection():
 
 Write each commented case out in full, in the shape of the first test.
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `pytest tests/test_prompt_serving.py -v`
 Expected: `test_command_entries_follow_the_selection` fails on the import. The served tests fail
 on names, because kb's `PromptProvider` serves and the layer skips every command. The
 elicitation and description tests may pass already; they pin the switch.
 
-- [ ] **Step 3: Implement the harvest side**
+- [x] **Step 3: Implement the harvest side**
 
 - `command_entries`: for each selected path in order, take the deepest of `COMMAND_DIRS` and
   `command_dirs` that contains it (`"."` contains every path), as `prompt_name` decides. Emit
@@ -636,7 +642,7 @@ elicitation and description tests may pass already; they pin the switch.
 - `visible_prompts`: `scope.admits(p.library, p.category, p.tags, library_categories=p.library_categories)`
   over `self.prompts`.
 
-- [ ] **Step 4: Implement the serving side**
+- [x] **Step 4: Implement the serving side**
 
 - `entry_for(plugin, commands)`: with `commands`, `entry["commands"] = list(commands.entries)`,
   and `strict` is dropped when it is `False` (D1). `_add` passes
@@ -715,7 +721,7 @@ return adapt(file)
 - `grep -rn "PromptProvider\|PromptRow\|load_prompts\|_load_prompts\|PromptSource\|COMMANDS_ARE_KBS\|\.body()" kubed tests`
   returns nothing.
 
-- [ ] **Step 5: Migrate the suite**
+- [x] **Step 5: Migrate the suite**
 
 - A test that reads `knowledge_base.prompts` or `snapshot.prompts` calls
   `server_of(knowledge_base)` first, because the prompts are what the layer serves.
@@ -731,7 +737,7 @@ return adapt(file)
   is pinned) with a command whose body cites `lib:s`. The pinned build renders it against its own
   generation's names (D6).
 
-- [ ] **Step 6: Update the spec, AGENTS.md and the Copilot rules**
+- [x] **Step 6: Update the spec, AGENTS.md and the Copilot rules**
 
 - PRM-2: a client sees a prompt when the plugin layer's view admits its plugin, which is kb's
   scope (SCP rules), and out of scope reads as absent.
@@ -761,13 +767,13 @@ return adapt(file)
 - `.github/copilot-instructions.md:106`: "`Catalogue`, `SkillIndex` and `PromptProvider` read"
   becomes "`Catalogue` and `SkillIndex` read, and the plugin layer's view,".
 
-- [ ] **Step 7: Run the checks**
+- [x] **Step 7: Run the checks**
 
 Run: `ruff check .` then `pytest -q`
 Expected: ruff is clean and the suite is green. `tests/test_live.py`'s three `PromptProvider`
 tests are deleted here, and Task 4 writes their replacements.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A kubed/mcp_kb tests docs/superpowers/specs AGENTS.md .github/copilot-instructions.md

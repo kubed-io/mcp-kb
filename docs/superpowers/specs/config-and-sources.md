@@ -180,12 +180,13 @@ revalidated like any other.
 
 **SRC-20.** A file fetch is served in place; nothing is copied. A path that is not a directory
 fails the fetch with `<path> is not a directory`. A skill's files are read once per generation,
-so an edit to one in place is served from the next refresh (or `POST /reindex`); a library file
-or a prompt is read off disk each time.
+so an edit to one in place is served from the next refresh (or `POST /reindex`); a prompt file is
+read when its plugin is added to the plugin layer, once per generation, like a skill's files; a
+library file is read off disk each time.
 
 ## `cache: live`
 
-**SRC-21.** On a live fetch, each read of one of its files (library file, prompt) first
+**SRC-21.** On a live fetch, each read of one of its library files first
 revalidates that file, and each request that reads skills or agents first revalidates every file
 of the live skills, and each agent file, of the plugins its scope admits (SKL-37): one request for
 its ETag, and a download only if the ETag differs from the local copy's. A skill's or an agent's

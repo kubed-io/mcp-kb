@@ -5,19 +5,20 @@ A skill is read by the model when it decides to. A prompt is picked by a person
 before the model sees anything. Different primitive, so a different module,
 scoped by the same library, category and tag rules as skills.
 
-The parsing -- frontmatter, placeholders, the loader -- lives in
-``catalogue/prompts.py`` and has no FastMCP in it at all: ``catalogue/`` is the
-layer ``AGENTS.md`` promises stays free of it. This module is the seam:
-``MCPFilePrompt`` wraps a catalogue ``FilePrompt`` in FastMCP's own ``Prompt``
-base class, and ``PromptProvider`` is what ``resources.py``'s sibling for
-skills is for prompts.
+The parsing -- frontmatter, dialects, placeholders -- lives in
+``catalogue/prompts/`` and has no FastMCP in it at all: ``catalogue/`` is the
+layer ``AGENTS.md`` promises stays free of it. kubed-mcp's plugin layer serves
+the prompts, scoped by kb's view, and reads each file through kb's command
+reader (``SkillServing.read_command``). This module is the seam between the
+two: ``adapt`` wraps a catalogue ``FilePrompt`` in FastMCP's own ``Prompt``
+base class as ``MCPFilePrompt``, which is what the reader hands the layer, and
+``register`` adds the prompt mirror.
 """
 
 from __future__ import annotations
 
 import functools
 import logging
-from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
@@ -29,31 +30,22 @@ from kubed.mcp import (
     ToolError,
     ValidationError,
 )
-from kubed.mcp.gateway import prefix, prefixed
 from kubed.mcp.protocol import (
     MODERN_PROTOCOL_VERSIONS,
     InputRequiredPromptResult,
     PromptsAsTools,
-    Provider,
     Tool,
     ToolAnnotations,
-    VersionSpec,
     types,
 )
 from kubed.mcp.request import get_context
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict
 
-from ..catalogue.names import QualifiedNames
 from ..catalogue.prompts import FilePrompt, MissingArguments
-from ..catalogue.uris import SCHEME, Catalogue
-from .request import requested_scope
-from .scope import EVERYTHING, Scope
 from .tools import READ_ONLY
 
 if TYPE_CHECKING:
     from kubed.mcp import Context
-
-    from ..catalogue.snapshot import Snapshot
 
 # The key the one form elicitation is minted and read back under. A prompt asks
 # for its arguments and nothing else, so there is exactly one.
@@ -68,19 +60,12 @@ _mirrored: ContextVar[bool] = ContextVar("mirrored_get_prompt", default=False)
 class MCPFilePrompt(Prompt):
     """FastMCP's ``Prompt``, backed by a catalogue ``FilePrompt``.
 
-    Everything a client-facing prompt needs -- the substitution, the missing-
-    argument check, the live re-read -- is ``file``'s to do; this class exists
-    only to satisfy FastMCP's ``Prompt`` contract and hand the result back. The
-    one thing added here is the library's own address base, so a body citing
-    ``${CLAUDE_PLUGIN_ROOT}/shared/x.md`` renders a URI the reader can read.
-    ``skill_dirs`` is the plugin's skills under that root, set per request by
-    ``PromptProvider``, so ``${CLAUDE_PLUGIN_ROOT}/skills/x/y.md`` renders as
-    skill ``x``'s own address. Rendered literally, as
-    ``skill://<library>/skills/x/y.md``, it would read as nothing: a skill's
-    files are served only at the skill's own address. ``names`` is the table of
-    qualified skill names (``<plugin>:<skill>``) the prompt's library serves in
-    the caller's scope, own plugin first, set per request alike, so a body
-    citing one renders its address.
+    Everything a client-facing prompt needs -- the substitution and the
+    missing-argument check -- is ``file``'s to do; this class exists only to
+    satisfy FastMCP's ``Prompt`` contract and hand the result back. ``file``'s
+    body was rendered when the plugin layer's build was made: qualified names
+    and ``${CLAUDE_PLUGIN_ROOT}`` are addresses already (PRM-47), and the
+    gateway prefix is the layer's to write into what this renders (GW-7).
 
     A missing argument is the one failure translated here. FastMCP treats any
     other exception out of a render as its own fault: -32603 on the wire and a
@@ -95,8 +80,6 @@ class MCPFilePrompt(Prompt):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     file: FilePrompt
-    skill_dirs: dict[str, str] = Field(default_factory=dict)
-    names: QualifiedNames = Field(default_factory=QualifiedNames)
 
     async def render(
         self, arguments: dict[str, object] | None = None
@@ -120,13 +103,7 @@ class MCPFilePrompt(Prompt):
                 raise _refused(again) from again
 
     def _filled(self, arguments: dict[str, object] | None) -> str:
-        text = self.file.render(
-            arguments,
-            plugin_root=f"{SCHEME}{self.file.library}",
-            skills=self.skill_dirs,
-            names=self.names,
-        )
-        return prefixed(text, prefix())
+        return self.file.render(arguments)
 
     def _ask(self, exc: MissingArguments) -> InputRequiredPromptResult | None:
         """The missing arguments as one form, or None when nobody can fill it.
@@ -200,7 +177,8 @@ def _answered() -> types.ElicitResult | None:
     return answered if isinstance(answered, types.ElicitResult) else None
 
 
-def _adapt(file: FilePrompt) -> MCPFilePrompt:
+def adapt(file: FilePrompt) -> MCPFilePrompt:
+    """``file`` as the ``Prompt`` kb's command reader hands the plugin layer."""
     return MCPFilePrompt(
         name=file.name,
         title=file.title,
@@ -214,79 +192,6 @@ def _adapt(file: FilePrompt) -> MCPFilePrompt:
         ],
         file=file,
     )
-
-
-class PromptProvider(Provider):
-    """The prompts, scoped to whoever is asking.
-
-    Scope is applied in the listing alone. ``_get_prompt`` finds a name
-    through FastMCP's default lookup, which searches that same listing, so a
-    prompt outside this client's scope is unknown to ``prompts/get`` too, not
-    merely unlisted.
-
-    Takes one getter for the whole ``Snapshot`` rather than for its prompts. A
-    refresh swaps the server's snapshot with a single assignment; a reader
-    that took two things off it through two getters could straddle that swap
-    and mix generations -- the one thing every other reader in this codebase
-    (``resources.py``, ``routes.py``) avoids by taking one reference and
-    working off it, and the shape this one keeps for the same reason.
-    """
-
-    def __init__(
-        self,
-        snapshot: Callable[[], Snapshot],
-        catalogue: Callable[[], Catalogue] | None = None,
-    ):
-        super().__init__()
-        self._snapshot = snapshot
-        # Where a body's names and plugin-root paths resolve: the catalogue
-        # the request reads, so a prompt never names a skill that is not
-        # served. The snapshot's own when none is given.
-        self._catalogue = catalogue
-
-    def visible(self, scope: Scope = EVERYTHING) -> list[FilePrompt]:
-        prompts = self._snapshot().prompts
-        return [
-            p
-            for p in prompts
-            if scope.admits(
-                p.library, p.category, p.tags, library_categories=p.library_categories
-            )
-        ]
-
-    async def _list_prompts(self) -> Sequence[Prompt]:
-        return [_adapt(p) for p in self.visible(requested_scope())]
-
-    async def _get_prompt(
-        self, name: str, version: VersionSpec | None = None
-    ) -> Prompt | None:
-        """The prompt, revalidated first if it came from a live source.
-
-        ``render`` is where the body is read, and it is not this provider's to
-        call -- FastMCP renders what it is handed. So the file is brought level
-        with its server here, on the way out.
-
-        The maps of the plugin's skills -- their directories and their
-        qualified names -- are set here too. They are built from the
-        snapshot reference the revalidation used, so both work off one
-        generation. The prompt was found by the lookup above, which takes its
-        own reference. The maps are built only on a get, so the listing never
-        pays for it.
-        """
-        prompt = await super()._get_prompt(name, version)
-        if not isinstance(prompt, MCPFilePrompt):
-            return prompt
-        snapshot = self._snapshot()
-        if prompt.file.live:
-            snapshot.revalidate(prompt.file.path)
-        catalogue = snapshot.catalogue if self._catalogue is None else self._catalogue()
-        dirs = catalogue.plugin_skill_dirs(
-            prompt.file.library, prompt.file.plugin, requested_scope()
-        )
-        names = catalogue.qualified_names(
-            prompt.file.library, prompt.file.plugin, requested_scope()
-        )
-        return prompt.model_copy(update={"skill_dirs": dirs, "names": names})
 
 
 class ReadOnlyPromptsAsTools(PromptsAsTools):
@@ -345,23 +250,18 @@ def _annotate(tool: Tool, title: str) -> Tool:
 
 
 # FastMCP's PromptsAsTools names. Its tools route through the server's own
-# prompts/list and prompts/get, so this provider's scoping applies to them too.
+# prompts/list and prompts/get, so the plugin layer's view scopes them too.
 PROMPT_TOOLS = frozenset({"list_prompts", "get_prompt"})
 
 
-def register(
-    mcp: QuickMCP,
-    snapshot: Callable[[], Snapshot],
-    catalogue: Callable[[], Catalogue] | None = None,
-) -> set[str]:
-    """Publish the prompts, and their tool mirror; return the mirror's names.
+def register(mcp: QuickMCP) -> set[str]:
+    """Add the prompt mirror; return its tools' names.
 
-    The mirror is FastMCP's own ``PromptsAsTools`` rather than one written here:
-    it keeps what a prompt actually is -- role-tagged messages, several of them
-    if the prompt has several -- which a resource or a hand-rolled tool would
-    flatten to text.
+    The prompts are the plugin layer's to serve. The mirror is FastMCP's own
+    ``PromptsAsTools`` rather than one written here: it keeps what a prompt
+    actually is -- role-tagged messages, several of them if the prompt has
+    several -- which a resource or a hand-rolled tool would flatten to text.
     """
-    mcp.add_provider(PromptProvider(snapshot, catalogue))
     # PromptsAsTools reads prompts back through the FastMCP server it is given.
     mcp.add_transform(ReadOnlyPromptsAsTools(mcp.server))
     return set(PROMPT_TOOLS)

@@ -132,12 +132,19 @@ def _declared(
     return KnowledgeBase(_config(root, library, **fields), tmp_path / "cache")
 
 
+def _prompts(knowledge_base: KnowledgeBase):
+    """The prompts served: the plugin layer reads them as the set is published,
+    which is also when ``status`` says what it skipped of them."""
+    server_of(knowledge_base)
+    return knowledge_base.prompts
+
+
 def _names(knowledge_base: KnowledgeBase) -> list[str]:
-    return [prompt.name for prompt in knowledge_base.prompts]
+    return [prompt.name for prompt in _prompts(knowledge_base)]
 
 
 def _prompt(knowledge_base: KnowledgeBase, name: str):
-    return next(p for p in knowledge_base.prompts if p.name == name)
+    return next(p for p in _prompts(knowledge_base) if p.name == name)
 
 
 def _served(knowledge_base: KnowledgeBase) -> set[str]:
@@ -198,7 +205,7 @@ def test_commands_replace_the_conventions_and_note_the_folder(tmp_path):
 
     knowledge_base = _declared(tmp_path, root)
 
-    assert [p.name for p in knowledge_base.prompts] == ["kit_one"]
+    assert [p.name for p in _prompts(knowledge_base)] == ["kit_one"]
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [COMMANDS_NOTE]
 
 
@@ -231,7 +238,7 @@ def test_commands_in_subfolders_carry_their_folders(tmp_path):
     knowledge_base = _declared(tmp_path, root, library="lib")
 
     assert sorted(_names(knowledge_base)) == ["lib_db_migrate", "lib_top"]
-    assert {p.dialect for p in knowledge_base.prompts} == {"claude"}
+    assert {p.dialect for p in _prompts(knowledge_base)} == {"claude"}
 
 
 def test_a_declared_commands_directory_reads_its_subfolders(tmp_path):
@@ -256,7 +263,7 @@ def test_the_prompts_convention_still_names_by_stem(tmp_path):
     assert knowledge_base.status["plugins"]["kit"]["skipped"] == [
         {
             "path": "prompts/sub/debug.md",
-            "reason": "prompt debug is already served by prompts/debug.md",
+            "reason": "prompt lib_debug is already served by prompts/debug.md",
         }
     ]
 
@@ -276,8 +283,8 @@ def test_penpot_still_serves_its_eight_commands(tmp_path):
     knowledge_base = _marketplace(tmp_path, penpot_root(tmp_path), "penpot")
 
     assert knowledge_base.status["libraries"]["penpot"]["prompts"] == 8
-    assert not any(p.path.name == "README.md" for p in knowledge_base.prompts)
-    assert {p.dialect for p in knowledge_base.prompts} == {"claude"}
+    assert not any(p.path.name == "README.md" for p in _prompts(knowledge_base))
+    assert {p.dialect for p in _prompts(knowledge_base)} == {"claude"}
 
 
 def test_an_entry_appends_to_its_manifest(tmp_path):
@@ -402,6 +409,7 @@ def test_an_unparsable_mcp_json_is_a_note_and_nothing_else(tmp_path):
     _manifest(root, name="kit", mcpServers={"c": {}})
 
     knowledge_base = _declared(tmp_path, root)
+    server_of(knowledge_base)
     status = knowledge_base.status["plugins"]["kit"]
 
     assert status["status"] == "ok"
@@ -448,6 +456,7 @@ def test_an_mcp_json_too_deep_or_too_long_to_parse_is_a_note(tmp_path, text):
     _write(root, ".mcp.json", text)
 
     knowledge_base = _declared(tmp_path, root)
+    server_of(knowledge_base)
     status = knowledge_base.status["plugins"]["kit"]
 
     assert status["status"] == "ok"
@@ -464,6 +473,7 @@ def test_a_manifest_too_deep_to_parse_fails_the_plugin_and_quotes_nothing(
     _write(root, ".claude-plugin/plugin.json", "[" * 200000)
 
     knowledge_base = _declared(tmp_path, root)
+    server_of(knowledge_base)
     status = knowledge_base.status["plugins"]["kit"]
 
     assert status["status"] == "failed"
@@ -479,7 +489,7 @@ def test_an_object_map_serves_no_prompt_and_still_replaces_the_conventions(tmp_p
 
     knowledge_base = _declared(tmp_path, root)
 
-    assert knowledge_base.prompts == ()
+    assert _prompts(knowledge_base) == ()
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [
         "commands object map is not served"
     ]
@@ -622,7 +632,7 @@ def test_a_listed_command_is_a_path_not_a_glob(tmp_path):
         "kit_m",
         "kit_secret",
     ]
-    assert {p.dialect for p in knowledge_base.prompts} == {"claude"}
+    assert {p.dialect for p in _prompts(knowledge_base)} == {"claude"}
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [
         "commands entry 'stars/*.md' is not in the plugin"
     ]
@@ -640,7 +650,7 @@ def test_an_entrys_listed_command_is_a_path_not_a_glob(tmp_path):
         "lib_m",
         "lib_secret",
     ]
-    assert {p.dialect for p in knowledge_base.prompts} == {"claude"}
+    assert {p.dialect for p in _prompts(knowledge_base)} == {"claude"}
     assert knowledge_base.status["plugins"]["kit@lib"]["notes"] == [
         "commands entry 'stars/*.md' is not in the plugin"
     ]
@@ -800,6 +810,7 @@ def test_a_prompt_file_with_a_key_that_is_not_text_is_skipped(tmp_path):
     _command(root, "prompts/ok.md")
 
     knowledge_base = _declared(tmp_path, root)
+    server_of(knowledge_base)
     status = knowledge_base.status["plugins"]["kit"]
 
     assert status["status"] == "ok"
@@ -815,6 +826,7 @@ def test_a_command_file_with_a_key_that_is_not_text_is_skipped(tmp_path):
     _manifest(root, name="kit", commands=["./cmds/bad.md", "./cmds/ok.md"])
 
     knowledge_base = _declared(tmp_path, root)
+    server_of(knowledge_base)
     status = knowledge_base.status["plugins"]["kit"]
 
     assert status["status"] == "ok"
@@ -847,6 +859,7 @@ def test_a_prompt_file_too_deep_to_parse_is_skipped_and_quotes_nothing(
     _command(root, "prompts/ok.md")
 
     knowledge_base = _declared(tmp_path, root)
+    server_of(knowledge_base)
     status = knowledge_base.status["plugins"]["kit"]
 
     assert status["status"] == "ok"
@@ -905,39 +918,14 @@ def test_a_prompt_whose_path_is_not_a_usable_name_is_skipped(tmp_path, rel, name
     _command(root, ok_rel)
 
     knowledge_base = _declared(tmp_path, root, library="lib")
+    server_of(knowledge_base)
     status = knowledge_base.status["plugins"]["kit"]
 
     assert status["status"] == "ok"
     ok = "lib_db_ok" if rel.startswith("commands/") else "lib_ok"
     assert _names(knowledge_base) == [ok]
     assert status["skipped"] == [
-        {"path": rel, "reason": f"prompt name {name!r} is not a usable name"}
-    ]
-
-
-def test_a_bad_prompt_name_in_an_old_index_is_skipped_on_a_cold_start(tmp_path):
-    root = tmp_path / "kit"
-    _skill(root, "skills/a")
-    _command(root, "commands/db/migrate.md")
-    _command(root, "commands/top.md")
-    config = _config(root, "lib")
-    first = KnowledgeBase(config, tmp_path / "cache")
-    assert sorted(_names(first)) == ["lib_db_migrate", "lib_top"]
-    del first
-    # An index written before names built from paths were checked.
-    index = tmp_path / "cache" / "index.json"
-    text = index.read_text()
-    assert text.count('"db_migrate"') == 1
-    index.write_text(text.replace('"db_migrate"', '"my db_migrate"'))
-
-    second = KnowledgeBase(config, tmp_path / "cache")
-
-    assert _names(second) == ["lib_top"]
-    assert second.status["plugins"]["kit"]["skipped"] == [
-        {
-            "path": "commands/db/migrate.md",
-            "reason": "prompt name 'my db_migrate' is not a usable name",
-        }
+        {"path": rel, "reason": f"prompt name {'lib_' + name!r} is not a usable name"}
     ]
 
 
@@ -947,10 +935,10 @@ def test_a_skip_whose_path_holds_a_newline_is_one_log_line(tmp_path, caplog):
     _command(root, "commands/a\nb/x.md")
 
     with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
-        _declared(tmp_path, root)
+        server_of(_declared(tmp_path, root))
 
     lines = [r.getMessage() for r in caplog.records if "skips" in r.getMessage()]
     assert lines == [
         "plugin kit skips 'commands/a\\nb/x.md': "
-        "prompt name 'a\\nb_x' is not a usable name"
+        "prompt name 'kit_a\\nb_x' is not a usable name"
     ]

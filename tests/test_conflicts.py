@@ -171,15 +171,17 @@ async def test_a_second_plugin_serving_a_claimed_prompt_name_fails(tmp_path):
     health = await _health(kb)
 
     assert _conflict(health) == {
-        "second": "conflict: prompt lib_same is already served by plugin 'lib'"
+        "second": "conflict: prompt lib_same is already served by plugin lib"
     }
     async with Client(server_of(kb)) as client:
         prompts = await client.list_prompts()
         rendered = await client.get_prompt("lib_same")
-        with pytest.raises(Exception, match="not found"):
-            await client.read_resource("skill://lib/shared/b.md")
+        # The plugin layer's refusal (LIB-29): kb's own files of the refused
+        # plugin still serve, as they do for any plugin the layer refuses.
+        shared = await client.read_resource("skill://lib/shared/b.md")
     assert [p.name for p in prompts] == ["lib_same"]
     assert "first" in rendered.messages[0].content.text
+    assert shared[0].text == "second b\n"
 
 
 async def test_a_later_file_inside_an_earlier_plugins_skill_fails_its_plugin(tmp_path):

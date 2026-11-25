@@ -82,7 +82,6 @@ def url(tmp_path_factory):
                     "name": "notes",
                     "source": f"file://{base / 'notes'}",
                     "tags": ["ops"],
-                    "skills": [],
                     "prompts": ["*.md"],
                 },
                 {"name": "blank", "source": f"file://{base / 'blank'}"},
@@ -382,8 +381,6 @@ def mixed(tmp_path):
     """One library fed by two differently-tagged plugins, and a prompts-only
     library named like a folder of another. The shapes the simple fixture
     above cannot express."""
-    from kubed.mcp_kb.mcp.prompts import PromptProvider
-
     def skill(root, *parts):
         d = root.joinpath("skills", *parts)
         d.mkdir(parents=True)
@@ -407,7 +404,7 @@ def mixed(tmp_path):
                  "prompts": [], "files": ["shared/**/*"]},
                 {"name": "alpha", "source": f"file://{tmp_path / 'alpha'}"},
                 {"name": "notes", "source": f"file://{tmp_path / 'notes'}",
-                 "skills": [], "prompts": ["*.md"]},
+                 "prompts": ["*.md"]},
             ],
             "libraries": [
                 {"name": "obs", "plugins": ["ops", "ui"]},
@@ -417,7 +414,9 @@ def mixed(tmp_path):
         }
     )
     knowledge_base = KnowledgeBase(config, tmp_path / "cache")
-    return knowledge_base, PromptProvider(lambda: knowledge_base.snapshot)
+    # Published, so the plugin layer has read the prompts the snapshot holds.
+    server_of(knowledge_base)
+    return knowledge_base
 
 
 def _tag(name):
@@ -430,7 +429,7 @@ def test_a_tag_scope_cannot_read_another_plugins_library_file(mixed):
     Admitting library files by library alone let an `ops` scope — which does
     see a skill in `obs` — read the `ui` plugin's file by guessing its URI.
     """
-    knowledge_base, _ = mixed
+    knowledge_base = mixed
     catalogue = knowledge_base.snapshot.catalogue
 
     assert catalogue.read("skill://obs/shared/tokens.md", _tag("ops")) is None
@@ -438,7 +437,7 @@ def test_a_tag_scope_cannot_read_another_plugins_library_file(mixed):
 
 
 def test_a_tag_scope_does_not_list_another_plugins_library_files(mixed):
-    knowledge_base, _ = mixed
+    knowledge_base = mixed
     catalogue = knowledge_base.snapshot.catalogue
 
     assert catalogue.read("skill://obs/_files.md", _tag("ops")) is None
@@ -452,9 +451,10 @@ def test_a_prompts_only_library_is_selected_by_its_name_alone(mixed):
     Only the library is a selector: `notes` gives the prompts-only library and
     never the folder, and the folder's spelling names nothing at all.
     """
-    knowledge_base, provider = mixed
+    knowledge_base = mixed
+    snapshot = knowledge_base.snapshot
 
-    assert [p.name for p in provider.visible(Scope("notes"))] == ["notes_n"]
+    assert [p.name for p in snapshot.visible_prompts(Scope("notes"))] == ["notes_n"]
     assert knowledge_base.index.visible(Scope("notes")) == []
     assert knowledge_base.index.visible(Scope("alpha/notes")) == []
-    assert provider.visible(Scope("alpha/notes")) == []
+    assert snapshot.visible_prompts(Scope("alpha/notes")) == []

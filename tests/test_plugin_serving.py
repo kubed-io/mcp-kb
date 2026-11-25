@@ -2,9 +2,9 @@
 
 kb publishes a plugin set each generation: every plugin of every library, added
 as itself under its library's namespace. kubed-mcp serves the skills, their
-files, ``_manifest`` and folders; kb serves its indexes, ``_files.md``, library
-files and fallbacks, and its prompts. kb's scope is the view, and kb's
-placeholder and name rewriting the one rewriter.
+files, ``_manifest`` and folders, and the prompts, through kb's command reader;
+kb serves its indexes, ``_files.md``, library files and fallbacks. kb's scope is
+the view, and kb's placeholder and name rewriting the one rewriter.
 """
 
 from __future__ import annotations
@@ -145,7 +145,10 @@ async def test_the_listing_is_index_rows_only(skills_dir):
     )
 
 
-async def test_kubed_mcp_serves_no_prompt(tmp_path):
+async def test_kubed_mcp_serves_the_prompts(tmp_path):
+    """The prompts are the plugin layer's, under kb's names (PLG-25); a command
+    lists no resource row, and reads unlisted at ``prompts://<namespace>/<place>``,
+    its raw text, where ``<place>`` is its path below the entry that read it (P6)."""
     command = "---\ndescription: Say it.\n---\nSay it.\n"
     skill = "---\nname: {0}\ndescription: Skill {0}.\n---\n{0}\n"
     config = market(
@@ -165,13 +168,17 @@ async def test_kubed_mcp_serves_no_prompt(tmp_path):
     async with Client(server_of(knowledge_base)) as client:
         names = [p.name for p in await client.list_prompts()]
         rows = [str(r.uri) for r in await client.list_resources()]
-        for uri in ("prompts://lib/a/hello.md", "prompts://lib/b/prompts/x.md"):
-            with pytest.raises(MCPError):
-                await client.read_resource(uri)
+        read = {
+            uri: await _text(client, uri)
+            for uri in ("prompts://lib/a/hello.md", "prompts://lib/b/prompts/x.md")
+        }
+        with pytest.raises(MCPError):
+            await client.read_resource("prompts://lib/a/commands/hello.md")
         assert await _text(client, "skill://lib/a/sa/SKILL.md")
     assert names == [p.name for p in knowledge_base.snapshot.prompts]
     assert sorted(names) == ["lib_hello", "lib_x"]
     assert not [uri for uri in rows if uri.startswith("prompts://")]
+    assert set(read.values()) == {command}
 
 
 async def test_a_strict_false_entry_without_components_serves(tmp_path):

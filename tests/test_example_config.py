@@ -268,6 +268,7 @@ def test_a_declared_command_is_the_prompt_and_its_neighbour_is_not(tmp_path):
     dialect, which is the dialect a command is written in.
     """
     knowledge_base = KnowledgeBase(_rewritten_config(tmp_path), tmp_path / "cache")
+    server_of(knowledge_base)
 
     prompts = {prompt.name: prompt for prompt in knowledge_base.prompts}
     assert list(prompts) == ["penpot_brief"]

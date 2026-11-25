@@ -336,11 +336,12 @@ letter, digit, `+`, `-` or `.` (`kb+skill://` and `myskill://` stay as they are)
 
 | Written by | Where |
 |---|---|
-| the plugin layer | a skill's files, the indexes inside a skill and an agent's card (GW-5), and `list_resources`, which writes the prefix into each row's `uri` (DLV-6, GW-5) |
-| kb, through the plugin layer's writer (GW-11) | everything else: resource bodies and listing descriptions outside a skill, read hints, the template's description, instructions, rendered prompts |
+| the plugin layer | a skill's files, the indexes inside a skill and an agent's card (GW-5), rendered prompts (GW-7), and `list_resources`, which writes the prefix into each row's `uri` (DLV-6, GW-5) |
+| kb, through the plugin layer's writer (GW-11) | everything else: resource bodies and listing descriptions outside a skill, read hints, the template's description, instructions |
 
 A prompt's description, in `prompts/list` and in `list_prompts`, is written as its library wrote
-it, with no prefix. *(proposed: it is written with the prefix, as every other description is.)*
+it, with no prefix: the plugin layer prefixes the text a prompt renders, and a prompt's
+frontmatter is served as its file wrote it.
 
 **SKL-42.** An incoming address (`resources/read`, `read_resource`, `skills/get`,
 `resources/directory/read`) MAY be `skill://…` or `<prefix>skill://…` for the request's own prefix.

@@ -54,7 +54,6 @@ def _prompts(root, name):
     return {
         "name": f"{name}-prompts",
         "source": f"file://{path}",
-        "skills": [],
         "prompts": ["*.md"],
     }
 

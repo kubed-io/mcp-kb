@@ -17,7 +17,6 @@ Two quirks of the server under test:
 
 import hashlib
 import json
-import logging
 import socket
 import threading
 import time
@@ -29,11 +28,9 @@ from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import BasicAuth, Config, EnvRef
-from kubed.mcp_kb.mcp.prompts import PromptProvider
 from kubed.mcp_kb.plugins import Fetch
 from kubed.mcp_kb.sources import live
 from tests.conftest import (
-    DEEP_YAML,
     ext_request,
     http_client,
     read_served,
@@ -169,13 +166,21 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
     a build no view pinned reads what is published now (N13)."""
     import contextvars
     from concurrent.futures import ThreadPoolExecutor
+    from dataclasses import replace
 
+    command = "---\ndescription: Cite.\n---\nUse notes:x.\n"
+    webdav.write("prompts/cite.md", command)
     knowledge_base = _knowledge_base(webdav, tmp_path)
     serving = serving_of(knowledge_base)
     text = (webdav.root / "skills/x/SKILL.md").read_text()
     pinned = contextvars.copy_context()
     view = pinned.run(serving.view)
     site = _skill_site(serving, view.key)
+    # The same build's command: its body cites x by its qualified name (D6).
+    cite = replace(
+        site, kind="command", path="prompts/cite.md", uri="prompts://notes/cite.md"
+    )
+    plugin = site.plugin
 
     webdav.write("skills/x/.draft.md", "draft\n")
     with ThreadPoolExecutor(1) as pool:
@@ -185,6 +190,16 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
     assert "first" in pinned.run(serving.rewrite, site, text)
     with pytest.raises(ValueError, match="hidden file"):
         contextvars.Context().run(serving.rewrite, site, text)
+
+    # The pinned build renders the command against its own generation's names,
+    # where x serves; the generation published since serves no x to name.
+    rendered = pinned.run(serving.rewrite, cite, command)
+    assert rendered.endswith("Use skill://notes/x/SKILL.md.\n")
+    assert contextvars.Context().run(serving.rewrite, cite, command) == command
+    prompt = pinned.run(
+        serving.read_command, rendered, "prompts/cite.md", "notes_cite", plugin
+    )
+    assert prompt.file.template == "Use skill://notes/x/SKILL.md.\n"
 
 
 def test_a_build_pinned_before_a_serve_that_raises_reads_its_own_generation(
@@ -247,72 +262,6 @@ def test_a_library_level_file_is_revalidated_too(webdav, tmp_path):
     webdav.write("docs/guide.md", "guidance, revised and lengthened upstream\n")
 
     assert "revised and lengthened" in read_served(knowledge_base, GUIDE)
-
-
-async def test_a_live_prompt_renders_the_edited_body(webdav, tmp_path):
-    """A prompt's body lives in memory, so live mode has to re-read it."""
-    webdav.write("prompts/p.md", PROMPT.format(body="the first body"))
-    knowledge_base = _knowledge_base(webdav, tmp_path)
-    provider = PromptProvider(lambda: knowledge_base.snapshot)
-
-    prompt = await provider.get_prompt("notes_p")
-    assert "the first body" in await prompt.render({})
-
-    webdav.write("prompts/p.md", PROMPT.format(body="the second body, much longer"))
-
-    prompt = await provider.get_prompt("notes_p")
-    assert "the second body" in await prompt.render({})
-
-
-async def test_a_live_prompt_saved_mid_edit_serves_the_last_good_body(
-    webdav, tmp_path, caplog
-):
-    """A frontmatter block that does not parse raises `yaml.YAMLError`, which
-    is not a `ValueError`: left out of the fallback, a file somebody is
-    halfway through saving turns `prompts/get` into an internal error instead
-    of serving the body last harvested, which is what live mode promises."""
-    webdav.write("prompts/p.md", PROMPT.format(body="the harvested body"))
-    knowledge_base = _knowledge_base(webdav, tmp_path)
-    provider = PromptProvider(lambda: knowledge_base.snapshot)
-
-    # An unquoted `[a] [b]` is two flow sequences in a row, which no YAML
-    # parser accepts -- the mistake `wiki/Prompts.md` warns about, and exactly
-    # what a half-typed hint looks like.
-    webdav.write(
-        "prompts/p.md",
-        "---\ndescription: A prompt.\nargument-hint: [a] [b]\n---\n\nthe edited body\n",
-    )
-
-    # `get_prompt` is what revalidates, so the invalid file is on disk by the
-    # time `render` re-reads it -- the shape the test above establishes.
-    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.catalogue.prompts"):
-        prompt = await provider.get_prompt("notes_p")
-        rendered = await prompt.render({})
-
-    assert "the harvested body" in rendered
-    assert "re-reading prompt" in caplog.text
-
-
-async def test_a_live_prompt_saved_too_deep_serves_the_last_good_body(
-    webdav, tmp_path, caplog, frontmatter_out_of_stack
-):
-    """Frontmatter nested past the parser's stack raises `RecursionError`,
-    which is neither of the above: it too falls back to the harvested body."""
-    webdav.write("prompts/p.md", PROMPT.format(body="the harvested body"))
-    knowledge_base = _knowledge_base(webdav, tmp_path)
-    provider = PromptProvider(lambda: knowledge_base.snapshot)
-
-    webdav.write(
-        "prompts/p.md",
-        f"---\ndescription: A prompt.\nx: {DEEP_YAML}\n---\n\nthe edited body\n",
-    )
-
-    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.catalogue.prompts"):
-        prompt = await provider.get_prompt("notes_p")
-        rendered = await prompt.render({})
-
-    assert "the harvested body" in rendered
-    assert "nested too deeply" in caplog.text
 
 
 # -- and what it does not ------------------------------------------------------

@@ -11,11 +11,11 @@ The readers below -- ``text``, ``names``, ``objects`` -- are why no dialect
 indexes or iterates a frontmatter value directly. Frontmatter is *fetched
 content*: a field is whatever YAML made of whatever somebody wrote, so
 ``arguments: true`` is a file that will be published one day, and a dialect
-that iterated it would raise ``TypeError`` out of ``load_prompts`` -- which
-catches ``ValueError`` -- and take the cold start down over one file in
-somebody else's repository. Every wrong type is refused as a ``ValueError``
-naming the field instead, so that file is skipped with a reason an operator
-can read in ``/health`` and every other prompt of the plugin still serves.
+that iterated it would raise whatever iterating it raises, with no reason an
+operator could act on. Every wrong type is refused as a ``ValueError`` naming
+the field instead, which kb's command reader returns as the file's reason, so
+that file is skipped with a reason an operator can read in ``/health`` and
+every other prompt of the plugin still serves.
 """
 
 from __future__ import annotations

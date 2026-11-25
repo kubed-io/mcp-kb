@@ -13,13 +13,9 @@ import logging
 import pytest
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.catalogue.prompts import (
-    dialect_of,
-    load_prompts,
-    parse_prompt,
-)
+from kubed.mcp_kb.catalogue.prompts import dialect_of, parse_prompt
 from kubed.mcp_kb.config import Config
-from tests.conftest import read_prompt
+from tests.conftest import read_prompt, server_of
 
 pytestmark = pytest.mark.unit
 
@@ -166,9 +162,9 @@ def test_an_instructions_file_is_not_a_prompt(tmp_path):
     path = write(
         tmp_path / "style.md", "description: d\napplyTo: '**/*.py'\n", "Type your code."
     )
-    skipped = []
-    assert load_prompts([path], library="lib", skipped=skipped) == []
-    assert skipped == [(path, "not a prompt: has `applyTo`")]
+    with pytest.raises(ValueError) as refused:
+        read_prompt(path)
+    assert str(refused.value) == "not a prompt: has `applyTo`"
 
 
 def test_an_instructions_file_carrying_a_prompts_key_is_still_not_a_prompt(tmp_path):
@@ -180,9 +176,9 @@ def test_an_instructions_file_carrying_a_prompts_key_is_still_not_a_prompt(tmp_p
         "description: d\ntools: [search]\napplyTo: '**/*.py'\n",
         "Always type your code.",
     )
-    skipped = []
-    assert load_prompts([path], library="lib", skipped=skipped) == []
-    assert skipped == [(path, "not a prompt: has `applyTo`")]
+    with pytest.raises(ValueError) as refused:
+        read_prompt(path)
+    assert str(refused.value) == "not a prompt: has `applyTo`"
 
 
 def test_a_dialect_nothing_here_reads_is_skipped_with_its_name(tmp_path):
@@ -190,9 +186,9 @@ def test_a_dialect_nothing_here_reads_is_skipped_with_its_name(tmp_path):
     file, the way any other unreadable prompt does -- not take the harvest
     down with a ``KeyError`` nothing catches."""
     path = write(tmp_path / "x.md", "description: d\n", "Text.")
-    skipped = []
-    assert load_prompts([path], library="lib", dialect="gemini", skipped=skipped) == []
-    assert skipped == [(path, "unknown dialect 'gemini'")]
+    with pytest.raises(ValueError) as refused:
+        read_prompt(path, dialect="gemini")
+    assert str(refused.value) == "unknown dialect 'gemini'"
 
 
 def test_a_description_and_a_body_are_this_servers_own_dialect(tmp_path):
@@ -473,9 +469,16 @@ def test_an_instructions_file_is_not_a_prompt_under_a_declared_dialect(tmp_path)
     path = write(
         tmp_path / "style.md", "description: d\napplyTo: '**/*.py'\n", "Type your code."
     )
-    skipped = []
-    assert load_prompts([path], library="lib", dialect="claude", skipped=skipped) == []
-    assert skipped == [(path, "not a prompt: has `applyTo`")]
+    with pytest.raises(ValueError) as refused:
+        read_prompt(path, dialect="claude")
+    assert str(refused.value) == "not a prompt: has `applyTo`"
+
+
+def _published(kb: KnowledgeBase) -> KnowledgeBase:
+    """``kb`` with its plugin set published: the plugin layer reads the prompts
+    through kb's reader, which is what ``snapshot.prompts`` then holds."""
+    server_of(kb)
+    return kb
 
 
 def _kb(tmp_path, rel, frontmatter, body):
@@ -484,11 +487,11 @@ def _kb(tmp_path, rel, frontmatter, body):
     write(root / rel, frontmatter, body)
     config = Config.model_validate(
         {
-            "plugins": [{"name": "src", "source": f"file://{root}", "skills": []}],
+            "plugins": [{"name": "src", "source": f"file://{root}"}],
             "libraries": [{"name": "lib", "plugins": ["src"]}],
         }
     )
-    return KnowledgeBase(config, tmp_path / "c")
+    return _published(KnowledgeBase(config, tmp_path / "c"))
 
 
 def test_an_instructions_file_in_a_commands_tree_is_not_published(tmp_path):
@@ -511,12 +514,12 @@ def _plugin(base, rel, frontmatter, body, **plugin):
     config = Config.model_validate(
         {
             "plugins": [
-                {"name": "src", "source": f"file://{root}", "skills": [], **plugin}
+                {"name": "src", "source": f"file://{root}", **plugin}
             ],
             "libraries": [{"name": "lib", "plugins": ["src"]}],
         }
     )
-    return KnowledgeBase(config, base / "c")
+    return _published(KnowledgeBase(config, base / "c"))
 
 
 def _manifested(base, rel, frontmatter, body, commands):
@@ -666,7 +669,6 @@ def _both(base, dialect, frontmatter):
                 {
                     "name": "src",
                     "source": f"file://{root}",
-                    "skills": [],
                     "prompts": ["*.md"],
                     "dialect": dialect,
                 }
@@ -674,7 +676,7 @@ def _both(base, dialect, frontmatter):
             "libraries": [{"name": "lib", "plugins": ["src"]}],
         }
     )
-    return KnowledgeBase(config, base / "c")
+    return _published(KnowledgeBase(config, base / "c"))
 
 
 @pytest.mark.parametrize(
@@ -687,10 +689,10 @@ def test_a_wrong_typed_field_skips_that_file_and_nothing_else(
 ):
     """Through a real server, because the half that matters is that it starts.
 
-    `load_prompts` catches `ValueError`, so a field refused as one is a
-    skipped row in `/health`; a `TypeError` out of the same field escapes
-    `build_plugin`, `_assemble` and `_cold_start` and the process dies over
-    one file in somebody else's repository."""
+    kb's command reader turns a malformed file into its reason, so a field
+    refused as one is a skipped row in `/health`; an exception it did not
+    catch would be the plugin layer's to turn into one, with no reason of
+    kb's in it."""
     kb = _both(tmp_path, dialect, frontmatter)
 
     (prompt,) = kb.snapshot.prompts

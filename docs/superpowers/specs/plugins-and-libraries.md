@@ -60,7 +60,7 @@ config refuses an empty item of any of the three, an absolute one, and one with 
 |---|---|---|
 | absent | the conventions, the manifest and the entry, merged per kind (PLG-17) | `skills/`, then the manifest's and the entry's folders (PLG-17) |
 | a list | exactly these patterns, replacing the conventions | these folders as well, after the manifest's and the entry's (LIB-33) |
-| `[]` | serve nothing of this kind | serve no skill, and no agent either (LIB-33) |
+| `[]` | serve nothing of this kind | serve no skill, and no agent or prompt either (LIB-33) |
 
 **PLG-10.** `files` has no convention. A plugin serves library files only when a `files` list
 names them.
@@ -122,8 +122,9 @@ plugin serves.
 | a skill | an earlier skill of the plugin has its address |
 | a library file | its name is `_index.md`, `_index.json` or `_files.md` |
 | a library file | its address is a served skill's, lies inside one, or contains one |
-| a prompt | the name its path builds is not a usable name (PLG-25) |
-| a prompt | an earlier prompt of the plugin has its name (PLG-25) |
+| a prompt | the name its path builds is not a usable name (PLG-25); the plugin layer's row |
+| a prompt | an earlier prompt of the plugin has its name (PLG-25); the plugin layer's row |
+| a prompt | kb's command reader cannot parse it (PRM-4) |
 | an agent | the name its folders and frontmatter `name` build is not a usable name (AGT-5) |
 
 **PLG-19.** A plugin **fails** when its fetch has no servable tree, its root is refused (PLG-8), its
@@ -287,7 +288,8 @@ later plugin **conflicts** with the claims when:
 - one of its skill URIs is, lies inside, or contains a claimed skill URI or library file URI;
 - one of its library file URIs (`skill://<library>/<path>`) is, lies inside, or contains a claimed
   library file URI or skill URI;
-- one of its prompt names is a claimed prompt name.
+- one of its prompt names is a claimed prompt name. That one is the plugin layer's refusal
+  (LIB-29), not kb's claim.
 
 **LIB-29.** A conflicting plugin serves nothing in that library. The earlier plugin keeps serving,
 and the library's `conflicts` in `/health` maps the later plugin's id to
@@ -295,8 +297,10 @@ and the library's `conflicts` in `/health` maps the later plugin's id to
 normally in every other library. A failed plugin (PLG-19) claims nothing. A plugin that kubed-mcp's
 plugin layer refuses to add (SKL-58), such as one whose namespace lies inside another plugin's
 skill, is reported the same way, as `conflict: <reason>`, the reason naming no cache path and no
-credential. Its skills and agents then read as absent in that library, and the library's `skills`
-and `agents` counts leave them out; its prompts and its library files still serve.
+credential. A prompt name a plugin earlier in the library serves is one such refusal:
+`conflict: prompt <name> is already served by plugin <owner>`. Its skills, agents and prompts then
+read as absent in that library, and the library's `skills`, `agents` and `prompts` counts leave
+them out; its library files still serve.
 
 ## Reading a plugin the way Claude Code does
 
@@ -346,9 +350,11 @@ named in a `commands` list. Files come in path order. A name built from a
 path, the folders and the stem together, MUST be a usable name: no whitespace, control or other
 invisible character, `/` or `@`. A file
 whose name is not, `commands/my db/x.md` or `prompts/a b.md`, is skipped with
-`prompt name <name> is not a usable name`, the name quoted escaped, and never claims the name. A
-later prompt of the plugin with an earlier one's name is skipped with
-`prompt <name> is already served by <path>`.
+`prompt name <name> is not a usable name`, the full name `<library>_<name>` quoted escaped, and
+never claims the name. A later prompt of the plugin with an earlier one's name is skipped with
+`prompt <name> is already served by <path>`, quoting the full name. kubed-mcp's plugin layer reads
+the files and claims the names: kb hands it its selection as the entry's `commands`, each file
+under a command directory through that directory and every other file as itself, in path order.
 
 **PLG-26.** A plugin's `notes` in `/health` lists what its manifest, its entry and its `.mcp.json`
 got wrong without failing it:
@@ -385,5 +391,5 @@ never connects to, starts or forwards a server.
 
 **LIB-33.** A declared plugin's own `skills:` folders **add** to `skills/` and to its manifest's
 folders, after them, as an entry's do. `skills: []` serves no skill: the plugin is never added to
-the plugin layer, so none of its agents is served either. Its own `prompts:` overrides its manifest
-and the conventions completely.
+the plugin layer, so none of its agents and none of its prompts is served either, and kb logs that
+once. Its own `prompts:` overrides its manifest and the conventions completely.
