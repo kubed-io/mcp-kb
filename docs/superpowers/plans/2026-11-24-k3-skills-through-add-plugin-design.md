@@ -3,7 +3,7 @@
 > **History.** Proposed for #79 (PR #89, into `issue-80`, epic #80). Not shipped. This is K3's
 > design of record, and [the plan](2026-11-24-k3-skills-through-add-plugin.md) implements it.
 > There was no draft spec on the branch. Its second round follows Dr K's rulings of 2026-11-24
-> (23:01) on PR #89. Those rulings replaced the first round's staged trees. The cluster
+> (23:01) on PR #89, and his answers of 2026-11-25. Those rulings replaced the first round's staged trees. The cluster
 > repository's `2026-11-23-kb-onto-the-plugin-layer-design.md` is where K3 started; it couldn't
 > be read from here.
 
@@ -47,8 +47,8 @@ kubed-mcp is read at tag `v0.2.0-rc.1`, and the two issues the rc2 carries at th
 list. It never depends on what serves or on what a request's scope admits. It is:
 
 1. the first of the library's plugins whose `name` is the library's name; else
-2. the library's marketplace's only entry, when its `marketplace.json` lists exactly one entry
-   (skipped ones count) and that entry's `source` is the marketplace root; else
+2. the library's marketplace's only entry, when its `marketplace.json` lists exactly one entry,
+   whatever that entry's path (skipped ones count, so a skip never moves an address); else
 3. none.
 
 The main plugin is added under namespace `<library>`, and every other plugin under
@@ -163,7 +163,7 @@ always agree. There is no gateway switch and no kb prefix rewriter.
 
 1. **The listing.** With `listed` at its default, `skills`, `resources/list` would gain a row per
    skill: 102 at QA, against today's index rows (SKL-14). K3 sets `config.delivery`'s `listed` to
-   none, so the listing stays kb's until the delivery sub-issue replaces `Kb-Listing`. With
+   none, so the listing stays kb's until #86 replaces `Kb-Listing`. With
    `header_prefix="Kb"`, a client's `Kb-Listed` or `X-MCP-Listed` would still override it, and no
    client sends either today.
 2. **The resource tools (DLV-7).** kb's mirror tools `list_resources` and `read_resource` clash
@@ -220,13 +220,16 @@ Everything else stays the same as the before-dump, under all ten scopes, with an
 - **[http-and-tools.md](../specs/http-and-tools.md):** the TOOL rows for `list_resources` and
   `read_resource` point at kubed-mcp's DLV-6, and their `?resources=` switch at DLV-2.
 
-## For Dr K
+## Settled by Dr K (2026-11-25)
 
-1. **Rule 2 of the main plugin.** Is "the library's own source when that source is a single
-   plugin" a marketplace whose only entry sits at its root (D1)? kb's library `source` is always
-   a marketplace.
-2. **D8.1.** Keep `resources/list` index-only by setting `config.delivery` `listed` to none until
-   the delivery sub-issue. This needs #21's config to accept an empty `listed`.
-3. **D8.2.** kubed-mcp's resource tools replace kb's in K3, because DLV-7 won't let both exist,
-   with N4 as a named change. The alternative is a quick-mcp knob that holds them back until the
-   delivery sub-issue.
+1. **Rule 2 of the main plugin** is a marketplace with exactly one entry, whatever its path,
+   counting skipped entries. On today's live sources, superpowers, n8n-skills, penpot-ai-kit and
+   svelte collapse onto their library, and grafana's seven entries nest. svelte's one entry
+   (`./plugins/claude/svelte`) is main by rule 2, and by rule 1 as well.
+2. **D8.1:** `listed` is none in `config.delivery` until #86, so K3 keeps the index-only
+   listing. Dr K is making sure quick-mcp#21 accepts an empty `listed`.
+3. **D8.2:** kubed-mcp's resource tools replace kb's in K3, with any change in their output as
+   N4. This is the epic's "the generic resources-off tools replace kb's mirror tools", one phase
+   early. There is no holding knob in quick-mcp.
+
+`plan approved` follows once `kubed-mcp==0.2.0rc2` is published.

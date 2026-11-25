@@ -22,7 +22,8 @@ kb's.
 pytest-asyncio, uvicorn, wsgidav.
 
 **Spec:** [the design](2026-11-24-k3-skills-through-add-plugin-design.md): D1–D10, the named
-changes N1–N4, and three questions for Dr K. Also #79's notes in `.issue/`, Dr K's rulings on
+changes N1–N4, and Dr K's answers of 2026-11-25 (main-plugin rule 2, `listed` none until #86,
+kubed-mcp's resource tools in K3). Also #79's notes in `.issue/`, Dr K's rulings on
 PR #89, quick-mcp#37 and #21, and the living spec in [skills.md](../specs/skills.md) and
 [plugins-and-libraries.md](../specs/plugins-and-libraries.md).
 
@@ -195,9 +196,9 @@ def served_tree(self, key: str) -> Path | None      # the serving record's root,
   - `test_a_plugin_named_like_its_library_is_main`: library `superpowers` with plugins
     `superpowers` and `tidy` has `main == "superpowers"`. Skill addresses are
     `superpowers/writing-plans` and `superpowers/tidy/natural-writing`.
-  - `test_a_lone_root_entry_is_main`: a marketplace whose only entry is `source: ./`, named `x`,
-    in library `n8n`, makes `x` main. A listed plugin `n8n-house` is
-    `n8n/n8n-house/<skill>`.
+  - `test_a_lone_entry_is_main_whatever_its_path`: in library `n8n`, a marketplace whose only
+    entry is named `x` makes `x` main, whether its `source` is `./` or `./plugins/claude/x`. A
+    listed plugin `n8n-house` is `n8n/n8n-house/<skill>`.
   - `test_several_entries_have_no_main`: grafana's seven entries give `main is None`, with
     addresses `grafana/grafana-lgtm/loki` as today.
   - `test_a_skipped_entry_still_counts`: a marketplace with one root entry and one `source:
