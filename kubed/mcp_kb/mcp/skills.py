@@ -31,9 +31,20 @@ once, and a skill only kubed-mcp found is failed in the rewriter, so it is not
 served either: kb never vetted it (N13). A plugin kubed-mcp refuses is a
 conflict in its library, as LIB-28's are.
 
-The rewriter and ``agent_meta`` read the snapshot being published, held here
-and set before ``serve()``: a build made between ``serve()`` and the swap in
-``KnowledgeBase`` must already see the generation it is a build of.
+The rewriter reads the published state its request's view pinned, so a build
+of one set never reads the next one's, whether a re-read, a refresh or a
+``serve()`` that raises swaps it meanwhile; a build no view pinned reads the
+state published now. ``agent_meta`` reads the generation entering the set. The
+published state is set before ``serve()``: a build made between ``serve()`` and
+the swap in ``KnowledgeBase`` must already see the generation it is a build of.
+One window is left. kb swaps its state before ``serve()`` and kubed-mcp swaps
+its own inside it, so a request that reads kubed-mcp's state before kubed-mcp
+swaps it and kb's after kb swaps it pins N and N+1, and builds N against N+1.
+That includes a publish on a worker thread that makes both swaps between
+kubed-mcp pinning its state and the view reading kb's. If that
+``serve()`` then raises, kubed-mcp keeps the build until the next publish that
+serves. Either order of the swaps leaves such a window. Closing it needs
+kubed-mcp to hand the pinned generation to the view and on ``Site``.
 
 **A live plugin is re-read on view (D9).** What a live plugin's skill and agent
 files held on disk is stamped as it enters the set. The view revalidates the
@@ -51,6 +62,7 @@ import os
 import re
 import threading
 from collections.abc import Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -153,6 +165,16 @@ def holds_hidden(folder: Path) -> bool:
         if any(name.startswith(".") for name in (*dirnames, *filenames)):
             return True
     return False
+
+
+# The published state of the set the current request's build belongs to, and
+# the ``SkillServing`` whose ``view()`` set it. It rests on one invariant: every
+# rewrite kubed-mcp makes follows a view in the same context, in ``_pin``, so a
+# pin left set after a build is never read by another build. kubed-mcp running a
+# build in a task copied before the view, or a rewriter on read, would break it.
+_PINNED: ContextVar[tuple[SkillServing, _Published] | None] = ContextVar(
+    "kb_pinned_published", default=None
+)
 
 
 def entry_for(plugin: Plugin) -> dict[str, object]:
@@ -585,13 +607,17 @@ class SkillServing:
         """The plugins the request's scope admits, which is also the build key.
 
         The live ones among them are revalidated first, and re-read when they
-        moved (D9).
+        moved (D9). The request builds against the state taken before that
+        re-read, and pins it for the rewriter; the next request reads the
+        re-read (N6).
         """
         scope = requested_scope()
+        published = self._published
         self._reread_live(scope)
-        table = self._published.table
+        table = published.table
         admitted = frozenset(key for key, row in table.items() if row.admitted(scope))
         key = admitted or EMPTY
+        _PINNED.set((self, published))
 
         def admits(plugin: Served) -> bool:
             return (plugin.namespace, plugin.address) in key
@@ -656,8 +682,12 @@ class SkillServing:
     def rewrite(self, site: Site, text: str) -> str:
         """kb's rewriting: a root ``SKILL.md`` and an agent's body rendered, and
         every text file of a skill with LF line endings (SKL-22); anything else
-        as written."""
-        published = self._published
+        as written. Against the state its request's view pinned, else the
+        current one."""
+        pinned = _PINNED.get()
+        published = (
+            pinned[1] if pinned is not None and pinned[0] is self else self._published
+        )
         row = published.table.get((site.namespace, site.plugin.address))
         if row is None:
             return text
