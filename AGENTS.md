@@ -60,7 +60,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `harvest.py` | what counts as a skill (`skill_dirs`, the folders Claude Code and kubed-mcp read), a prompt or a library file, and a plugin's globs for the last two |
 | ⤷ `skills.py` | the domain — `Skill`, `SkillIndex`, and the scoping rules. Imports no FastMCP |
 | ⤷ `uris.py` | the `skill://` address space — `Catalogue`, the grammar |
-| ⤷ `agents.py` | a plugin's agent file, parsed — `parse_agent`, `routing_hint`, `Agent`, `AgentRoster`. Imports no FastMCP |
+| ⤷ `agents.py` | `ServedAgent`, what the plugin layer serves of one agent file; and `parse_agent`, `routing_hint` and `Agent`, kb's own reading of one for its `_meta` key. Imports no FastMCP |
 | ⤷ `prompts/` | `FilePrompt`, `parse_prompt` (from text, never from disk), `dialect_of`, the dialect seam, rendering — no FastMCP |
 | ⤷⤷ `detect.py` | which dialect a file is, strongest signal first |
 | ⤷⤷ `mcpkb.py`, `claude.py`, `copilot.py` | one module per dialect: `parse` into `Parsed`, `substitute` back out |

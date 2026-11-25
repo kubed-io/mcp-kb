@@ -160,7 +160,7 @@ def _serving(snapshot: Snapshot, scope: Scope) -> bool:
         return True
     if snapshot.visible_prompts(scope):
         return True
-    return bool(served.agents.visible(scope))
+    return bool(snapshot.visible_agents(scope))
 
 
 class RefuseEmptyScope(Middleware):

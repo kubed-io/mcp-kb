@@ -1,29 +1,31 @@
-"""A Claude Code subagent file, read for what the agents extension serves.
+"""A Claude Code subagent file: kb's reading of one, and what is served of it.
 
 An agent is a markdown file: YAML frontmatter naming it and saying when to use
-it, then the system prompt as the body. This module is the pure reading of one
--- no FastMCP, no catalogue -- so the harvest can record it and a later layer
-can serve it. A file that is wrong in its *content* gives back the reason it is
-skipped (AGT-6) rather than raising; only an unreadable file raises ``OSError``,
-and the harvest skips it with a fixed reason, so it never fails the plugin.
+it, then the system prompt as the body. kubed-mcp's plugin layer is the one
+reader that decides whether an agent serves and under which name (AGT-6,
+AGT-8): kb's harvest records each agent file's path and nothing else.
+``parse_agent`` is kb's own reading of one file, for the ``_meta`` key kb adds
+to an agent the layer serves (AGT-9). A file that is wrong in its *content*
+gives back a reason rather than raising; only an unreadable file raises
+``OSError``.
 
-``Agent`` and ``AgentRoster`` are what a snapshot serves of them: one agent
-under the name its library gave it (AGT-8), and every one of them, admitted by
-a ``Scope`` exactly as a skill or a prompt of the same plugin is (AGT-15).
+``ServedAgent`` is what the plugin layer serves of one agent file, as kb
+records it: its name and file as the layer reports them, admitted by a
+``Scope`` exactly as a skill or a prompt of the same plugin is (AGT-15). No
+FastMCP here.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import frontmatter
 import yaml
 
-from ..mcp.scope import EVERYTHING, Scope
+from ..mcp.scope import Scope
 from .harvest import usable_name
 
 # Model families (AGT-9): the first one named in a value, by position, wins.
@@ -116,13 +118,12 @@ def routing_hint(model: str | None) -> dict | None:
 
 @dataclass(frozen=True)
 class Agent:
-    """One served agent: the name its library gave it, and what it was parsed as.
+    """One agent file as kb read it, for the ``_meta`` key kb adds to it (AGT-9).
 
     ``plugin``, ``category``, ``tags`` and ``library_categories`` are its
-    plugin's, in its library: what a scope admits it on. ``path`` is the file,
-    under ``root``, its plugin root. ``parsed`` is the copy read when the
-    snapshot was built; a ``live`` agent is read again on every definition and
-    falls back to it (AGT-16).
+    plugin's, in its library. ``path`` is the file, under ``root``, its plugin
+    root, and ``parsed`` what it read as when its plugin entered the set; a
+    ``live`` plugin kept unread answers with that read.
     """
 
     name: str
@@ -146,30 +147,29 @@ class Agent:
         )
 
 
-class AgentRoster:
-    """Every agent a snapshot serves, by name, and who may see each.
+@dataclass(frozen=True)
+class ServedAgent:
+    """One agent the plugin layer serves: the name and the file it reports.
 
-    Names are unique across the roster: one is unique within its library
-    (AGT-8), and every name starts with its library's. Built once and never
-    edited, as the snapshot holding it is not.
+    ``name`` is the layer's (``AgentFile.name``), a rename included, and
+    ``path`` its file, relative to the plugin root (``AgentFile.path``).
+    ``plugin`` is kb's plugin id, and ``category``, ``tags`` and
+    ``library_categories`` are that plugin's, in ``library``: what a scope
+    admits it on.
     """
 
-    def __init__(self, agents: Sequence[Agent] = ()):
-        self._agents = tuple(sorted(agents, key=lambda a: a.name))
-        self._by_name: dict[str, Agent] = {}
-        for agent in self._agents:
-            self._by_name.setdefault(agent.name, agent)
+    name: str
+    library: str
+    plugin: str
+    path: str
+    category: str | None
+    tags: frozenset[str]
+    library_categories: frozenset[str] = frozenset()
 
-    def __len__(self) -> int:
-        return len(self._agents)
-
-    def visible(self, scope: Scope = EVERYTHING) -> list[Agent]:
-        """The agents ``scope`` admits, in name order (AGT-7)."""
-        return [a for a in self._agents if a.admitted(scope)]
-
-    def get(self, name: str, scope: Scope = EVERYTHING) -> Agent | None:
-        """One agent by name, or None when it is absent or out of scope alike."""
-        found = self._by_name.get(name)
-        if found is None or not found.admitted(scope):
-            return None
-        return found
+    def admitted(self, scope: Scope) -> bool:
+        return scope.admits(
+            self.library,
+            self.category,
+            self.tags,
+            library_categories=self.library_categories,
+        )

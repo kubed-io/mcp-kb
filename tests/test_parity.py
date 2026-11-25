@@ -529,8 +529,9 @@ def test_a_listed_agent_is_a_path_not_a_glob(tmp_path):
     _manifest(root, name="kit", agents=["./agents/[draft].md", "./agents/*.md"])
 
     knowledge_base = _declared(tmp_path, root)
+    server_of(knowledge_base)
 
-    cards = knowledge_base.catalogue.agents.visible()
+    cards = knowledge_base.snapshot.agents
     assert [card.name for card in cards] == ["kit_draft"]
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [
         "agents entry 'agents/*.md' is not in the plugin"
@@ -548,8 +549,9 @@ def test_a_listed_agent_in_a_dot_folder_is_served_and_one_outside_is_not(tmp_pat
     _manifest(root, name="kit", agents=["./.private/wip.md", "./agents/out.md"])
 
     knowledge_base = _declared(tmp_path, root)
+    server_of(knowledge_base)
 
-    cards = knowledge_base.catalogue.agents.visible()
+    cards = knowledge_base.snapshot.agents
     assert [card.name for card in cards] == ["kit_wip"]
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [
         "agents entry 'agents/out.md' is not in the plugin"
@@ -570,7 +572,7 @@ async def test_a_listed_agent_linked_out_of_the_root_is_not_served(tmp_path):
         listing = await ext_request(client, "agents/list")
 
     assert [agent["name"] for agent in listing["agents"]] == ["kit_in"]
-    assert len(knowledge_base.snapshot.catalogue.agents) == 1
+    assert len(knowledge_base.snapshot.agents) == 1
 
 
 def test_kb_reads_no_agent_file_linked_out_of_the_root(tmp_path):
@@ -777,7 +779,8 @@ def test_a_component_glob_python_refuses_matches_nothing(
     assert knowledge_base.status["plugins"]["kit"]["status"] == "ok"
     assert "a" in _served(knowledge_base)
     if key == "agents":
-        cards = knowledge_base.catalogue.agents.visible()
+        server_of(knowledge_base)
+        cards = knowledge_base.snapshot.agents
         assert [card.name for card in cards] == ["kit_good"]
     if key == "commands":
         assert _names(knowledge_base) == ["kit_ok"]

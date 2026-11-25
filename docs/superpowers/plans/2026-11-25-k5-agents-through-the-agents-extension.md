@@ -356,7 +356,7 @@ git commit -m "K5: check kubed-mcp's agent hook, files and reasons under the pin
   - `Catalogue.agent_meta(self, library: str, plugin: str, path: str, frontmatter: Mapping[str, object], servers: Sequence[str]) -> dict`.
     Its `skills` is `own.preload(frontmatter.get("skills"))`, as now.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `tests/test_agents.py`, over `agents_tree` and `server_of`:
 
@@ -414,13 +414,13 @@ Migrate the rest of `tests/test_agents.py`:
 `tests/test_index.py::test_a_record_with_agents_round_trips` round-trips the paths.
 `tests/test_parity.py:533,552,573` and `tests/test_plugin_serving.py:634` read `snapshot.agents`.
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `pytest tests/test_agents.py -v`
 Expected: the new tests fail. `PluginRecord.agents` holds `AgentRow`s, and the skip reasons are
 kb's.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `build_plugin`:
   `agents=tuple(_relative(path, root) for path, _ in harvest.agent_files(root, globs))` inside
@@ -446,7 +446,7 @@ kb's.
 - `grep -rn "AgentRow\|AgentRoster\|_AgentNames\|_read_agents\|agent_path\|catalogue\.agents" kubed tests`
   returns nothing.
 
-- [ ] **Step 4: Update the spec and AGENTS.md**
+- [x] **Step 4: Update the spec and AGENTS.md**
 
 - AGT-6:
   - the plugin layer reads each agent file as its plugin is added, and is the only reader;
@@ -463,13 +463,13 @@ kb's.
 - AGENTS.md's layout row for `catalogue/agents.py`: `ServedAgent`, what the plugin layer serves of
   one agent file. Imports no FastMCP.
 
-- [ ] **Step 5: Run the checks**
+- [x] **Step 5: Run the checks**
 
 Run: `ruff check .` then
 `pytest tests/test_agents.py tests/test_agents_extension.py tests/test_index.py tests/test_parity.py tests/test_plugin_serving.py tests/test_live.py -v`
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A kubed/mcp_kb tests docs/superpowers/specs AGENTS.md

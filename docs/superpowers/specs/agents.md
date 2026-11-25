@@ -51,19 +51,34 @@ usable name, as the frontmatter `name` is (AGT-6). A file whose name is not, `ag
 skipped with `agent name <name> is not a usable name`, the name quoted escaped, and never claims
 the name.
 
-**AGT-6.** An agent file is YAML frontmatter and a Markdown body. Its frontmatter MUST parse into
-a non-empty mapping with string keys, convert to JSON, and carry `name` and `description` as
-non-empty strings. The `name` MUST be a usable name, as a name PLG-25 builds is: no
-whitespace, control or other invisible character, `/` or `@`, so no file can take the
-`<name>@<plugin name>` a rename gives (AGT-8); one that is not is skipped with
-`agent frontmatter name is not a usable name`. A file that breaks any of these, that cannot be read, or that is not UTF-8 is
-skipped and listed with its reason under its plugin's `skipped` in `/health`; it never fails the
-plugin. The plugin layer reads each file again as its plugin is added, and differs in three ways.
-A file whose frontmatter has no `name` is served under its file's stem, though `/health` still
-lists it under `skipped` with `agent frontmatter has no name`. A `description` of whitespace alone,
-a `:` in a name, or frontmatter that is not representable as JSON is not served, and the server
-logs it once. Two files of one plugin that take the same name (AGT-7): the first in path order is served
-and the rest are skipped, each with `agent <name> is already served by <path>`.
+**AGT-6.** An agent file is YAML frontmatter and a Markdown body. The plugin layer reads each
+agent file as its plugin is added, and is the only reader that decides whether it serves: kb's
+harvest records where each file is (AGT-5) and reads none. The frontmatter MUST parse into a
+non-empty mapping that converts to JSON, and carry `name` and `description` as non-empty strings,
+the `description` not whitespace alone. A file whose frontmatter has no `name` is served under its
+file's stem, and is not listed as skipped. The name an agent is served under MUST be a usable name:
+no whitespace, control or other invisible character, `/`, `@` or `:`, so no file can take the
+`<name>@<plugin name>` a rename gives (AGT-8). Two files of one plugin that take the same name
+(AGT-7): the first in path order is served and the rest are skipped. A file the plugin layer refuses
+is listed under its plugin's `skipped` in `/health`, with the layer's reason, and never fails the
+plugin:
+
+| The file | Its reason |
+|---|---|
+| No frontmatter, or frontmatter that is not YAML | `no YAML frontmatter` |
+| Frontmatter that is not a non-empty mapping | `its frontmatter is not a non-empty mapping` |
+| Frontmatter with no JSON form: a date, `.nan`, a key that is not a string | `its frontmatter is not representable as JSON` |
+| A `name` that is not a non-empty string | `its name must be a non-empty string` |
+| No `description`, or one that is blank | `its description must be a non-empty string` |
+| A name that is not usable | `agent name '<name>' is not a usable name`, the served name, library prefix and folders included, quoted escaped |
+| A later file of one plugin taking a name already taken in it | `agent <name> is already served by <path>`, the served name and the first file's path |
+| A file that is not UTF-8 | The decode error, as `'utf-8' codec can't decode byte 0xe9 in position 11: invalid continuation byte`, which names no path |
+
+kb then reads each file the layer serves for its own `_meta` key (AGT-9). A file kb cannot read is
+skipped with `agent_meta failed: kb cannot read agent file <path>`. An agent file the plugin layer
+finds that kb's harvest did not is not served either, and is not listed under `skipped`: kb logs
+`agent file <path> of plugin <id> is not served: kb's harvest did not find it` once, and the plugin
+layer logs its own refusal each time the plugin is added.
 
 ## The roster: `agents/list`
 
@@ -92,9 +107,9 @@ library's, so only one library's agents meet, and each served agent claims its n
 - When `<name>@<plugin name>` is taken too, that agent alone is not served in that library, and
   the library's `unserved` in `/health` lists it with its plugin, path and reason.
 - A plugin that LIB-28 fails in a library serves no agents there either.
-- An agent whose recorded file no longer parses when a snapshot is built, as on a cold start from
-  `index.json`, serves nothing and is listed under its plugin's `skipped`. It claims no name, so a
-  later plugin's agent of that name is served under the name itself.
+- An agent whose file does not read when its plugin is added serves nothing, is listed under its
+  plugin's `skipped` (AGT-6), and claims no name, so a later plugin's agent of that name is served
+  under the name itself.
 
 The names are decided in library order alone, as Claude Code decides which agent loads first. kb
 stores no owner anywhere: the promise is that **a plugin added after a library's existing plugins
@@ -179,7 +194,12 @@ are not tags and narrow nothing. A scope reaching only agents is served, not ref
 **AGT-14.** `/health` reports:
 
 - `agents` at the top level: the agents currently served, across libraries;
-- `agents` for each plugin (what it yields, library-independent) and each library (what it serves);
-- each skipped agent file under its plugin's `skipped`, with its reason (AGT-5, AGT-6, AGT-8), and each
-  dropped or missing `agents` entry under its `notes` (AGT-5);
-- a library's `renamed` and `unserved` (AGT-8), each present only when not empty.
+- `agents` for each plugin and each library: what the plugin layer reports serving for each plugin
+  added, its agent files (PLUG-74). A plugin's count is library-independent, from the first library
+  that serves it, and a plugin no library serves counts the agent files found (AGT-5);
+- each agent file found that the plugin layer skipped (its plugin's skipped files, PLUG-74) under
+  its plugin's `skipped`, with the layer's reason (AGT-6), and each dropped or missing `agents`
+  entry under its `notes` (AGT-5);
+- a library's `renamed` and `unserved` (AGT-8), as the plugin layer reports them, each present
+  only when not empty. An agent whose rename is taken too is the library's `unserved`, and not its
+  plugin's `skipped`.
