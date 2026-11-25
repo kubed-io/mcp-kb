@@ -4,6 +4,13 @@
 > notes are the spec. Dr K's rulings of 2026-11-24 and 2026-11-25 (rulings 41 to 43) apply: no
 > gateway switch at QA, `Kb-Resource-Prefix` stays and kubed-mcp reads it, and kb deletes the
 > prefix code K3 left behind. The design is below; there is no separate design file.
+> Approved as written by Dr K on 2026-11-25 (11:25 UTC):
+> - G1 is a named change, and no dot-resolving middleware is kept.
+> - G2 and G3 are accepted.
+> - Both corrections to the notes stand.
+> - The PR takes `no changelog`.
+> - quick-mcp#46 asks GW-4 to resolve dots on all three methods and for a public `unprefixed()`.
+>   A later pin bump that carries it undoes G1, and D2's own strip moves onto `unprefixed()`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -70,11 +77,13 @@ and [http-and-tools.md](../specs/http-and-tools.md).
   kb's `Catalogue` still resolves dot segments itself, in `uris.parse`, for every read, hint and
   directory it answers. So kb's own directories (a library, a folder) still resolve
   `resources/directory/read` dots by kb's rule. A skill's directories are kubed-mcp's, matched
-  exactly, and a dotted one no longer resolves (G1).
+  exactly, and a dotted one no longer resolves (G1). Dr K ruled against keeping a
+  dot-resolving middleware for `directory/read`, because it would be a second address layer.
+  quick-mcp#46 asks GW-4 to resolve dots on every method.
 - **D2. The hint takes the prefix off itself.** `NameTheFileToRead` stays outermost (AGENTS.md:
   inside, the hint came out `kb+kb+`). It takes `prefix()` off the URI as sent when the URI starts
   with `<prefix>skill://`. This is the one place kb takes a prefix off, because GW-4's `_plain` is
-  private. It then resolves the address with a new pure `uris.resolved(uri)`. A wrong-prefix
+  private in rc2; quick-mcp#46 asks for a public `unprefixed()` to replace it. It then resolves the address with a new pure `uris.resolved(uri)`. A wrong-prefix
   address, and a prefixed one on a request with no prefix, stay as sent, parse as nothing, and get
   no hint.
 - **D3. Every kb writer calls `prefixed(text, prefix())`.** These are `CatalogueProvider` (listing
@@ -104,7 +113,7 @@ and [http-and-tools.md](../specs/http-and-tools.md).
   does in a skill's files. It shows only where upstream text holds one.
 
 Nothing changes for an operator. The gateway routes keep sending `Kb-Resource-Prefix: kb+`.
-Recommended label: `no changelog`.
+The PR takes the `no changelog` label (Dr K).
 
 ## Global Constraints
 
