@@ -302,8 +302,9 @@ def test_an_agent_only_the_layer_finds_is_not_served(tmp_path, monkeypatch, capl
     assert read_served(kb, "skill://kit/draw/SKILL.md")
     # Not a path kb found, so not one of the plugin's rows (D3).
     assert _rows(kb, "kit", "agents/a.md") == []
-    # The layer logs its own refusal on every add; kb notes it once (A5).
-    assert caplog.text.count("agent file agents/a.md is not one kb found") >= 1
+    # kb notes it once (A5); the layer's own refusal line is kept out (D6).
+    assert "agent file agents/a.md is not one kb found" not in caplog.text
+    assert "agent_meta failed" not in caplog.text
     kbs = [
         r.getMessage() for r in caplog.records if r.name == "kubed.mcp_kb.mcp.skills"
     ]
@@ -433,9 +434,12 @@ def test_one_bad_agent_file_skips_itself_and_not_the_plugin(tmp_path):
     assert status["agents"] == 1
 
 
-def test_an_unreadable_agent_file_is_skipped_without_its_error(tmp_path, monkeypatch):
+def test_an_unreadable_agent_file_is_skipped_without_its_error(
+    tmp_path, monkeypatch, caplog
+):
     """A file kb cannot read for its ``_meta`` key is refused in ``agent_meta``
-    (PLUG-73): skipped with kb's reason, which quotes no errno and no path."""
+    (PLUG-73): skipped with kb's reason, which quotes no errno and no path,
+    and logged once, by kb (D6)."""
     real = Path.read_text
 
     def read_text(self, *args, **kwargs):
@@ -447,9 +451,13 @@ def test_an_unreadable_agent_file_is_skipped_without_its_error(tmp_path, monkeyp
     _write(root, "agents/bad.md", _agent("bad"))
     monkeypatch.setattr(Path, "read_text", read_text)
 
-    knowledge_base = _kit(tmp_path)
+    with caplog.at_level(logging.WARNING):
+        knowledge_base = _kit(tmp_path)
+        assert sorted(_served(knowledge_base)) == ["kit_good"]
 
-    assert sorted(_served(knowledge_base)) == ["kit_good"]
+    reason = "agent_meta failed: kb cannot read agent file agents/bad.md"
+    lines = [r.getMessage() for r in caplog.records if "bad" in r.getMessage()]
+    assert lines == [f"plugin kit skips 'agents/bad.md': {reason}"]
     status = knowledge_base.status["plugins"]["kit"]
     assert status["status"] == "ok"
     assert status["skipped"] == [
@@ -724,6 +732,8 @@ def test_a_prepended_plugin_takes_the_short_name(tmp_path):
 
 
 def test_a_conflicting_plugin_serves_no_agents(tmp_path):
+    """I4: the plugin layer refuses `copy` (LIB-29), so it serves no agent and
+    counts none, where AGT-14's fallback counted the agent file it found."""
     tree = agents_tree(tmp_path)
     # A skill of `copy` sits in its own folder (SKL-59), so what it collides on
     # is a prompt name an earlier plugin of the library already serves.
@@ -745,7 +755,7 @@ def test_a_conflicting_plugin_serves_no_agents(tmp_path):
     assert "copy@drawio" in library["conflicts"]
     assert "drawio_clone" not in _names(knowledge_base, "drawio")
     assert library["agents"] == 4
-    assert knowledge_base.status["plugins"]["copy@drawio"]["agents"] == 1
+    assert knowledge_base.status["plugins"]["copy@drawio"]["agents"] == 0
 
 
 def test_counts(tmp_path):

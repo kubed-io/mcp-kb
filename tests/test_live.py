@@ -296,6 +296,27 @@ def test_an_edit_upstream_fastmcp_refuses_unlists_the_skill(webdav, tmp_path):
     assert knowledge_base.generation == 0, "the read did it, not a refresh"
 
 
+def test_a_skill_a_live_edit_breaks_is_logged_once(webdav, tmp_path, caplog):
+    """K6 D5: a skill a live re-read newly skips is a ``skipped`` row, and the
+    re-read logs it once, by kb, as a refresh would; a refresh after it does
+    not say it again. Read twice (N6)."""
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+    assert "first" in read_served(knowledge_base, URI)
+    reason = "description must contain 1-1024 characters"
+
+    with caplog.at_level(logging.WARNING):
+        webdav.write("skills/x/SKILL.md", "---\nname: x\ndescription: ''\n---\nBody.\n")
+        assert "first" in read_served(knowledge_base, URI), "N6: the re-adding read"
+        assert read_served(knowledge_base, URI) is None
+        knowledge_base.refresh(force=True)
+
+    assert knowledge_base.generation == 1
+    rows = knowledge_base.status["plugins"]["notes"]["skipped"]
+    assert {"path": "skills/x", "reason": reason} in rows
+    lines = [r.getMessage() for r in caplog.records if "skills/x" in r.getMessage()]
+    assert lines == [f"plugin notes skips 'skills/x': {reason}"]
+
+
 def test_a_library_level_file_is_revalidated_too(webdav, tmp_path):
     """A skill's instructions are not the only thing a live source serves."""
     knowledge_base = _knowledge_base(webdav, tmp_path)

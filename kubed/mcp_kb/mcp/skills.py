@@ -39,11 +39,20 @@ index, hint, listing or rewritten name points at a skill that does not read.
 Anything either side has alone is logged once, and a skill only kubed-mcp found
 is failed in the rewriter, so it is not served either: kb never vetted it
 (N13); an agent file only kubed-mcp found is refused in ``agent_meta`` alike
-(D4). The agents served are each added plugin's ``agent_files``, and
-``/health`` reads them and the plugin's ``skipped`` (AGT-14). A plugin
+(D4). The agents served are each added plugin's ``agent_files``. A plugin
 kubed-mcp refuses is a conflict in its library, as LIB-28's are. kb's prompts
 are what the reader read as the set was staged, kept to the names kubed-mcp
 serves (D5).
+
+``/health`` reads what the layer serves (K6). Each ``ok`` plugin's skills,
+prompts and agents are counted from the first library that adds it, and are 0
+when none does: refused, failed in every library, or ``skills: []``. Its
+``skipped`` is kb's own rows, then the layer's for each skill folder, selected
+prompt file and agent file kb found and the layer did not serve, one row per
+path with the first reason. ``log_changes`` logs each row once, so the parity
+guard does not say a skill whose folder has one, and ``QuietSelection`` keeps
+the layer's own line for it out of the log; a skill folder or agent file the
+layer skips that kb never found is said once in its place (``_unlisted``).
 
 The rewriter and the reader read the published state its request's view
 pinned, so a build of one set never reads the next one's, whether a re-read, a
@@ -103,6 +112,7 @@ from ..catalogue.snapshot import (
     Library,
     PluginCommands,
     Snapshot,
+    log_changes,
     namespace_for,
     unrooted,
 )
@@ -127,8 +137,28 @@ EMPTY: frozenset[tuple[str, str]] = frozenset()
 NOT_SELECTED = "not one of the plugin's prompt files"
 RENAMED = "named {name} by the plugin layer and {expected} by kb"
 # The plugin layer's line for a skipped command file, which ``QuietSelection``
-# keeps out of the log for ``NOT_SELECTED``.
+# keeps out of the log: for ``NOT_SELECTED`` a file kb left out (P8), and for any
+# other reason one kb lists in the plugin's ``skipped`` and logs itself (D6).
 _SKIP_LINE = "prompt %s is skipped: %s"
+# The plugin layer's lines for every other skip kb lists and logs itself, or
+# says once (D6), by logger: each a template with the number of args it takes,
+# matched as written, never by the formatted text, which quotes a cache path. A
+# skills folder's nested ``SKILL.md`` (a note kb does not read) is not here.
+_QUIET: Mapping[str, Mapping[str, int]] = {
+    "kubed.mcp.plugins": {
+        _SKIP_LINE: 2,
+        "agent file %s is skipped: %s": 2,
+        "plugin %s: agent file %s is skipped: %s": 3,
+        "%s is already served by %s; %s is skipped": 3,
+        "plugin %s: %s is skipped, served already": 2,
+        # An agent kb's ``agent_meta`` refused: a row of its plugin's for a file
+        # kb found, else ``_agents_of``'s note (D4).
+        "plugin %s: agent_meta failed on agent %s, so it is not served: %s": 3,
+    },
+    "kubed.mcp.skills": {
+        "skill at %s is not a valid Agent Skill, so it is not served: %s": 2,
+    },
+}
 
 _ENTRY = f"/{MAIN_FILE}"
 # kubed-mcp's reason for an agent whose rename is taken (PLUG-64).
@@ -271,31 +301,44 @@ def entry_for(
 
 
 class QuietSelection(logging.Filter):
-    """Keeps the plugin layer's line for a file kb left out of the log (P8).
+    """Keeps the plugin layer's line for a skip kb reports out of the log (P8, D6).
 
     A command folder kb hands the layer can hold files kb's selection leaves out
     on purpose, and the layer logs each one it skips at WARNING on every read,
-    which buries the warnings worth reading. This drops exactly that line, for
-    ``NOT_SELECTED``; the skip is still in the plugin's ``skipped``.
+    which buries the warnings worth reading (P8). Every other skill folder,
+    command file and agent file the layer skips is a row of its plugin's
+    ``skipped``, which ``log_changes`` logs once, its path written with ``%r``
+    and no cache path in it, or else a line kb says once (``_unlisted``). So
+    this drops the layer's own line for each of those skips (``_QUIET``),
+    matched on its template and the number of its args, and each such skip
+    logs one line, kb's. The skip is still in the layer's own record.
+
+    Two kinds of skip are now said by nobody. A file kb did not select that the
+    layer skips before kb's reader sees it -- at an index's name, with an
+    unusable name, or unreadable -- is left out on purpose, as ``NOT_SELECTED``
+    is (P8). And a plugin the layer refuses in every library (LIB-29) has no
+    served plugin to take rows from, so the skips it met before the refusal
+    are not said; its library's conflict line says it serves nothing.
     """
 
-    LOGGER = "kubed.mcp.plugins"
+    LOGGERS = tuple(_QUIET)
 
     def filter(self, record: logging.LogRecord) -> bool:
-        args = record.args
+        msg, args = record.msg, record.args
+        if not isinstance(msg, str):
+            return True
+        arity = _QUIET.get(record.name, {}).get(msg)
         return not (
-            record.msg == _SKIP_LINE
-            and isinstance(args, tuple)
-            and bool(args)
-            and args[-1] == NOT_SELECTED
+            arity is not None and isinstance(args, tuple) and len(args) == arity
         )
 
     @classmethod
     def install(cls) -> None:
-        """Add the filter to the plugin layer's logger, once per process."""
-        logger = logging.getLogger(cls.LOGGER)
-        if not any(isinstance(f, cls) for f in logger.filters):
-            logger.addFilter(cls())
+        """Add the filter to each of the plugin layer's loggers, once per process."""
+        for name in cls.LOGGERS:
+            logger = logging.getLogger(name)
+            if not any(isinstance(f, cls) for f in logger.filters):
+                logger.addFilter(cls())
 
 
 HIDDEN = "skill {} holds a hidden file, which kubed-mcp would serve; not served"
@@ -499,7 +542,7 @@ class SkillServing:
                 # refresh moved the fetch under this re-read, and publishes it.
                 raise _Abandoned
         published, served_hidden = self._narrowed(
-            snapshot, added, refused, skills, noted, prompts, hidden
+            snapshot, added, refused, skills, noted, prompts, hidden, found
         )
         # Before serve(): a build of the new set must find its own generation.
         # A serve that raises serves nothing new, so what was published stays.
@@ -710,18 +753,23 @@ class SkillServing:
         noted: set[str],
         reads: Mapping[Key, Mapping[str, FilePrompt]],
         hidden: frozenset[str],
+        found: Mapping[tuple[str, str], Sequence[Skill]],
     ) -> tuple[Snapshot, frozenset[str]]:
         """``snapshot`` less what kubed-mcp does not serve, with its ``/health``
         reading what it does: the parity guard (D3, D11). Also the skills it
         would serve of those ``hidden`` gives, which hold a hidden path and
         which kb does not let it serve (N13).
 
-        Its prompts are what kb's reader read as each plugin entered the set,
-        the first read of each name kubed-mcp serves (D5), and ``/health``
-        counts them and gives a ``skipped`` row for each selected file that
-        did not serve. Its agents are each added plugin's ``agent_files``, and
-        ``/health`` counts them and gives a ``skipped`` row, with the layer's
-        reason, for each agent file kb found that the layer skipped (AGT-14)."""
+        Every ``ok`` plugin's ``skills``, ``prompts`` and ``agents`` are what
+        the first library that adds it serves, and 0 when none does (K6 D3):
+        its skills kb found less any held hidden, the prompts kb's reader read
+        as it entered the set, the first read of each name kubed-mcp serves
+        (D5), and its ``agent_files`` (AGT-14). Its ``skipped`` is kb's own
+        rows, then that add's rows for each skill folder kb found
+        (``_skills_of``), selected prompt file and agent file kb found that the
+        layer did not serve, with the layer's reason: one row per path, the
+        first reason kept (K6 D4). ``found`` is kb's skills by library and
+        plugin, which place a skill's folder for the parity guard's note."""
         catalogue = snapshot.catalogue
         served_hidden: set[str] = set()
         kept = {(lib.name, plugin.id) for lib, plugin, _ in added}
@@ -737,8 +785,9 @@ class SkillServing:
         unserved: dict[str, list[dict[str, str]]] = {}
         prompts: list[FilePrompt] = []
         library_prompts: dict[str, int] = {}
-        # Each plugin's prompt and agent counts and skipped rows, from the
-        # first library that serves it: all are the plugin's own.
+        # Each plugin's skill, prompt and agent counts and skipped rows, from
+        # the first library that adds it: all are the plugin's own.
+        plugin_skills: dict[str, tuple[int, list[dict[str, str]]]] = {}
         plugin_prompts: dict[str, tuple[int, list[dict[str, str]]]] = {}
         plugin_agents: dict[str, tuple[int, list[dict[str, str]]]] = {}
         for lib, plugin, served in added:
@@ -752,17 +801,27 @@ class SkillServing:
             plugin_prompts.setdefault(plugin.id, (len(served_prompts), skipped))
             mine = set(skills.get((lib.name, plugin.id), ()))
             theirs = {_address_of(uri) for uri in served.skills}
+            skill_rows = self._skills_of(plugin, served, snapshot)
+            plugin_skills.setdefault(
+                plugin.id, (len((mine & theirs) - hidden), skill_rows)
+            )
             for address in sorted(mine & theirs):
                 if address in hidden:
                     served_hidden.add(address)
                     gone.append(address)
                     self._note(noted, HIDDEN.format(address))
+            # A folder with a row is said by ``log_changes``, with its reason.
+            listed = {row["path"] for row in skill_rows}
+            folders = self._folders(plugin, found.get((lib.name, plugin.id)))
             for address in sorted(mine - theirs):
                 gone.append(address)
+                if folders.get(address) in listed:
+                    continue
                 self._note(
                     noted,
                     f"skill {address} is not served: the plugin layer refused it",
                 )
+            self._unlisted(plugin, served, snapshot, noted)
             for address in sorted(theirs - mine):
                 # Its SKILL.md fails in the rewriter, which finds no such skill.
                 self._note(noted, f"skill {address} is not served: kb did not find it")
@@ -801,24 +860,37 @@ class SkillServing:
             )
             entry["agents"] = sum(1 for a in served_agents if a.library == name)
             entry["prompts"] = library_prompts.get(name, 0)
-            for key, found in (("renamed", renamed), ("unserved", unserved)):
-                if found.get(name):
-                    entry[key] = found[name]
+            for key, by_library in (("renamed", renamed), ("unserved", unserved)):
+                if by_library.get(name):
+                    entry[key] = by_library[name]
                 else:
                     entry.pop(key, None)
             status_libraries[name] = entry
         status_plugins = {}
         for pid, entry in snapshot.status.get("plugins", {}).items():
             entry = dict(entry)
+            if entry.get("status") != "ok":
+                status_plugins[pid] = entry
+                continue
+            # kb's own rows first, then the layer's, one row per path (D4).
+            skipped = list(entry.get("skipped", ()))
+            paths = {row["path"] for row in skipped}
             for kind, by_plugin in (
+                ("skills", plugin_skills),
                 ("prompts", plugin_prompts),
                 ("agents", plugin_agents),
             ):
-                if pid in by_plugin:
-                    count, rows = by_plugin[pid]
-                    entry[kind] = count
-                    if rows:
-                        entry["skipped"] = [*entry.get("skipped", ()), *rows]
+                # A plugin no library adds serves none of either (D3, LIB-33).
+                count, rows = by_plugin.get(pid, (0, []))
+                entry[kind] = count
+                for row in rows:
+                    if row["path"] not in paths:
+                        paths.add(row["path"])
+                        skipped.append(row)
+            if skipped:
+                entry["skipped"] = skipped
+            else:
+                entry.pop("skipped", None)
             status_plugins[pid] = entry
         published = replace(
             snapshot,
@@ -833,6 +905,79 @@ class SkillServing:
             },
         )
         return published, frozenset(served_hidden)
+
+    def _skills_of(
+        self, plugin: Plugin, served: Served, snapshot: Snapshot
+    ) -> list[dict[str, str]]:
+        """A ``skipped`` row for each skill folder kb's harvest found that the
+        plugin layer skipped, in the layer's order, with its first reason and
+        no cache path (K6 D4). A folder is one of ``snapshot.skill_dirs``,
+        relative to the plugin root as the layer's paths are."""
+        dirs = set(snapshot.skill_dirs.get(plugin.id, ()))
+        rows: dict[str, str] = {}
+        for path, why in served.skipped:
+            if path in dirs:
+                rows.setdefault(path, why)
+        return [
+            {"path": self._clean(path, plugin), "reason": self._clean(why, plugin)}
+            for path, why in rows.items()
+        ]
+
+    def _folders(
+        self, plugin: Plugin, skills: Sequence[Skill] | None
+    ) -> dict[str, str]:
+        """Each of ``skills``' folders, relative to ``plugin``'s root, by address."""
+        root = self._root_of(plugin)
+        if root is None or not skills:
+            return {}
+        folders: dict[str, str] = {}
+        spellings = ((root, False), (root.resolve(), True))
+        for skill in skills:
+            for base, resolved in spellings:
+                path = skill.path.resolve() if resolved else skill.path
+                if path.is_relative_to(base):
+                    folders[skill.address] = path.relative_to(base).as_posix()
+                    break
+        return folders
+
+    def _unlisted(
+        self, plugin: Plugin, served: Served, snapshot: Snapshot, noted: set[str]
+    ) -> None:
+        """Say once each skill folder or agent file the layer skipped that kb's
+        harvest never found, so no row of the plugin's lists it (D6).
+
+        ``QuietSelection`` keeps the layer's own line for it out of the log, so
+        this is the one line said. A file in the plugin's command entries is a
+        prompt file, which kb selected and lists, or left out on purpose and
+        nobody says (P8), and so is any ``NOT_SELECTED`` skip, whatever entry a
+        ``.`` skills or agents component makes it look like it is in. A rename
+        that is taken is the library's ``unserved``, and an agent ``agent_meta``
+        refused is said by ``_agents_of``."""
+        commands = snapshot.commands.get(plugin.id)
+        known = {
+            *snapshot.skill_dirs.get(plugin.id, ()),
+            *snapshot.agent_files.get(plugin.id, ()),
+            *(() if commands is None else commands.selected),
+        }
+        parts = served.components
+        entries = [PurePosixPath(e).as_posix() for e in (*parts.skills, *parts.agents)]
+        prompts = [PurePosixPath(e).as_posix() for e in parts.commands]
+        said: set[str] = set()
+        for path, why in served.skipped:
+            if path in known or path in said or why == NOT_SELECTED:
+                continue
+            if _RENAME_TAKEN.match(why) or why.startswith(_AGENT_META_FAILED):
+                continue
+            if any(_under(path, entry) for entry in prompts):
+                continue
+            if not any(_under(path, entry) for entry in entries):
+                continue
+            said.add(path)
+            self._note(
+                noted,
+                f"{self._clean(path, plugin)!r} of plugin {plugin.id} is not served:"
+                f" {self._clean(why, plugin)}",
+            )
 
     def _agents_of(
         self,
@@ -1007,6 +1152,11 @@ class SkillServing:
                 self._published = replace(published, live={**published.live, **moved})
                 return
             self._knowledge_base.renarrowed(published.snapshot, narrowed)
+            if self._knowledge_base.snapshot is narrowed:
+                # What the re-read changed, said once as a refresh says it: a
+                # skill it newly skips is a row, which no parity note says. kb's
+                # lock is not held here, nor taken.
+                log_changes(published.snapshot.status, narrowed.status)
         finally:
             self._lock.release()
 
@@ -1172,6 +1322,11 @@ class SkillServing:
 
 class _Abandoned(Exception):
     """A re-read that read a moved plugin from another export: not served."""
+
+
+def _under(path: str, entry: str) -> bool:
+    """Whether the root-relative ``path`` is the component ``entry`` or in it."""
+    return entry == "." or path == entry or path.startswith(f"{entry}/")
 
 
 def _same_folder(recorded: Path | None, read: Path) -> bool:
