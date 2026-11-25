@@ -190,6 +190,25 @@ always agree. There is no gateway switch and no kb prefix rewriter.
 the served-tree loader. Then it `serve`s that set. All of this runs under the serving lock taken
 without blocking: a refresh that holds it is about to publish anyway.
 
+It runs on every request that pins the plugin layer's state, agents included, as SKL-37 says.
+kb's catalogue is narrowed again over the same snapshot and swapped in by
+`KnowledgeBase.renarrowed`: the same generation, swapped only while the snapshot it narrowed is
+still the one served. Three checks leave a refresh to land. A set that is published but not yet
+swapped in (kb's snapshot isn't the one published) re-reads nothing. Before re-adding, a moved
+plugin whose served root is no longer the one it was added from re-reads nothing: a refresh has
+pointed its fetch at a new export and is building it. That check is only a cheap filter, because
+a refresh can still move the fetch before the plugin is read. So after staging, and before
+`serve()`, each re-added plugin's root as kubed-mcp read it is compared with the recorded one. On
+any mismatch the re-read is abandoned: nothing is served, no new stamp is recorded and nothing is
+swapped. Adding from that tree would mix two exports.
+
+**One request late (Dr K, 2026-11-25 07:36, option 2).** kubed-mcp's `Plugins._pin` takes the
+request's state before it calls the view, so the request that revalidates and re-adds still reads
+the old copy, and the next request reads the edit. That is one request on top of the 2 s trust
+window: a weaker guarantee than K1's, where the revalidating read was already the new one.
+quick-mcp#45 proposes a way for the view's re-read to land in its own request; a later pin move
+can restore the first-request read.
+
 ### D10. Empty and refused scopes build nothing (ruling 8)
 
 `what_is_wrong` and `_serving` read `snapshot.catalogue`, which `publish` has already narrowed,
@@ -246,9 +265,13 @@ needed: a holding knob that keeps kb's extension would exist only to delay adopt
 - **N5.** `agents/get`'s `_meta` also carries kubed-mcp's `io.kubed/agent` (`frontmatter`, and
   `skills` as the `SKILL.md` URIs of the agent's own plugin's skills it names), beside kb's
   `io.kubed.mcp-kb/agent`, which is unchanged.
-- **N6.** A live agent's edit reaches `agents/list` as well as `agents/get`, once kb re-adds its
-  plugin (D9). An edit that no longer parses takes the agent away until it parses again, where
-  AGT-16 served the last good copy.
+- **N6.** A live skill's or agent's edit reads one request later than K1: the request after trust
+  revalidates and re-adds the plugin (D9) but still reads the old copy, and the next request reads
+  the edit. A live agent's edit reaches `agents/list` as well as `agents/get`. An edit that no
+  longer parses takes the agent away until it parses again, where AGT-16 served the last good
+  copy. A live edit of an agent's frontmatter `name` serves it under the new name from the next
+  request, without a refresh, and a later plugin's agent it now clashes with is renamed
+  `<name>@<plugin>` (PLUG-64). AGT-16 kept the snapshot's name until the next refresh.
 - **N7.** An agent's file also reads at `agents://<library>[/<plugin>]/<path below agents/>`, an
   unlisted resource (#20).
 - **N8.** An agent kubed-mcp's `parse_agent` refuses and kb's accepted is no longer served: one
@@ -325,3 +348,6 @@ Everything else stays the same as the before-dump, under all ten scopes, with an
    of knob ruled out for the resource tools. Commands are skipped with a `command_reader` until
    K4, and kb passes no empty component lists, so RF4 no longer arises. The pin stays
    `kubed-mcp==0.2.0rc2` for K3; mcp-kb#92 moves it to rc3 after the merge.
+5. **Live re-read (2026-11-25 07:36), option 2 of three:** accept one request late (D9, N6), on
+   rc2. Option 1, letting the view's re-read land in its own request, is quick-mcp#45. Option 3,
+   a kb middleware before the pin, is ruled out.

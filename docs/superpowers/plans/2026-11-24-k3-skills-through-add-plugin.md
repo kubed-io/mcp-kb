@@ -425,22 +425,24 @@ def live_stamp(self, skill: Skill) -> tuple
 
 - [ ] **Step 1: Write the failing tests.** They use the WebDAV fixture with `cache: live`, and
   each edit changes the file's length (wsgidav's ETag).
-  - `test_a_live_edit_reads_after_trust`: past the 2 s trust, the next read returns the new text,
-    and `_manifest` and `skills/get` describe it.
+  - `test_a_live_edit_reads_after_trust`: past the 2 s trust, the first read still returns the
+    old text (it revalidates and re-adds, D9's one request late), and the second returns the new
+    text, with `_manifest` and `skills/get` describing it.
   - `test_a_reread_keeps_every_other_plugin`: every other `Plugin` in `mcp.plugins` is the same
     object, and `mcp.generation` moved by one.
   - `test_no_reread_while_a_refresh_publishes`: with the lock held, `mcp.generation` doesn't move.
   - `test_an_out_of_scope_live_skill_is_not_revalidated`: wsgidav logs no request for its files.
-  - `test_a_live_agent_edit_reads_after_trust`: `agents/get` and `agents/list` serve the edit
-    (N6); an edit that no longer parses takes the agent away, and the next good edit brings it
-    back.
+  - `test_a_live_agent_edit_reads_after_trust`: on the second request after trust, `agents/get`
+    and `agents/list` serve the edit (N6); an edit that no longer parses takes the agent away,
+    and the next good edit brings it back.
 - [ ] **Step 2: Run** `pytest tests/test_live.py -v`. Expected: FAIL.
 - [ ] **Step 3: Implement** D9.
   - For each admitted live plugin, compare the stamps over its skills and its agent files with
     the ones recorded at publish. For those that moved, build a new set: `keep` the rest and `add` the moved address
     again. Then `serve`.
-  - **Stop and report** if kubed-mcp pins its state before calling the view function, so the
-    edit shows a request late.
+  - kubed-mcp pins its state before calling the view (rc2 `Plugins._pin`), so the edit shows a
+    request late. Dr K accepted that (2026-11-25, option 2; quick-mcp#45). Any other test that
+    asserted the first read after trust asserts the second, citing N6.
 - [ ] **Step 4: Run** `ruff check .` and `pytest tests/test_live.py tests/test_webdav_source.py
   -v`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat: a live skill's or agent's edit is re-read and served`.

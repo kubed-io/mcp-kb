@@ -453,6 +453,17 @@ class KnowledgeBase:
             log_changes(self.snapshot.status, published.status)
             self.snapshot = published
 
+    def renarrowed(self, was: Snapshot, now: Snapshot) -> None:
+        """Swap in ``now``, the same generation as ``was`` narrowed again by the
+        publisher after a live re-read (D9), when ``was`` is still the one served.
+
+        Takes no lock, as ``served_tree`` does not: the publisher calls this
+        holding its own lock, which a refresh needs to publish before it swaps,
+        so no swap can land between the check and the assignment.
+        """
+        if self.snapshot is was:
+            self.snapshot = now
+
     def served_tree(self, key: str) -> Path | None:
         """The tree being served for fetch ``key``, or None.
 

@@ -32,6 +32,14 @@ once. A plugin kubed-mcp refuses is a conflict in its library, as LIB-28's are.
 The rewriter and ``agent_meta`` read the snapshot being published, held here
 and set before ``serve()``: a build made between ``serve()`` and the swap in
 ``KnowledgeBase`` must already see the generation it is a build of.
+
+**A live plugin is re-read on view (D9).** What a live plugin's skill and agent
+files held on disk is stamped as it enters the set. The view revalidates the
+live plugins its request's scope admits and stamps them again; a plugin whose
+stamp moved is added again, every other one is kept as served, and the set is
+served and kb's catalogue narrowed afresh, under the generation it already had.
+kubed-mcp pins a request's state before it calls the view, so the request that
+re-adds still reads the copy it pinned and the next one reads the edit (N6).
 """
 
 from __future__ import annotations
@@ -40,18 +48,20 @@ import logging
 import os
 import re
 import threading
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
 from kubed.mcp import QuickMCP
 from kubed.mcp.plugins import Plugin as Served
-from kubed.mcp.plugins import PluginError, Site, View
+from kubed.mcp.plugins import PluginError, PluginSet, Site, View
 
+from ..catalogue import harvest
 from ..catalogue.agents import Agent, AgentRoster, parse_agent
 from ..catalogue.names import split_frontmatter
+from ..catalogue.skills import Skill
 from ..catalogue.snapshot import Library, Snapshot, namespace_for, unrooted
 from ..catalogue.uris import AGENT_META, MAIN_FILE, SCHEME, agent_path
 from ..config import scrub
@@ -92,11 +102,28 @@ class _Row:
         )
 
 
-# Each added plugin by ``(namespace, address)``: what kubed-mcp's ``Plugin``
-# carries. ``(library, address)`` alone is not unique: grafana's root entries
-# share one address, each with its own category, and so do declared plugins
-# reading different folders of one tree.
-Table = Mapping[tuple[str, str], _Row]
+# An added plugin's key: what kubed-mcp's ``Plugin`` carries.
+Key = tuple[str, str]
+
+# Each added plugin by ``(namespace, address)``. ``(library, address)`` alone is
+# not unique: grafana's root entries share one address, each with its own
+# category, and so do declared plugins reading different folders of one tree.
+Table = Mapping[Key, _Row]
+
+
+@dataclass(frozen=True)
+class _Watch:
+    """A live plugin's skills and agent files, and what they held on disk when
+    it entered the set (D9)."""
+
+    skills: tuple[Skill, ...]
+    agents: tuple[Path, ...]
+    stamp: tuple
+    # The folder the plugin was added from: a refresh points its fetch at a
+    # new export before it publishes, and a re-read must not add from that.
+    root: Path | None = None
+    # Its agents as the add read them, by path from the root (N6).
+    read: Mapping[str, Agent] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -104,12 +131,16 @@ class _Published:
     """What one generation is served from: its snapshot, narrowed, and its table.
 
     ``hidden`` is the addresses of the skills holding a hidden path, which the
-    rewriter fails in every build (N13).
+    rewriter fails in every build (N13). ``source`` is the snapshot as it was
+    handed to ``publish``, which a re-read narrows again, and ``live`` each live
+    plugin's watch, by key.
     """
 
     snapshot: Snapshot
     table: Table
     hidden: frozenset[str] = frozenset()
+    source: Snapshot | None = None
+    live: Mapping[Key, _Watch] = field(default_factory=dict)
 
 
 def holds_hidden(folder: Path) -> bool:
@@ -160,10 +191,15 @@ class SkillServing:
         self._published = _Published(knowledge_base.snapshot, {})
         # The generation being published, while its plugins enter the set.
         self._entering: _Published | None = None
-        # One publisher at a time; a live re-read (Task 6) takes it too.
+        # One publisher at a time; a live re-read takes it too, never blocking.
+        # Always taken after ``KnowledgeBase._lock``, never before it.
         self._lock = threading.Lock()
         # What the parity guard has said, so a refresh does not say it again.
         self._noted: set[str] = set()
+        # While a set is staged: the live watches of the plugins kept unread,
+        # and the agents ``agent_meta`` read for those added, by key and path.
+        self._carried: dict[Key, _Watch] = {}
+        self._reads: dict[Key, dict[str, Agent]] = {}
 
     def attach(self) -> None:
         """Register the view, the rewriter, the command reader and ``agent_meta``,
@@ -181,24 +217,42 @@ class SkillServing:
         with self._lock:
             return self._publish(snapshot)
 
-    def _publish(self, snapshot: Snapshot) -> Snapshot:
+    def _publish(
+        self,
+        snapshot: Snapshot,
+        moved: Mapping[Key, _Watch] | None = None,
+        current: Mapping[Key, Served] | None = None,
+    ) -> Snapshot:
+        """Stage ``snapshot``'s set, serve it and return ``snapshot`` narrowed.
+
+        A re-read (D9) passes the live plugins that ``moved``, with their new
+        watches, and the plugins served now by key: every plugin served now that
+        did not move is kept unread, and one whose re-read is refused is kept as
+        it was, logged once.
+        """
         catalogue = snapshot.catalogue
         by_id = {plugin.id: plugin for plugin in snapshot.plugins}
         libraries = snapshot.status.get("libraries", {})
         plugins = snapshot.status.get("plugins", {})
         skills: dict[tuple[str, str], list[str]] = {}
+        found: dict[tuple[str, str], list[Skill]] = {}
         for skill in catalogue.visible_skills():
             skills.setdefault((skill.library, skill.plugin), []).append(skill.address)
+            found.setdefault((skill.library, skill.plugin), []).append(skill)
         agents: dict[tuple[str, str], list[Agent]] = {}
         for agent in catalogue.agents.visible():
             agents.setdefault((agent.library, agent.plugin), []).append(agent)
 
         noted: set[str] = set()
         table: dict[tuple[str, str], _Row] = {}
+        live: dict[Key, _Watch] = {}
         self._entering = _Published(snapshot, table)
+        self._carried, self._reads = {}, {}
         staged = self._mcp.plugin_set()
         added: list[tuple[Library, Plugin, Served]] = []
         refused: dict[str, dict[str, str]] = {}
+        # Each moved plugin re-added, with the root its watch was added from.
+        readded: list[tuple[Path | None, Served]] = []
         try:
             for lib in snapshot.libraries:
                 failed = libraries.get(lib.name, {}).get("conflicts", {})
@@ -224,14 +278,45 @@ class SkillServing:
                         continue
                     namespace = namespace_for(lib, plugin)
                     key = (namespace, plugin.address)
+                    served_now = None if current is None else current.get(key)
+                    if current is not None and served_now is None:
+                        # Refused at publish, so not served: a re-read leaves
+                        # it so, its conflict as it was (D9).
+                        was = self._published.snapshot.status.get("libraries", {})
+                        prior = was.get(lib.name, {}).get("conflicts", {}).get(pid)
+                        if prior is not None:
+                            refused.setdefault(lib.name, {})[pid] = prior
+                        continue
                     before = table.get(key)
                     table[key] = _Row(lib.name, plugin, frozenset(lib.categories))
+                    last = self._published.live.get(key)
+                    watch: _Watch | None = None
                     try:
-                        served = staged.add(
-                            plugin.address,
-                            namespace=namespace,
-                            manifest=entry_for(plugin),
-                        )
+                        if served_now is not None and key not in (moved or {}):
+                            # Not moved: carried as served, unread (D9), its
+                            # agents as its last add read them.
+                            watch = last
+                            served = self._keep(staged, key, served_now, last)
+                        else:
+                            if moved is not None and key in moved:
+                                watch = moved[key]
+                            elif is_live(plugin.fetch):
+                                # Stamped first, so what is added is what it says.
+                                watch = self._watch(
+                                    snapshot, plugin, found.get(own, ())
+                                )
+                            served, kept = self._add(
+                                staged, key, plugin, served_now, last, lib, noted
+                            )
+                            if moved is not None and key in moved and not kept:
+                                readded.append((moved[key].root, served))
+                            if watch is not None:
+                                read = (
+                                    self._reads.get(key, {})
+                                    if not kept
+                                    else ({} if last is None else last.read)
+                                )
+                                watch = replace(watch, read=read)
                     except (PluginError, ValueError) as exc:
                         # A refused add leaves the set as it was, and the table.
                         if before is None:
@@ -241,17 +326,25 @@ class SkillServing:
                         reason = f"conflict: {self._clean(str(exc), plugin)}"
                         refused.setdefault(lib.name, {})[pid] = reason
                         continue
+                    if watch is not None:
+                        live[key] = watch
                     added.append((lib, plugin, served))
         finally:
             self._entering = None
+            self._carried, self._reads = {}, {}
 
+        for root, served in readded:
+            if not _same_folder(root, served.root):
+                # Read from another export than the one it was added from: a
+                # refresh moved the fetch under this re-read, and publishes it.
+                raise _Abandoned
         published, hidden = self._narrowed(
-            snapshot, added, refused, skills, agents, noted
+            snapshot, added, refused, skills, agents, noted, live
         )
         # Before serve(): a build of the new set must find its own generation.
         # A serve that raises serves nothing new, so what was published stays.
         previous = self._published
-        self._published = _Published(published, table, hidden)
+        self._published = _Published(published, table, hidden, snapshot, live)
         try:
             self._mcp.serve(staged)
         except BaseException:
@@ -259,6 +352,64 @@ class SkillServing:
             raise
         self._noted = noted
         return published
+
+    def _add(
+        self,
+        staged: PluginSet,
+        key: Key,
+        plugin: Plugin,
+        served_now: Served | None,
+        last: _Watch | None,
+        lib: Library,
+        noted: set[str],
+    ) -> tuple[Served, bool]:
+        """``plugin`` read and added to ``staged``, and False. On a re-read, a
+        refused one is kept as served instead, said once, and True (D9)."""
+        try:
+            served = staged.add(
+                plugin.address, namespace=key[0], manifest=entry_for(plugin)
+            )
+            return served, False
+        except (PluginError, ValueError) as exc:
+            if served_now is None:
+                raise
+            self._reads.pop(key, None)
+            self._note(
+                noted,
+                f"plugin {plugin.id} in library {lib.name} was not read again, so"
+                f" it serves what it served: {self._clean(str(exc), plugin)}",
+            )
+            return self._keep(staged, key, served_now, last), True
+
+    def _keep(
+        self, staged: PluginSet, key: Key, served_now: Served, last: _Watch | None
+    ) -> Served:
+        """``served_now`` carried into ``staged`` unread: ``agent_meta`` answers
+        its live agents from ``last``, what its last add read."""
+        if last is not None:
+            self._carried[key] = last
+        return staged.keep(served_now)
+
+    def _root_of(self, plugin: Plugin) -> Path | None:
+        """The folder ``plugin`` is served from now, or None."""
+        tree = self._knowledge_base.served_tree(plugin.fetch.key)
+        return None if tree is None else plugin_root(tree, plugin.subdir)
+
+    def _watch(
+        self, snapshot: Snapshot, plugin: Plugin, skills: Sequence[Skill]
+    ) -> _Watch:
+        """A live ``plugin``'s root, skills and agent files, stamped now."""
+        agents: tuple[Path, ...] = ()
+        root = self._root_of(plugin)
+        if plugin.claude_format and root is not None:
+            try:
+                agents = tuple(
+                    path for path, _ in harvest.agent_files(root, plugin.globs)
+                )
+            except OSError:
+                agents = ()
+        stamp = _stamp(snapshot, tuple(skills), agents)
+        return _Watch(tuple(skills), agents, stamp, root)
 
     def _clean(self, text: str, plugin: Plugin) -> str:
         """A kubed-mcp message with no cache path and no credential in it."""
@@ -270,6 +421,24 @@ class SkillServing:
                 text = unrooted(text, root)
                 for base in (root.resolve(), root):
                     text = text.replace(str(base), plugin.address)
+        return scrub(text)
+
+    def _cleaned(self, text: str, plugins: Sequence[Plugin]) -> str:
+        """``text`` with every served tree of ``plugins`` named by kb's address:
+        each plugin's own root by its address, a fetch's tree by its key, the
+        deepest first, so a path is named by the plugin it is under."""
+        names: dict[str, str] = {}
+        for plugin in plugins:
+            tree = self._knowledge_base.served_tree(plugin.fetch.key)
+            if tree is None:
+                continue
+            root = plugin_root(tree, plugin.subdir)
+            for base, name in ((root, plugin.address), (tree, plugin.fetch.key)):
+                if base is not None:
+                    for spelling in (base.resolve(), base):
+                        names.setdefault(str(spelling), name)
+        for base in sorted(names, key=len, reverse=True):
+            text = text.replace(base, names[base])
         return scrub(text)
 
     def _note(self, noted: set[str], message: str) -> None:
@@ -285,6 +454,7 @@ class SkillServing:
         skills: dict[tuple[str, str], list[str]],
         agents: dict[tuple[str, str], list[Agent]],
         noted: set[str],
+        live: Mapping[Key, _Watch],
     ) -> tuple[Snapshot, frozenset[str]]:
         """``snapshot`` less what kubed-mcp does not serve, with its ``/health``
         reading what it does: the parity guard (D3, D11). Also the skills
@@ -331,7 +501,13 @@ class SkillServing:
                         f"{base} is already served by plugin '{owners.get(base, '?')}'"
                     )
                 owners[file.name] = plugin.id
-                agent = catalogue.agent(lib.name, plugin.id, file.path)
+                # A live one as its add read it, which a re-read is for.
+                watch = live.get((served.namespace, served.address))
+                agent = (
+                    watch.read.get(file.path)
+                    if watch is not None
+                    else catalogue.agent(lib.name, plugin.id, file.path)
+                )
                 if agent is None:
                     # One kb's harvest did not read, a nameless one say (N10):
                     # read as kb's roster reads one, its stem its name.
@@ -400,8 +576,13 @@ class SkillServing:
     # -- the hooks -----------------------------------------------------------
 
     def view(self) -> View:
-        """The plugins the request's scope admits, which is also the build key."""
+        """The plugins the request's scope admits, which is also the build key.
+
+        The live ones among them are revalidated first, and re-read when they
+        moved (D9).
+        """
         scope = requested_scope()
+        self._reread_live(scope)
         table = self._published.table
         admitted = frozenset(key for key, row in table.items() if row.admitted(scope))
         key = admitted or EMPTY
@@ -410,6 +591,61 @@ class SkillServing:
             return (plugin.namespace, plugin.address) in key
 
         return View(key, admits)
+
+    def _reread_live(self, scope: Scope) -> None:
+        """Revalidate the live plugins ``scope`` admits, and serve again with
+        each one whose files moved read afresh (D9).
+
+        Under the serving lock, taken without blocking: a publish holding it
+        serves a new set anyway, so this request reads what is served. Never
+        takes the knowledge base's lock, which a refresh holds while it waits
+        for this one. kubed-mcp has pinned the request's state already, so the
+        edit reads from the next request on (N6).
+        """
+        if not self._published.live:
+            return
+        if not self._lock.acquire(blocking=False):
+            return
+        try:
+            published = self._published
+            source = published.source
+            # A publish is served and not yet swapped in: leave it to land.
+            if (
+                source is None
+                or self._knowledge_base.snapshot is not published.snapshot
+            ):
+                return
+            moved: dict[Key, _Watch] = {}
+            for key, watch in published.live.items():
+                row = published.table.get(key)
+                if row is None or not row.admitted(scope):
+                    continue
+                stamp = _stamp(source, watch.skills, watch.agents)
+                if stamp != watch.stamp:
+                    moved[key] = replace(watch, stamp=stamp)
+            if not moved:
+                return
+            for key, watch in moved.items():
+                if self._root_of(published.table[key].plugin) != watch.root:
+                    # A refresh has moved the fetch to a new export and will
+                    # publish it: adding from it now would mix two trees.
+                    return
+            current = {(p.namespace, p.address): p for p in self._mcp.plugins}
+            try:
+                narrowed = self._publish(source, moved, current)
+            except _Abandoned:
+                # Nothing served and nothing recorded: the refresh publishes.
+                return
+            except Exception as exc:  # noqa: BLE001 - a failed re-read serves what is served
+                plugins = [row.plugin for row in published.table.values()]
+                message = self._cleaned(str(exc), plugins)
+                log.warning("re-reading live plugins failed: %s", message)
+                # Not tried again until a file moves again.
+                self._published = replace(published, live={**published.live, **moved})
+                return
+            self._knowledge_base.renarrowed(published.snapshot, narrowed)
+        finally:
+            self._lock.release()
 
     def rewrite(self, site: Site, text: str) -> str:
         """kb's rewriting: a root ``SKILL.md`` and an agent's body rendered, and
@@ -456,7 +692,23 @@ class SkillServing:
         if path is None:
             return None
         catalogue = published.snapshot.catalogue
-        value = catalogue.agent_meta(row.library, row.plugin.id, path)
+        read = None
+        if is_live(row.plugin.fetch):
+            key = (plugin.namespace, plugin.address)
+            carried = self._carried.get(key)
+            if carried is not None:
+                # Kept unread: as its last add read it.
+                read = carried.read.get(path)
+            else:
+                # Added: what the file says now, which a re-read is for (N6).
+                read = _read_agent(
+                    row.library, row.library_categories, row.plugin, plugin.root, path
+                )
+                if read is not None:
+                    self._reads.setdefault(key, {})[path] = read
+            if read is None:
+                raise ValueError(f"kb cannot read agent file {path}")
+        value = catalogue.agent_meta(row.library, row.plugin.id, path, read)
         if value is None:
             read = _read_agent(
                 row.library, row.library_categories, row.plugin, plugin.root, path
@@ -468,6 +720,38 @@ class SkillServing:
         served = set(plugin.skills)
         value["skills"] = {k: v for k, v in value["skills"].items() if v in served}
         return {AGENT_META: value}
+
+
+class _Abandoned(Exception):
+    """A re-read that read a moved plugin from another export: not served."""
+
+
+def _same_folder(recorded: Path | None, read: Path) -> bool:
+    """Whether the folder a plugin was read from is the one recorded."""
+    if recorded is None:
+        return False
+    try:
+        return Path(read).resolve() == recorded.resolve()
+    except OSError:
+        return False
+
+
+def _stamp(
+    snapshot: Snapshot, skills: Sequence[Skill], agents: Sequence[Path]
+) -> tuple:
+    """What a live plugin's ``skills`` and ``agents`` files hold on disk now,
+    each revalidated first (SKL-37)."""
+    catalogue = snapshot.catalogue
+    parts: list[tuple] = [catalogue.live_stamp(skill) for skill in skills]
+    for path in agents:
+        snapshot.revalidate(path)
+        try:
+            stat = path.stat()
+        except OSError:
+            parts.append((str(path),))
+            continue
+        parts.append((str(path), stat.st_mtime_ns, stat.st_size))
+    return tuple(parts)
 
 
 def _read_agent(

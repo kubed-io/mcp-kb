@@ -574,10 +574,11 @@ class Catalogue:
         address it resolves to among the agent's own plugin's skills alone
         (N9): this is computed once per generation and never sees a scope, and
         every scope that admits the agent admits its plugin, so it never names
-        a skill a caller cannot see (SCP-24). ``read`` is the agent when the
-        roster does not hold it: one read since, as the plugin layer read it.
+        a skill a caller cannot see (SCP-24). ``read`` is the agent as read
+        since, in place of the roster's: one the roster does not hold, or a live
+        one whose file may have moved (N6).
         """
-        agent = self.agent(library, plugin, path) or read
+        agent = read or self.agent(library, plugin, path)
         if agent is None:
             return None
         names = self.qualified_names(library, plugin)
