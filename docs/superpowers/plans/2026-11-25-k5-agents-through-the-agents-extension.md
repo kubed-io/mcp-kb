@@ -14,6 +14,12 @@
 > which D4 relies on, and D5 is K4's shape, with one warning. Task 0 ran under rc2: `issue-80`
 > still pins it, as #99 (0.3.0) has not merged. K6 (#84) writes index v12 and accepts v11's
 > `fetches`.
+>
+> **The pin moved during Task 4.** #99 merged into `issue-80`, and `issue-80` was merged into this
+> branch, so the pin is `kubed-mcp>=0.3.0,<0.4`. `tests/test_agent_layer.py` passes unchanged
+> under 0.3.0, and Task 4 cites kubed-mcp's rows at `v0.3.0`. Task 4 also found that kb's
+> `_meta.skills` named a skill SKL-3 does not serve, because the hook runs before the parity
+> guard. It is fixed in `agent_meta`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -647,7 +653,7 @@ git commit -m "K5: a live agent saved mid-edit keeps its plugin's last good buil
 **Interfaces:**
 - Consumes: Tasks 1 to 3.
 
-- [ ] **Step 1: Write the tests**
+- [x] **Step 1: Write the tests**
 
 ```python
 def test_rename_order_holds_across_refreshes(tmp_path):  # tests/test_agents.py, D8
@@ -677,13 +683,13 @@ In `tests/test_agents_extension.py::test_a_prefix_reaches_instructions_only`, un
 - `_meta["io.kubed.mcp-kb/agent"]["skills"]` values start with `skill://`;
 - its `frontmatter` holds no `kb+`.
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `pytest tests/test_agents.py::test_rename_order_holds_across_refreshes tests/test_live.py::test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state tests/test_agents_extension.py::test_a_prefix_reaches_instructions_only -v`
 Expected: PASS. They pin behaviour the earlier tasks keep. A failure is a bug in Tasks 1 to 3's
 code: fix it there, not in the test.
 
-- [ ] **Step 3: Update the spec**
+- [x] **Step 3: Update the spec**
 
 - AGT-17: "It is decided once per generation…" gains a reason: the plugin layer's agent-meta hook
   runs as the agent enters the set (PLUG-73), not per build.
@@ -691,12 +697,12 @@ code: fix it there, not in the test.
   from quick-mcp's spec at the pinned tag, keep kb's rows' IDs, and keep the statements that
   still apply.
 
-- [ ] **Step 4: Run the checks**
+- [x] **Step 4: Run the checks**
 
 Run: `ruff check .` then `pytest tests/test_agents.py tests/test_live.py tests/test_agents_extension.py -v`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests docs/superpowers/specs/agents.md

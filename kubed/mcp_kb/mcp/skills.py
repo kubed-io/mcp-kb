@@ -1138,7 +1138,15 @@ class SkillServing:
             row.library, row.plugin.id, path, read, row.plugin.servers
         )
         served = set(plugin.skills)
-        value["skills"] = {k: v for k, v in value["skills"].items() if v in served}
+        index = published.snapshot.index
+
+        def serves(uri: str) -> bool:
+            # The parity guard runs after the set is staged, so a skill it drops
+            # for a hidden path (N13) is still the layer's here: leave it out.
+            skill = index.get(_address_of(uri)) if uri in served else None
+            return skill is not None and not holds_hidden(skill.path)
+
+        value["skills"] = {k: v for k, v in value["skills"].items() if serves(v)}
         return {AGENT_META: value}
 
 

@@ -87,17 +87,18 @@ layer logs its own refusal each time the plugin is added.
 
 ## The roster: `agents/list`
 
-**AGT-7.** `agents/list` takes no params but an optional `cursor`, and returns a card
-for every agent in the caller's scope (AGT-15), in name order:
+**AGT-7.** `agents/list` is kubed-mcp's agents extension (kubed-mcp's PLUG-30), serving
+the plugins kb adds to its plugin set (SKL-58) under kb's view (PLUG-53). It takes no params but an
+optional `cursor`, and returns a card for every agent in the caller's scope (AGT-15), in name order:
 
 | Card field | Value |
 |---|---|
-| `name` | The plugin layer's name, which is kb's. Found by the default scan: `<library>_<subfolder>_…_<frontmatter name>`, one `_` segment for each folder between `agents/` and the file. Listed in a manifest or an entry: `<library>_<frontmatter name>`. Renamed by AGT-8 when it clashes |
+| `name` | The plugin layer's name, which is kb's (PLUG-28, PLUG-63). Found by the default scan: `<library>_<subfolder>_…_<frontmatter name>`, one `_` segment for each folder between `agents/` and the file. Listed in a manifest or an entry: `<library>_<frontmatter name>`. Renamed by AGT-8 when it clashes (PLUG-64) |
 | `description` | The frontmatter `description`, whitespace collapsed |
 | `capabilities` | The frontmatter `capabilities` when it is a list of strings, else `[]` |
 
 It does not paginate: one page holds every card, and any `cursor` fails with `-32602`
-`Invalid agents cursor`, as SKL-48 does.
+`Invalid agents cursor` (PLUG-30), as SKL-48 does.
 
 **AGT-8.** An agent name is unique within a library, so within anything one client
 sees. The plugin layer claims names across the set in the order kb adds plugins: library by
@@ -172,15 +173,17 @@ reads the plugin from its source and has no earlier build to keep.
 request's scope. The agent's plugin is the own plugin and its library is the library, and the
 rewrite runs before PRM-48. `_meta["io.kubed.mcp-kb/agent"]` adds `skills`, an object that maps
 entries of the frontmatter `skills` to the `SKILL.md` addresses they resolve to. It is decided once
-per generation, whatever the caller's scope, from the agent's own plugin alone, which every scope
-that sees the agent also sees.
+per generation, whatever the caller's scope, because the plugin layer's agent-meta hook runs as the
+agent enters the plugin set, never per build (kubed-mcp's PLUG-73); and from the agent's own plugin
+alone, which every scope that sees the agent also sees.
 
 - **Entries.** The frontmatter `skills` is a list, whose string items are the entries, or one
   string, split on `,`. Each entry is trimmed, and is the map's key as written.
 - **Resolution.** A qualified name resolves by SKL-55 with the agent's own plugin as its only
   candidate, so a name of another plugin's skill never resolves. A bare `<skill>` resolves to the
   one served skill of that name in the agent's own plugin.
-- **The rest.** An entry that does not resolve is left out, and `skills` is `{}` when none do.
+- **The rest.** An entry that does not resolve is left out, and so is one that resolves to a skill
+  SKL-3 does not serve, and `skills` is `{}` when none are left.
   `frontmatter` stays verbatim, and the addresses are never prefixed (SKL-41).
 
 **AGT-18.** An agent's file also reads as a resource at
@@ -193,12 +196,16 @@ builds the file, after kb's rewriter and the prefix.
 
 ## Caching and errors
 
-**AGT-12.** Both results carry `resultType: "complete"`, `ttlMs: 0` and
-`cacheScope: "private"`, as the Skills extension's do (SKL-48).
+**AGT-12.** Both results are kubed-mcp's agents extension's, and carry
+`resultType: "complete"`, `ttlMs: 0` and `cacheScope: "private"` (kubed-mcp's PLUG-30, PLUG-31),
+as the Skills extension's do (SKL-48).
 
 **AGT-13.** An unknown agent, and one outside the caller's scope, fail alike with
-`-32602`, the message `Agent not found` and `data: {"reason": "agent_not_found"}`. A refused scope
-(SCP-29) fails both methods with `-32602` and the refusal message, as SKL-50 does.
+`-32602`, the message `Agent not found` and `data: {"reason": "agent_not_found"}`: kubed-mcp's
+agents extension's answer to a name it does not serve (kubed-mcp's PLUG-31), and kb's view leaves
+an out-of-scope agent's plugin out of the request's build (PLUG-53), so the extension does not
+serve it. A refused scope (SCP-29) fails both methods with `-32602` and the refusal message, as
+SKL-50 does.
 
 ## Scope
 

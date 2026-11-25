@@ -674,6 +674,37 @@ def test_an_appended_plugin_renames_nothing(tmp_path):
     assert after == {**before, "drawio_diagrammer@late": "late@drawio"}
 
 
+def test_rename_order_holds_across_refreshes(tmp_path):
+    """AGT-8: names are claimed in the order kb adds plugins, every generation,
+    and kb stores no owner, so a refresh renames nothing and a plugin appended
+    to the library takes the rename, not the name."""
+    tree = agents_tree(tmp_path)
+    knowledge_base = tree.knowledge_base(tmp_path / "cache")
+    before = _owners(knowledge_base)
+    renamed = {
+        "drawio_diagrammer@extra": (
+            "drawio_diagrammer is already served by plugin 'drawio@drawio'"
+        )
+    }
+    assert before["drawio_diagrammer"] == "drawio@drawio"
+    for _ in range(2):
+        assert knowledge_base.refresh(force=True)
+        assert _owners(knowledge_base) == before
+        assert knowledge_base.status["libraries"]["drawio"]["renamed"] == renamed
+
+    _entries(tree, after=[("late", {"agents/d.md": _agent("diagrammer")})])
+    assert knowledge_base.refresh(force=True)
+
+    late = {"drawio_diagrammer@late": "late@drawio"}
+    assert _owners(knowledge_base) == {**before, **late}
+    assert knowledge_base.status["libraries"]["drawio"]["renamed"] == {
+        **renamed,
+        "drawio_diagrammer@late": (
+            "drawio_diagrammer is already served by plugin 'drawio@drawio'"
+        ),
+    }
+
+
 def test_a_prepended_plugin_takes_the_short_name(tmp_path):
     tree = agents_tree(tmp_path)
     _entries(tree, before=[("first", {"agents/d.md": _agent("diagrammer")})])

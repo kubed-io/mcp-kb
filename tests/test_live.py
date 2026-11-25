@@ -29,6 +29,7 @@ from fastmcp import Client
 from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
+from kubed.mcp_kb.catalogue.uris import AGENT_META
 from kubed.mcp_kb.config import BasicAuth, Config, EnvRef
 from kubed.mcp_kb.plugins import Fetch
 from kubed.mcp_kb.sources import live
@@ -166,17 +167,27 @@ def _skill_site(serving, view_key=None):
 
 
 def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
-    webdav, tmp_path
+    webdav, tmp_path, monkeypatch
 ):
     """A refresh publishing from another thread while a build is in flight: the
     build's rewriter reads the state its request's view pinned, not the new one;
-    a build no view pinned reads what is published now (N13)."""
+    a build no view pinned reads what is published now (N13).
+
+    The refresh lands inside an ``agents/get``, after its view pinned: that
+    request answers from its own generation, kb's ``_meta`` key included, and
+    the next one from the new generation (AGT-17)."""
     import contextvars
     from concurrent.futures import ThreadPoolExecutor
     from dataclasses import replace
 
     command = "---\ndescription: Cite.\n---\nUse notes:x.\n"
     webdav.write("prompts/cite.md", command)
+    webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
+    webdav.write(
+        "agents/a.md",
+        "---\nname: a\ndescription: Cites.\nskills: [x, y]\n---\n"
+        "Use notes:x and notes:y.\n",
+    )
     knowledge_base = _knowledge_base(webdav, tmp_path)
     serving = serving_of(knowledge_base)
     text = (webdav.root / "skills/x/SKILL.md").read_text()
@@ -189,9 +200,33 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
     )
     plugin = site.plugin
 
+    # x renamed y: x's folder now holds a hidden file, so x no longer serves.
     webdav.write("skills/x/.draft.md", "draft\n")
-    with ThreadPoolExecutor(1) as pool:
-        assert pool.submit(knowledge_base.refresh, force=True).result() == [KEY]
+    webdav.skill("y", "renamed")
+    reread = serving._reread_live
+    refreshed: list[list[str]] = []
+
+    def refresh_inside_the_view(scope):
+        # The plugin layer has taken its state, and kb's view its published
+        # one: a refresh publishing from another thread now lands after the pin.
+        reread(scope)
+        if not refreshed:
+            with ThreadPoolExecutor(1) as pool:
+                done = pool.submit(knowledge_base.refresh, force=True)
+                refreshed.append(done.result())
+
+    monkeypatch.setattr(serving, "_reread_live", refresh_inside_the_view)
+
+    async def get_twice(client):
+        first = await ext_request(client, "agents/get", name="notes_a")
+        return first, await ext_request(client, "agents/get", name="notes_a")
+
+    first, then = run_client(knowledge_base, get_twice)
+    assert refreshed == [[KEY]]
+    assert first["instructions"] == "Use skill://notes/x/SKILL.md and notes:y."
+    assert first["_meta"][AGENT_META]["skills"] == {"x": "skill://notes/x/SKILL.md"}
+    assert then["instructions"] == "Use notes:x and skill://notes/y/SKILL.md."
+    assert then["_meta"][AGENT_META]["skills"] == {"y": "skill://notes/y/SKILL.md"}
     assert SKILL.removeprefix("skill://") in serving._published.hidden
 
     assert "first" in pinned.run(serving.rewrite, site, text)
