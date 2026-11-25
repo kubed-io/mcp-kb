@@ -9,7 +9,6 @@ import httpx
 import pytest
 from fastmcp import Client
 from kubed.mcp.protocol import types
-from mcp.types import Implementation
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
@@ -20,7 +19,7 @@ KB_INFO = {"name": "mcp-kb", "version": dist_version("kubed-mcp-kb")}
 # kubed-mcp's report of the delivery settings it resolved (HTTP-42).
 DELIVERY_META = "io.kubed/delivery"
 # A client kubed-mcp's table of known clients takes to declare resources off.
-VS_CODE = Implementation(name="Visual Studio Code", version="1.99.0")
+VS_CODE = types.Implementation(name="Visual Studio Code", version="1.99.0")
 
 
 async def call(client, name, **args):
