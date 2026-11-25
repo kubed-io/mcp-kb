@@ -378,3 +378,33 @@ async def test_the_template_description_follows_the_prefix(server_url):
     async with _client(server_url) as client:
         (plain,) = await client.list_resource_templates()
     assert "Start at skill://{library}/_index.md;" in plain.description
+
+
+@pytest.mark.integration
+async def test_an_escaped_slash_is_hinted_nothing(server_url):
+    for uri in ("kb+skill://flatsource%2Falpha", "skill://flatsource/alpha%2Frefs"):
+        message = await _missed(server_url, uri, BOTH, tools=False)
+        assert "Resource not found" in message
+        assert not _HINTED.findall(message), message
+
+
+@pytest.mark.integration
+async def test_a_foreign_prefix_is_a_bare_miss(server_url):
+    for uri, headers in (
+        ("other+skill://flatsource/alpha", BOTH),
+        ("kb+skill://flatsource/alpha", PIN),
+    ):
+        message = await _missed(server_url, uri, headers, tools=False)
+        assert "Resource not found" in message
+        assert not _HINTED.findall(message), message
+
+
+@pytest.mark.integration
+async def test_an_escaped_slash_before_a_dot_segment_is_hinted_nothing(server_url):
+    # The hint mirrors GW-4's refusal: it never names an address sent nowhere. Only
+    # the tool sends the raw string; a resources/read client normalises the URI
+    # (AnyUrl) before it leaves, so the escape never reaches the server.
+    for uri in ("skill://flatsource/alpha/x%2F/..", "skill://flatsource/x%2F/.."):
+        message = await _missed(server_url, uri, BOTH, tools=True)
+        assert "Resource not found" in message
+        assert not _HINTED.findall(message), message

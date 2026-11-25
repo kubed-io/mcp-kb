@@ -106,7 +106,9 @@ and [http-and-tools.md](../specs/http-and-tools.md).
 
 - **G1.** A `resources/directory/read` of a skill's directory, or of a folder inside one, that is
   spelled with `.` or `..` segments fails with `Directory not found`. Before, kb resolved the dots
-  first. kb's own directories, and every `resources/read`, resolve as before.
+  first. kb's own directories, and every `resources/read`, resolve as before. A trailing `/` on
+  a skill's directory (`skill://<library>/<skill>/`) is the same: it served, and is now
+  `Directory not found`.
 - **G2.** A `resources/read` of a skill's file with a trailing `/`
   (`skill://<library>/<skill>/SKILL.md/`) is `Resource not found`. Before, kb dropped the slash.
 - **G3.** kb's own text now prefixes `prompts://` and `agents://` addresses too, as GW-5 already

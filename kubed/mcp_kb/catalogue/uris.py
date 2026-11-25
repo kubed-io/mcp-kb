@@ -148,6 +148,18 @@ def parse(uri: str) -> tuple[str, str] | None:
     return head, _remove_dot_segments(tail)
 
 
+def resolved(uri: str) -> str | None:
+    """The address ``parse`` reads: ``skill://<library>/<path>``, dots resolved.
+
+    A bare library is ``skill://<library>``. None when ``parse`` gives None.
+    """
+    parsed = parse(uri)
+    if parsed is None:
+        return None
+    library, path = parsed
+    return f"{SCHEME}{library}/{path}" if path else f"{SCHEME}{library}"
+
+
 def _remove_dot_segments(path: str) -> str:
     """RFC 3986 ``remove_dot_segments`` on the path below the library.
 

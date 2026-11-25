@@ -85,12 +85,14 @@ file under a nested skill belongs to the nested skill.
 **SKL-13.** Before any other check, the path below `skill://` has its `.` and `..` segments
 resolved as in RFC 3986, over the whole path: the library is a segment, not an authority. A `..`
 with nothing left to pop makes the address resolve to nothing, so no address climbs past the root.
-Scope applies to the resolved address. The plugin layer resolves the dots for `resources/read`
-(GW-4), and so for its `read_resource` tool, which reads through `resources/read` (DLV-6).
-`resources/directory/read` resolves them by kb's own rule instead: a `..` at the library is dropped,
-so the address never leaves the library. A miss is reported under the address as sent.
-Percent-escapes are not decoded, so an escaped `/` (`%2F`) is no separator and a URI holding one
-resolves to nothing. A URI that does not start with `skill://` resolves to nothing.
+Scope applies to the resolved address. The plugin layer resolves the dots on `resources/read`
+(GW-4), and so for its `read_resource` tool, which reads through `resources/read` (DLV-6). On
+`resources/directory/read` it passes them on as sent: kb's own directories, a library and a
+folder, resolve them by kb's rule, so a `..` at the library is dropped and the address never
+leaves the library, while a skill's directory, and a folder inside one, match exactly, so a
+dotted one is `Directory not found`. A miss is reported under the address as sent (GW-4).
+An escaped `/` (`%2F`) anywhere in an incoming address resolves to nothing (GW-4), and
+percent-escapes are never decoded. A URI that does not start with `skill://` resolves to nothing.
 
 ## The listing
 
@@ -328,8 +330,9 @@ stay as they are).
 
 **SKL-42.** An incoming address (`resources/read`, `read_resource`, `skills/get`,
 `resources/directory/read`) MAY be `skill://…` or `<prefix>skill://…` for the request's own prefix.
-Any other prefix resolves to nothing. The prefix is taken off before any provider is asked, so the
-plugin layer sees the plain address; a read still answers with the URI the client sent.
+Any other prefix resolves to nothing. The plugin layer takes the prefix off before any
+provider is asked (GW-4), so every provider sees the plain address; a read still answers with
+the URI the client sent.
 
 **SKL-43.** Neither a scope nor a prefix removes the library segment from an address.
 
