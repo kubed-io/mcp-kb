@@ -28,8 +28,8 @@ dependencies = [
   # The platform this server and selenium-flow share (kubed-io/quick-mcp), and
   # the one route to FastMCP: the sibling namespace package kubed.mcp builds the
   # server and re-exports every FastMCP and MCP SDK name kb uses, and it owns the
-  # FastMCP pin, so kb declares none of its own. Pre-1.0, so a minor is a break.
-  # Milestones are release candidates, and a bump moves the pin.
+  # FastMCP pin, so kb declares none of its own. Pre-1.0, so a minor is a break:
+  # the range takes 0.3's patches and stops short of 0.4, which a bump moves to.
   "kubed-mcp>=0.3.0,<0.4",
   "pyyaml>=6.0",
   "python-frontmatter>=1.1",
