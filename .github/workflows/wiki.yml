@@ -7,6 +7,7 @@ name: 📖 Wiki
 #
 #   pull_request        generate only, never pushes — the "does it still build?" gate
 #   push: main          generate and push to the wiki
+#   push: issue-*       only bring the open PRs into that family branch up to date
 #   workflow_dispatch   manual republish, e.g. after editing wiki/notes
 #   workflow_call       called by another workflow; the caller decides whether to push
 #
@@ -31,7 +32,7 @@ on:
     # description, and spec/builder.py reads all three off this file's metadata.
     - pyproject.toml
   push:
-    branches: [main]
+    branches: [main, 'issue-*']
     paths:
     - kubed/**
     - wiki
@@ -77,7 +78,10 @@ jobs:
     env:
       # true only for a real publish: merge to main, or a dispatch/call with
       # push=true. A pull_request run never pushes.
-      PUSH: ${{ (github.event_name == 'push' || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && inputs.push)) && 'true' || 'false' }}
+      PUSH: ${{ ((github.event_name == 'push' && github.ref_name == 'main') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && inputs.push)) && 'true' || 'false' }}
+      # a push to a family's branch (issue-*) only brings the PRs into it up to date (the last
+      # step): nothing is generated or published, and the wiki's master is never written
+      FAMILY: ${{ github.event_name == 'push' && github.ref_name != 'main' }}
     steps:
 
     # Only a run that pushes needs a writable identity, and only for the
@@ -151,6 +155,7 @@ jobs:
         fi
 
     - name: Set up Python
+      if: env.FAMILY != 'true'
       uses: actions/setup-python@v7
       with:
         python-version: '3.14'
@@ -158,13 +163,16 @@ jobs:
     # The generator imports the package to build the pages from the live models
     # and a live server, so the package itself is the dependency.
     - name: Install
+      if: env.FAMILY != 'true'
       run: pip install .
 
     - name: Generate
+      if: env.FAMILY != 'true'
       run: python scripts/generate_wiki.py
 
     - name: Diff
       id: diff
+      if: env.FAMILY != 'true'
       working-directory: wiki
       run: |
         git add -A
@@ -234,3 +242,14 @@ jobs:
         git add wiki
         git commit -m "chore: bump wiki submodule [skip ci]"
         git push "$remote" "HEAD:${GITHUB_REF_NAME}"
+
+    # A family branch's push (a pin moved straight onto issue-<P>) leaves the sub-issue PRs into
+    # it behind, their wiki pointer conflicting: this brings each one up to date, as the other
+    # agent-flow repositories' wiki.yml does (quick-mcp #41). Only on a family branch here; main's
+    # pushes are unchanged.
+    - name: Bring the Open PRs Up to Date
+      if: ${{ !cancelled() && env.FAMILY == 'true' }}
+      uses: kubed-io/actions/pr-update@main
+      with:
+        client-id: ${{ vars.GH_CLIENT_ID }}
+        private-key: ${{ secrets.GH_APP_KEY }}
