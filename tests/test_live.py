@@ -523,20 +523,37 @@ def test_a_server_that_hangs_is_asked_once_and_then_left_alone(
     Two things stop it. The revalidation client has a timeout well under the
     TTL, so one read costs a bounded moment; and a failure puts the source in a
     cooldown, so nothing after the first pays anything at all.
+
+    "Nothing" is counted, not timed: a read that never asks the hung server
+    cannot wait on it, and a wall-clock bound on the repeats only measures the
+    runner (one of them took 122 ms on a loaded 3.11 job, against 50 ms).
     """
     monkeypatch.setattr(live, "REVALIDATE_TIMEOUT", 0.2)
     monkeypatch.setattr(live, "COOLDOWN_SECONDS", 60.0)
     knowledge_base = black_hole(tmp_path)
+    asked: list[str] = []
+    asking = live.fetch_file
+
+    def counted(fetch, root, rel, *args, **kwargs):
+        asked.append(rel)
+        return asking(fetch, root, rel, *args, **kwargs)
+
+    monkeypatch.setattr(live, "fetch_file", counted)
 
     with caplog.at_level("WARNING"):
         first = _elapsed(knowledge_base, URI)
-        after = [_elapsed(knowledge_base, URI) for _ in range(5)]
-        other = _elapsed(knowledge_base, GUIDE)
+        once = len(asked)
+        for _ in range(5):
+            read_served(knowledge_base, URI)
+        repeats = len(asked) - once
+        read_served(knowledge_base, GUIDE)
+        other = len(asked) - once - repeats
 
+    assert once >= 1, "the first read asks the server"
     assert "first" in read_served(knowledge_base, URI), "the cached copy is still served"
     assert first < 1.0, f"one read must not cost the httpx default: {first:.2f}s"
-    assert max(after) < 0.05, f"a wedged server must cost nothing twice: {after}"
-    assert other < 0.05, "the cooldown covers the source, not the one file"
+    assert repeats == 0, f"a wedged server must not be asked twice: {asked}"
+    assert other == 0, f"the cooldown covers the source, not the one file: {asked}"
     assert caplog.text.count("revalidating") == 1
 
 

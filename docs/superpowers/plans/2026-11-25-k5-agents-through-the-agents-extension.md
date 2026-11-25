@@ -7,6 +7,13 @@
 > at what `issue-80` pins). The design is below; there is no separate design file. Three points
 > of the notes could not be built as written against rc2's source, and D4, D5 and D7 say what
 > replaces each.
+>
+> **Approved 2026-11-25**, with D4, D5 and D7 checked against kubed-mcp `v0.3.0` as well as rc2.
+> In 0.3.0 `agent_meta` still runs once per agent at set entry with no view, so N9 stays and no
+> quick-mcp row is raised from K5. A raise still skips one agent and keeps its plugin (PLUG-73),
+> which D4 relies on, and D5 is K4's shape, with one warning. Task 0 ran under rc2: `issue-80`
+> still pins it, as #99 (0.3.0) has not merged. K6 (#84) writes index v12 and accepts v11's
+> `fetches`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -168,7 +175,13 @@ in [plugins-and-libraries.md](../specs/plugins-and-libraries.md) and PRM-60 in
 ### Named changes for QA's dump
 
 - **A1. Agent skip reasons are the layer's.** `/health`'s `skipped` rows for agent files carry
-  the layer's reasons (check 3), and Task 0 records its twin and non-UTF-8 wording.
+  the layer's reasons (check 3). Task 0 read them under rc2:
+  - a twin in the same plugin: `agent <library>_twin is already served by agents/twin-1.md`. It
+    is skipped, not renamed: a rename is only for a clash with another plugin;
+  - a file that is not UTF-8: Python's decode error, such as `'utf-8' codec can't decode byte
+    0xe9 in position 11: invalid continuation byte`, with no path in it;
+  - an unusable name: `agent name '<library>_a:b' is not a usable name`, with the name already
+    prefixed.
   - A file with no frontmatter `name` serves under its stem, as before, and is no longer listed
     as skipped.
   - A blank `description`, frontmatter with no JSON form, and a name the layer refuses were
@@ -240,14 +253,14 @@ Unchanged, and not in the dump diff:
   manifest=…)`, `serve(...)`, `agent_meta(fn)`, and `kubed.mcp.agents.parse_agent`, `META_KEY`.
 - Produces: the go/no-go for D4 to D7, and A1's exact reasons.
 
-- [ ] **Step 1: Bring in `issue-80`**
+- [x] **Step 1: Bring in `issue-80`**
 
 Run: `git fetch origin && git merge origin/issue-80`, then `pip install -e '.[test]'` and
 `pytest -q`.
 Expected: green, with the K4 baseline's skips and its one xfail (N15). Read the pin in
 `pyproject.toml`.
 
-- [ ] **Step 2: Write the layer checks**
+- [x] **Step 2: Write the layer checks**
 
 These use kubed-mcp alone, with no kb code: a `QuickMCP("mcp-kb")` and one plugin folder in
 `tmp_path` holding `.claude-plugin/plugin.json` `{"name": "p"}`, `skills/s/SKILL.md`, and agents
@@ -281,14 +294,14 @@ async def test_the_layers_skip_reasons(tmp_path):
 Write each `...` and the hook helper out in full. Run the tests once, then write the values the
 rc gives into the assertions and into A1.
 
-- [ ] **Step 3: Run them**
+- [x] **Step 3: Run them**
 
 Run: `pytest tests/test_agent_layer.py -v`
 Expected: all pass. **If the hook runs in a build (once per view), stop.** A scoped `_meta.skills`
 becomes buildable, and D7 goes back to Dr K. **If `parse_agent` or `META_KEY` is not exported,
 stop:** D6 then needs a facade row in quick-mcp, and kb does not import around it.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/test_agent_layer.py docs/superpowers/plans/2026-11-25-k5-agents-through-the-agents-extension.md
