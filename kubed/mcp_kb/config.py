@@ -7,7 +7,7 @@ is the worst failure a config file has. The models are also the published
 schema: ``config.schema.json`` is ``Config.model_json_schema()`` and a test
 fails when the two drift.
 
-Three lists, each answering one question:
+Three lists and a section, each answering one question:
 
 - a **source** is a backend, named once: where bytes come from and how to log
   in. A plugin never carries a credential, so a token is declared in exactly
@@ -19,6 +19,9 @@ Three lists, each answering one question:
   the same kind of thing.
 - a **library** is a saved query over plugins, and the first segment of every
   URI served: a marketplace, a list of plugin names, or a ``pluginSelector``.
+- the **telemetry** section is kubed-mcp's ``TelemetrySettings``, as it is: what
+  the process reports, never what it serves. A setting for it is added
+  upstream, never here.
 
 The shape of a source follows PEP 610's direct-URL data structure: a URL and a
 credential that is a *reference* (``{env: NAME}``) rather than a value, so the
@@ -38,6 +41,7 @@ from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 
 import yaml
+from kubed.mcp import TelemetrySettings
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -98,6 +102,9 @@ def redact(text: str, secrets: list[str]) -> str:
     for secret in sorted(set(secrets), key=len, reverse=True):
         text = text.replace(secret, "***")
     return text
+
+
+CREDENTIAL_REFUSAL = "telemetry.profiles must not embed a credential"
 
 
 class ConfigError(ValueError):
@@ -398,11 +405,38 @@ class LibraryConfig(Strict):
 
 
 class Config(Strict):
-    """The whole config file: the sources, the plugins under them, the libraries."""
+    """The whole config file: the sources, the plugins under them, the libraries,
+    and the process's telemetry."""
 
     sources: list[SourceConfig] = Field(default_factory=list)
     plugins: list[PluginConfig] = Field(default_factory=list)
     libraries: list[LibraryConfig] = Field(default_factory=list)
+    telemetry: TelemetrySettings = Field(
+        default_factory=TelemetrySettings,
+        description=(
+            "What the process reports: kubed-mcp's profiles, traces and metrics. "
+            "Absent, every signal is off."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _telemetry_carries_no_credential(self) -> Config:
+        """The profiles address is published, so it may not carry a login.
+
+        The message does not quote the address back: it is the credential. One
+        urlsplit cannot parse (an unclosed or misplaced bracket) is refused the
+        same way when it holds an ``@``, or its error would quote it instead.
+        """
+        profiles = self.telemetry.profiles or ""
+        try:
+            parts = urlsplit(profiles)
+        except ValueError:
+            if "@" in profiles:
+                raise ValueError(CREDENTIAL_REFUSAL) from None
+            raise
+        if parts.username or parts.password:
+            raise ValueError(CREDENTIAL_REFUSAL)
+        return self
 
     @model_validator(mode="after")
     def _names_are_unique(self) -> Config:
@@ -564,6 +598,12 @@ def load_config(path: Path) -> Config:
     except yaml.YAMLError as exc:
         raise ConfigError(f"{path} is not YAML: {exc}") from exc
     except ValidationError as exc:
+        if any(CREDENTIAL_REFUSAL in e["msg"] for e in exc.errors()):
+            # That validator runs on the whole Config, so pydantic echoes the whole
+            # input, truncated, and the cut can drop the "://" the mask keys on.
+            # Hiding inputs on Config would also hide the nested ones the other
+            # refusals quote, so only this one is reported without its input.
+            raise ConfigError(f"{path}: {CREDENTIAL_REFUSAL}") from None
         raise ConfigError(f"{path}: {USERINFO.sub('***@', str(exc))}") from exc
 
 

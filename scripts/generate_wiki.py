@@ -67,8 +67,8 @@ FOOTER_LINKS = "[Home](Home) · [Installing](Installing) · [Deployment](Deploym
 
 # The config models, in the order a reader meets them: the file itself, then
 # its three lists, then the selector a library may carry, then the two small
-# things a source points at. `Config` is the schema's root; the rest are its
-# `$defs`.
+# things a source points at, then the telemetry section, which is kubed-mcp's.
+# `Config` is the schema's root; the rest are its `$defs`.
 MODELS = [
     "Config",
     "SourceConfig",
@@ -77,6 +77,7 @@ MODELS = [
     "Selector",
     "BasicAuth",
     "EnvRef",
+    "TelemetrySettings",
 ]
 
 

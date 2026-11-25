@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import pytest
+from kubed.mcp import TelemetrySettings
 from pydantic import ValidationError
 
 from kubed.mcp_kb.config import (
@@ -611,3 +612,51 @@ def test_a_library_named_like_the_server_is_refused():
         Config.model_validate(
             {"libraries": [{"name": "mcp-kb", "source": "file:///x"}]}
         )
+
+
+def test_no_telemetry_section_is_every_signal_off(tmp_path):
+    config = load_config(write(tmp_path, ""))
+    assert config.telemetry == TelemetrySettings()
+    assert config.telemetry.profiles is None and config.telemetry.otel is False
+
+
+def test_a_telemetry_section_parses(tmp_path):
+    config = load_config(
+        write(
+            tmp_path,
+            "telemetry:\n  profiles: http://pyroscope.example.com:4040\n"
+            "  otel: true\n  tags: {team: platform}\n",
+        )
+    )
+    assert config.telemetry.profiles == "http://pyroscope.example.com:4040"
+    assert config.telemetry.otel is True
+    assert config.telemetry.tags == {"team": "platform"}
+    assert config.telemetry.profile_cpu is True
+
+
+def test_a_typod_telemetry_key_is_refused(tmp_path):
+    text = "telemetry:\n  profile: http://pyroscope.example.com\n"
+    with pytest.raises(ConfigError, match="profile"):
+        load_config(write(tmp_path, text))
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["pyroscope.example.com:4040", "pyroscope:4040", "[::1:4040", "[pyroscope]:4040"],
+)
+def test_a_credential_in_the_profiles_address_is_refused(tmp_path, host):
+    # A short host keeps the token's tail inside pydantic's truncated input repr,
+    # and a host urlsplit cannot parse must be refused too, not reported as it is.
+    text = f"telemetry:\n  profiles: http://me:s3cret@{host}\n"
+    with pytest.raises(ConfigError) as raised:
+        load_config(write(tmp_path, text))
+    assert "must not embed a credential" in str(raised.value)
+    assert "s3cret" not in str(raised.value)
+
+
+def test_the_schema_carries_the_telemetry_section():
+    published = schema()
+    assert published["properties"]["telemetry"]["$ref"].endswith("/TelemetrySettings")
+    model = published["$defs"]["TelemetrySettings"]
+    assert {"profiles", "otel", "tags"} <= set(model["properties"])
+    assert model["additionalProperties"] is False

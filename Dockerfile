@@ -52,8 +52,10 @@ set -eu
 pip install --no-cache-dir --upgrade pip
 # Read out of pyproject.toml rather than restated here: a second copy is a
 # second thing to keep in step, and the way that fails is an image built against
-# dependencies nobody declared. No --extra: [build] and [test] are both tooling.
-python scripts/requirements.py runtime > /tmp/requirements.txt
+# dependencies nobody declared. `--extra telemetry` and no other: the profiler and
+# OpenTelemetry belong in the image and in no plain install, and [build] and
+# [test] are tooling.
+python scripts/requirements.py runtime --extra telemetry > /tmp/requirements.txt
 pip install --no-cache-dir -r /tmp/requirements.txt
 SHELL
 
@@ -97,8 +99,9 @@ COPY examples/config.yaml /etc/mcp-kb/config.yaml
 # still resolve. That is an assumption worth failing the BUILD over rather than
 # a running pod, so it is checked here — this imports the whole dependency tree,
 # which is what would break if a wheel needed a shared library only the fat
-# image has.
-RUN python -c "from kubed.mcp_kb.server import KnowledgeBase"
+# image has. The telemetry packages are imported too, so a wheel that will not
+# load on -slim fails the build.
+RUN python -c "import pyroscope, opentelemetry.sdk; from kubed.mcp_kb.server import KnowledgeBase"
 
 # Where a source is fetched into at start — a git clone's export, a mirrored
 # file:// tree, whatever the config names. Owned by the runtime user so a
