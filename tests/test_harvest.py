@@ -173,7 +173,9 @@ def test_grafana_entries_serve_their_declared_skills(tmp_path):
     record = build_plugin(completed, tmp_path, globs=globs)
 
     assert record.status == "ok"
-    assert [row.name for row in record.skills] == ["loki"]
+    assert [(s.name, s.path) for s in record.skills] == [
+        ("loki", tmp_path / "skills/grafana-lgtm/loki")
+    ]
 
 
 @pytest.mark.unit

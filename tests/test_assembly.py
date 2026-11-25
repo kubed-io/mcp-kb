@@ -17,8 +17,14 @@ import pytest
 from fastmcp import Client
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.catalogue.index import PluginRecord, now
-from kubed.mcp_kb.catalogue.snapshot import Library, assemble_libraries, build_snapshot
+from kubed.mcp_kb.catalogue.index import now
+from kubed.mcp_kb.catalogue.skills import Skill
+from kubed.mcp_kb.catalogue.snapshot import (
+    Harvest,
+    Library,
+    assemble_libraries,
+    build_snapshot,
+)
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.pins import what_is_wrong
 from kubed.mcp_kb.mcp.scope import Scope
@@ -323,15 +329,12 @@ async def test_an_unreadable_manifest_is_reported_without_the_cache_path(
 
 
 def test_a_plugin_status_never_carries_a_null_error(tmp_path):
-    """`PluginStatus.error` is a string: an ok record with no root -- a shape
-    nothing builds, but the index could hold -- says so in words."""
+    """`PluginStatus.error` is a string: an ok harvest with no root -- a shape
+    nothing builds -- says so in words."""
     plugin = fake_plugin("p", tmp_path)
-    record = PluginRecord(
-        id="p", fetch=plugin.fetch.key, root=None, status="ok", error=None,
-        built=now(), skills=(), prompts=(), files=(), skill_dirs=(),
-    )
+    harvest = Harvest(id="p", root=None, status="ok", error=None, built=now())
     snapshot = build_snapshot(
-        Config(), [plugin], [Library("lib", "", ("p",))], {}, {"p": record}, 0
+        Config(), [plugin], [Library("lib", "", ("p",))], {}, {"p": harvest}, 0
     )
 
     assert snapshot.status["plugins"]["p"]["error"] == "not harvested"
@@ -541,9 +544,8 @@ async def test_an_entrys_version_stands_beside_a_manifest_without_one(tmp_path):
 async def test_a_cold_start_reuses_the_index_and_re_reads_the_marketplace(
     market, tmp_path, monkeypatch
 ):
-    """Nothing is cloned or harvested on a restart; the marketplace's entries
-    are re-derived from the tree already on disk."""
-    from kubed.mcp_kb import server
+    """Nothing is cloned on a restart; the marketplace's entries are re-derived,
+    and harvested, from the tree already on disk."""
     from kubed.mcp_kb.sources import SourceLoader
 
     config = _config(tmp_path, libraries=[{"name": "obs", "source": "lab://market"}])
@@ -552,10 +554,8 @@ async def test_a_cold_start_reuses_the_index_and_re_reads_the_marketplace(
     def must_not_run(*args, **kwargs):
         raise AssertionError("a cold start must reuse the index")
 
-    # server.py imports build_plugin by name, so it is patched where it is
-    # called from; every fetch is materialised through its source's loader.
+    # Every fetch is materialised through its source's loader.
     monkeypatch.setattr(SourceLoader, "materialise", must_not_run)
-    monkeypatch.setattr(server, "build_plugin", must_not_run)
     second = KnowledgeBase(config, tmp_path / "cache")
 
     assert second.status["libraries"]["obs"]["plugins"] == ["lgtm@obs", "k6@obs"]
@@ -908,14 +908,16 @@ def test_notes_and_list_skills_carry_through(tmp_path):
 def test_a_snapshot_strips_library_text_before_the_index_uses_it(tmp_path):
     """A YAML `notes: |` block ends in a newline; it must not double the blank
     line, and a whitespace-only value adds no line at all."""
-    from kubed.mcp_kb.catalogue.index import SkillRow
-
     plugin = fake_plugin("p", tmp_path)
-    rows = tuple(SkillRow(n, f"{n}.", str(tmp_path / n)) for n in ("a", "b"))
-    record = PluginRecord(
-        id="p", fetch=plugin.fetch.key, root=str(tmp_path), status="ok",
-        error=None, built=now(), skills=rows, prompts=(), files=(),
-        skill_dirs=(),
+    skills = tuple(
+        Skill(
+            name=n, library="", folder="", description=f"{n}.", path=tmp_path / n,
+            plugin="p", root=tmp_path,
+        )
+        for n in ("a", "b")
+    )
+    harvest = Harvest(
+        id="p", root=tmp_path, status="ok", error=None, built=now(), skills=skills
     )
 
     def index(description, notes):
@@ -924,7 +926,7 @@ def test_a_snapshot_strips_library_text_before_the_index_uses_it(tmp_path):
             [plugin],
             [Library("lib", description, ("p",), notes=notes)],
             {},
-            {"p": record},
+            {"p": harvest},
             0,
         )
         return snapshot.catalogue.read("skill://lib/_index.md")

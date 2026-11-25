@@ -1105,7 +1105,7 @@ def test_a_publisher_that_raises_leaves_the_records_as_they_were(
     webdav, tmp_path, monkeypatch
 ):
     """I3: a refresh whose publish raises keeps the fetches, plugins, libraries
-    and records it had, so live re-reads go on against the tree being served,
+    and harvests it had, so live re-reads go on against the tree being served,
     and the next refresh publishes the new content."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     mcp = serving_of(knowledge_base)._mcp
@@ -1114,7 +1114,7 @@ def test_a_publisher_that_raises_leaves_the_records_as_they_were(
         knowledge_base._fetches,
         knowledge_base._plugins,
         knowledge_base._libraries,
-        knowledge_base._records,
+        knowledge_base._harvests,
     )
     publish = knowledge_base._publish
     raised = []
@@ -1135,7 +1135,7 @@ def test_a_publisher_that_raises_leaves_the_records_as_they_were(
         knowledge_base._fetches,
         knowledge_base._plugins,
         knowledge_base._libraries,
-        knowledge_base._records,
+        knowledge_base._harvests,
     ) == before
 
     # Live re-reads resume against the tree being served (N6: one request late).

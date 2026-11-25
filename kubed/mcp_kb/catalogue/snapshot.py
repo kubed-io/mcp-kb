@@ -8,16 +8,17 @@ assignment, so a listing in flight is served by a consistent catalogue and no
 reader ever sees a half-rebuilt one. Nothing here mutates a snapshot; there is
 no method that could.
 
-Two units of work, because two things are expensive. ``build_fetch`` does the
-blocking part for a *tree* (materialise, fingerprint) and hands back a
-``FetchRecord``; ``build_plugin`` does the harvest of one *plugin* out of such
-a tree (find the skills, parse frontmatter, find the prompt, agent and other files)
-and hands back a ``PluginRecord`` -- rows, not objects, because both records
-are also what gets written to ``index.json``. ``build_snapshot`` does the cheap
-part: assign every plugin to the libraries that select it and turn its rows
-into the live objects the catalogue needs. That split is what lets a refresh
-rebuild one fetch and reuse the rest, and what lets a cold start rebuild
-*nothing* and still serve.
+Two units of work. ``build_fetch`` does the blocking part for a *tree*
+(materialise, fingerprint) and hands back a ``FetchRecord``, which is what
+``index.json`` holds. ``build_plugin`` does the harvest of one *plugin* out of
+such a tree (find the skills, parse frontmatter, find the prompt, agent and
+other files) and hands back a ``Harvest``. A harvest is in memory only, and is
+redone for every plugin on every generation: it is a local walk, and a harvest
+kept across generations is one the lists that chose it can move out from under
+(SRC-48). ``build_snapshot`` then assigns every plugin to the libraries that
+select it and gives each its copy of the plugin's skills. That split is what
+lets a refresh rebuild one fetch and keep the rest, and what lets a cold start
+fetch *nothing* and still serve.
 
 A failed fetch or plugin is a record, not an exception. One unreachable
 repository must not empty the catalogue of everything else, so the failure
@@ -36,6 +37,7 @@ import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
 from ..config import Config, scrub
 from ..mcp.scope import EVERYTHING, Scope
@@ -49,7 +51,7 @@ from ..sources import AccessRefused, SourceError, SourceLoader
 from ..sources.live import Revalidator, is_live
 from . import harvest
 from .agents import ServedAgent
-from .index import FetchRecord, PluginRecord, SkillRow, now
+from .index import FetchRecord, now
 from .prompts import FilePrompt
 from .skills import LibraryFiles, Skill, SkillIndex, load_skills, naming_problem
 from .uris import RESERVED_NAMES, SCHEME, Catalogue, LibraryText, _count, uri_for
@@ -90,6 +92,44 @@ class Library:
 
 
 @dataclass(frozen=True)
+class Harvest:
+    """One plugin's harvest out of its fetch's tree, held in memory.
+
+    ``root`` is the plugin root -- the fetch root joined with the plugin's
+    subdirectory -- or ``None`` for a plugin that has none. A plugin fails on
+    its own when its root is not a directory, its manifest does not parse, its
+    fetch failed or its tree could not be read; the error says which.
+
+    ``skills`` carry no library and no folder: those are the library's, and
+    each library takes its copy of a skill with ``dataclasses.replace``, so a
+    plugin in two libraries is one harvest served twice. Every path but
+    ``skill_dirs`` is root-relative, in the order the harvest found it.
+    """
+
+    id: str
+    root: Path | None
+    status: Literal["ok", "failed"]
+    error: str | None
+    built: str
+    skills: tuple[Skill, ...] = ()
+    # The prompt files the harvest selected, in path order. Nothing is parsed
+    # here: the plugin layer reads them, through kb's command reader, when the
+    # plugin is added (PRM-18).
+    prompts: tuple[str, ...] = ()
+    # Those of ``prompts`` a ``commands`` declaration selects, which are read
+    # in Claude's dialect wherever they sit (PRM-14).
+    claude_prompts: tuple[str, ...] = ()
+    # The declared command folders, which name what is below them (PLG-25).
+    command_dirs: tuple[str, ...] = ()
+    files: tuple[str, ...] = ()
+    skill_dirs: tuple[Path, ...] = ()
+    # The agent files the harvest found, read by nothing here; and the paths
+    # a fallback must refuse (AGT-3).
+    agents: tuple[str, ...] = ()
+    agent_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class PluginCommands:
     """One plugin's prompt files, as the plugin layer is handed them (D1).
 
@@ -125,7 +165,8 @@ class Snapshot:
     ``agents`` is what the plugin layer serves, likewise, in name order (AGT-7),
     and ``agent_files`` each harvested plugin's agent files by plugin id: what
     kb found, which a live plugin's watch stamps and the parity guard holds
-    the layer to (D4).
+    the layer to (D4). ``skill_dirs`` is each harvested plugin's skill
+    folders by plugin id, root-relative.
     """
 
     generation: int
@@ -147,6 +188,7 @@ class Snapshot:
     commands: Mapping[str, PluginCommands] = field(default_factory=dict)
     agent_files: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     agents: tuple[ServedAgent, ...] = ()
+    skill_dirs: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
     def visible_agents(self, scope: Scope = EVERYTHING) -> list[ServedAgent]:
         """The agents served that ``scope`` admits, in name order (AGT-15)."""
@@ -385,8 +427,8 @@ def effective_globs(plugin: Plugin, root: Path) -> Globs:
     return with_manifest(plugin, root)[1]
 
 
-def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
-    """Harvest one plugin out of its tree: the rows, and what could not be loaded.
+def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> Harvest:
+    """Harvest one plugin out of its tree: its skills and the files it serves.
 
     ``root`` is the plugin root -- the fetch root joined with the plugin's
     subdirectory -- and ``globs`` is already resolved (``effective_globs``).
@@ -405,7 +447,7 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
         dirs = (
             [] if globs.skills == () else harvest.skill_dirs(root, globs.skills or ())
         )
-        # Rows carry no library; the one given here is discarded by from_skill.
+        # No library and no folder: each library gives its copy its own.
         skills = load_skills(dirs, library="", plugin=plugin, root=root)
         files = harvest.library_files(root, globs, dirs)
         declared = harvest.command_files(root, globs)
@@ -421,21 +463,20 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
     except OSError as exc:
         return failed_plugin(plugin, unrooted(str(exc), root))
 
-    return PluginRecord(
+    return Harvest(
         id=plugin.id,
-        fetch=plugin.fetch.key,
-        root=str(root),
+        root=root,
         status="ok",
         error=None,
         built=now(),
-        skills=tuple(SkillRow.from_skill(s) for s in skills),
+        skills=tuple(skills),
         prompts=prompts,
+        claude_prompts=claude,
+        command_dirs=globs.command_dirs,
         files=tuple(files),
-        skill_dirs=tuple(str(d) for d in dirs),
+        skill_dirs=tuple(dirs),
         agents=agents,
         agent_paths=agent_paths,
-        globs=globs,
-        claude_prompts=claude,
     )
 
 
@@ -563,12 +604,13 @@ def build_snapshot(
     plugins: list[Plugin],
     libraries: list[Library],
     fetches: dict[str, FetchRecord],
-    records: dict[str, PluginRecord],
+    harvests: dict[str, Harvest],
     generation: int,
 ) -> Snapshot:
-    """Live objects from rows: the cheap half, run on every rebuild.
+    """The catalogue out of this generation's harvests, run on every rebuild.
 
-    Skills are rebuilt from their rows without touching disk. Prompts are not
+    Each library takes its copy of each plugin's skills without touching
+    disk. Prompts are not
     loaded here at all: each plugin's prompt files become its
     ``PluginCommands``, and the plugin layer reads them through kb's command
     reader when the set is published, which is what fills ``prompts``.
@@ -595,9 +637,9 @@ def build_snapshot(
     skills: list[Skill] = []
     resources = LibraryFiles(revalidate)
     admitted = {
-        pid: _admit(record)
-        for pid, record in records.items()
-        if record.status == "ok" and record.root is not None
+        pid: _admit(harvest)
+        for pid, harvest in harvests.items()
+        if harvest.status == "ok" and harvest.root is not None
     }
     # Filled by the first library that serves each plugin: its own counts.
     served: dict[str, dict[str, int]] = {}
@@ -608,7 +650,7 @@ def build_snapshot(
         entry, own = _serve_library(
             lib,
             by_id,
-            records,
+            harvests,
             admitted,
             resources,
             served,
@@ -620,7 +662,7 @@ def build_snapshot(
     status_plugins = {
         plugin.id: _plugin_status(
             plugin,
-            records.get(plugin.id),
+            harvests.get(plugin.id),
             [lib.name for lib in libraries if plugin.id in lib.plugins],
             admitted.get(plugin.id),
             served.get(plugin.id),
@@ -634,7 +676,7 @@ def build_snapshot(
         key: _fetch_status(record, key in live_keys) for key, record in fetches.items()
     }
 
-    commands = {pid: _commands(records[pid]) for pid in admitted}
+    commands = {pid: _commands(harvests[pid]) for pid in admitted}
     index = SkillIndex(skills)
     return Snapshot(
         generation=generation,
@@ -668,25 +710,32 @@ def build_snapshot(
         libraries=tuple(libraries),
         plugins=tuple(plugins),
         commands=commands,
-        agent_files={pid: records[pid].agents for pid in admitted},
+        agent_files={pid: harvests[pid].agents for pid in admitted},
+        skill_dirs={pid: _skill_folders(harvests[pid]) for pid in admitted},
     )
 
 
-def _commands(record: PluginRecord) -> PluginCommands:
+def _skill_folders(harvested: Harvest) -> tuple[str, ...]:
+    """A harvested plugin's skill folders, as the plugin names them."""
+    root = harvested.root or Path()
+    return tuple(_relative(path, root) for path in harvested.skill_dirs)
+
+
+def _commands(harvested: Harvest) -> PluginCommands:
     """A harvested plugin's prompt files, and the entries that read them."""
-    dirs = () if record.globs is None else record.globs.command_dirs
+    dirs = harvested.command_dirs
     return PluginCommands(
-        selected=record.prompts,
-        claude=frozenset(record.claude_prompts),
+        selected=harvested.prompts,
+        claude=frozenset(harvested.claude_prompts),
         command_dirs=dirs,
-        entries=harvest.command_entries(record.prompts, dirs),
+        entries=harvest.command_entries(harvested.prompts, dirs),
     )
 
 
 def _serve_library(
     lib: Library,
     by_id: dict[str, Plugin],
-    records: dict[str, PluginRecord],
+    harvests: dict[str, Harvest],
     admitted: dict[str, _Admitted],
     resources: LibraryFiles,
     served: dict[str, dict[str, int]],
@@ -695,9 +744,10 @@ def _serve_library(
     """One library's plugins in order: its ``/health`` entry and its skills.
 
     Each plugin's skills take their addresses here, in the library's folder for
-    the plugin (``folder_for``). Registers the library's files on ``resources``
-    as it goes. ``served`` is written for a plugin the first time any library
-    serves it, since it is the plugin's own and the same in every library. Its
+    the plugin (``folder_for``): each library's is its own copy of the skill.
+    Registers the library's files on ``resources`` as it goes. ``served`` is
+    written for a plugin the first time any library serves it, since it is the
+    plugin's own and the same in every library. Its
     ``prompts`` and ``agents`` counts are the plugin's selected prompt files
     and the agent files it found, until the plugin layer says what it served
     (``SkillServing._narrowed``), and so are the library's. ``shadowed`` -- its
@@ -721,19 +771,19 @@ def _serve_library(
         plugin = by_id[pid]
         if pid not in admitted:
             continue
-        root = Path(records[pid].root or "")
+        harvested = harvests[pid]
+        root = harvested.root or Path()
         own = [
-            row.to_skill(
+            replace(
+                skill,
                 library=lib.name,
                 folder=folder_for(lib, plugin),
-                plugin=pid,
-                root=root,
                 category=plugin.category,
                 tags=plugin.labels,
                 library_categories=lib_categories,
                 live=is_live(plugin.fetch),
             )
-            for row in admitted[pid].skills
+            for skill in admitted[pid].skills
         ]
         files, inside = _outside_skills(lib.name, own, admitted[pid].files)
         rows = shadowed.setdefault(pid, [])
@@ -748,16 +798,16 @@ def _serve_library(
             lib.name,
             root,
             files,
-            [Path(d) for d in records[pid].skill_dirs],
+            list(harvested.skill_dirs),
             plugin=plugin,
             library_categories=lib_categories,
-            agent_paths=[root / a for a in records[pid].agent_paths],
+            agent_paths=[root / a for a in harvested.agent_paths],
         )
         counts = {
             "skills": len(own),
-            "prompts": len(records[pid].prompts),
+            "prompts": len(harvested.prompts),
             "files": len(files),
-            "agents": len(records[pid].agents),
+            "agents": len(harvested.agents),
         }
         served.setdefault(pid, counts)
         for key, count in counts.items():
@@ -773,7 +823,7 @@ def _serve_library(
 
 def _plugin_status(
     plugin: Plugin,
-    record: PluginRecord | None,
+    harvested: Harvest | None,
     libraries: list[str],
     admitted: _Admitted | None,
     served: dict[str, int] | None,
@@ -781,7 +831,7 @@ def _plugin_status(
 ) -> dict:
     """One plugin's entry in ``/health``: what it is, and what it yielded."""
     entry: dict = {
-        "status": record.status if record is not None else "failed",
+        "status": harvested.status if harvested is not None else "failed",
         "fetch": plugin.fetch.key,
         "root": plugin.subdir,
         "category": plugin.category,
@@ -792,10 +842,10 @@ def _plugin_status(
         # Already scrubbed and unrooted by with_manifest, which had the root.
         **({"notes": list(plugin.notes)} if plugin.notes else {}),
     }
-    if record is None or admitted is None:
-        # A record that is not ok carries why; one that never got a root has
+    if harvested is None or admitted is None:
+        # A harvest that is not ok carries why; one that never got a root has
         # nothing to say, and the key is typed as a string.
-        entry["error"] = (record.error if record is not None else None) or (
+        entry["error"] = (harvested.error if harvested is not None else None) or (
             "not harvested"
         )
         return entry
@@ -805,13 +855,13 @@ def _plugin_status(
     # served of them (P9, AGT-14).
     counts = served or {
         "skills": len(admitted.skills),
-        "prompts": len(record.prompts),
+        "prompts": len(harvested.prompts),
         "files": len(admitted.files),
-        "agents": len(record.agents),
+        "agents": len(harvested.agents),
     }
     entry.update(counts)
-    entry["built"] = record.built
-    skipped = [*record.skipped, *admitted.skipped, *left_out]
+    entry["built"] = harvested.built
+    skipped = [*admitted.skipped, *left_out]
     if skipped:
         entry["skipped"] = skipped
     return entry
@@ -926,15 +976,15 @@ def log_changes(before: dict[str, dict], after: dict[str, dict]) -> None:
 class _Admitted:
     """What of one plugin the address space has room for, library-independent."""
 
-    skills: list[SkillRow]
+    skills: list[Skill]
     files: list[str]
     skipped: list[dict[str, str]]
 
 
-def _admit(record: PluginRecord) -> _Admitted:
+def _admit(harvested: Harvest) -> _Admitted:
     """What of one plugin the address space has room for, and what it has not.
 
-    Returns the skill rows and library files to serve, and a
+    Returns the skills and library files to serve, and a
     ``skipped`` row -- the plugin-relative path and the reason -- for
     everything left out. A skipped thing is a defect in the plugin, not a
     failure of it: the rest serves, and ``/health`` says what is missing and
@@ -963,27 +1013,27 @@ def _admit(record: PluginRecord) -> _Admitted:
         # would repeat the same line each time. ``log_changes`` says it once.
         skipped.append({"path": path, "reason": reason})
 
-    root = Path(record.root or "")
-    served: dict[str, SkillRow] = {}
-    for row in record.skills:
-        path = Path(row.path)
+    root = harvested.root or Path()
+    served: dict[str, Skill] = {}
+    for skill in harvested.skills:
+        path = skill.path
         where = _relative(path, root)
-        problem = naming_problem(row.name)
+        problem = naming_problem(skill.name)
         # A plugin that is one skill has no directory of its own to match: its
         # root is wherever the cache put it, a commit hash for a git fetch.
         at_root = where == "."
-        if problem is None and not at_root and row.name != path.name:
-            problem = f"name {row.name!r} differs from its directory {path.name!r}"
-        if problem is None and row.name in served:
-            first = _relative(Path(served[row.name].path), root)
-            problem = f"{row.name} is already served by {first}"
+        if problem is None and not at_root and skill.name != path.name:
+            problem = f"name {skill.name!r} differs from its directory {path.name!r}"
+        if problem is None and skill.name in served:
+            first = _relative(served[skill.name].path, root)
+            problem = f"{skill.name} is already served by {first}"
         if problem is not None:
             skip(where, problem)
             continue
-        served[row.name] = row
+        served[skill.name] = skill
 
     files: list[str] = []
-    for rel in record.files:
+    for rel in harvested.files:
         name = PurePosixPath(rel).name
         if name in RESERVED_NAMES:
             skip(rel, f"{name} is the name of an index the server generates")
@@ -1156,16 +1206,7 @@ def failed_fetch(key: str, error: str) -> FetchRecord:
     )
 
 
-def failed_plugin(plugin: Plugin, error: str) -> PluginRecord:
-    return PluginRecord(
-        id=plugin.id,
-        fetch=plugin.fetch.key,
-        root=None,
-        status="failed",
-        error=error,
-        built=now(),
-        skills=(),
-        prompts=(),
-        files=(),
-        skill_dirs=(),
+def failed_plugin(plugin: Plugin, error: str) -> Harvest:
+    return Harvest(
+        id=plugin.id, root=None, status="failed", error=error, built=now()
     )

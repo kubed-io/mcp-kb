@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import time
 
 import httpx
@@ -18,7 +19,7 @@ from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.announce import _can_remember
 from kubed.mcp_kb.mcp.scope import Scope
 from kubed.mcp_kb.sources import SourceError, SourceLoader
-from tests.conftest import NESTED, key_of, make_config, server_of
+from tests.conftest import NESTED, V11_PLUGIN_ROW, key_of, make_config, server_of
 
 
 @pytest.fixture
@@ -177,38 +178,71 @@ def test_a_cold_start_rebuilds_a_fetch_whose_root_is_gone(
     assert _fetch(knowledge_base, "deepsource")["status"] == "ok"
 
 
-@pytest.mark.unit
-def test_a_cold_start_reuses_a_plugin_record_only_with_its_fetch(
-    skills_dir, cache, monkeypatch
-):
-    """A plugin's rows describe one tree; a fetch rebuilt is a plugin re-harvested,
-    and a fetch reused is a plugin reused -- without touching the tree."""
-    from kubed.mcp_kb import server
+def _as_v11(cache):
+    """Rewrite the index a boot wrote as v11 did: its fetches, and plugin rows."""
+    raw = json.loads((cache / "index.json").read_text())
+    raw |= {"version": 11, "plugins": {"flatsource": V11_PLUGIN_ROW}}
+    (cache / "index.json").write_text(json.dumps(raw))
 
+
+def _remove(root):
+    for path in sorted(root.rglob("*"), reverse=True):
+        path.rmdir() if path.is_dir() else path.unlink()
+    root.rmdir()
+
+
+@pytest.mark.unit
+def test_a_v11_index_boots_from_disk_with_no_network(skills_dir, cache, monkeypatch):
+    """The upgrade: a v11 file's fetches are kept, every plugin is harvested off
+    the trees on disk, and the file is written again as v12 (D1)."""
+    first = KnowledgeBase(make_config(skills_dir), cache)
+    _as_v11(cache)
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("no network, no fetch")
+
+    monkeypatch.setattr(SourceLoader, "materialise", refuse)
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    second = KnowledgeBase(make_config(skills_dir), cache)
+
+    # Every fetch kept, its `built` unmoved.
+    assert second.status["fetches"] == first.status["fetches"]
+    assert [s.address for s in second.index.visible()] == [
+        s.address for s in first.index.visible()
+    ]
+    written = json.loads((cache / "index.json").read_text())
+    assert written["version"] == 12 and "plugins" not in written
+
+
+@pytest.mark.unit
+def test_a_v11_fetch_whose_tree_is_gone_is_built(skills_dir, cache, monkeypatch):
+    """Review Focus 1: that fetch is built again, and every other is kept (SRC-37)."""
     config = make_config(skills_dir)
     first = KnowledgeBase(config, cache)
-    real = server.build_plugin
-    harvested = []
+    _as_v11(cache)
+    _remove(skills_dir / "flatsource")
 
-    def spy(plugin, root, *, globs):
-        harvested.append(plugin.id)
-        return real(plugin, root, globs=globs)
-
-    # server.py imports the name, so it is patched where it is called from.
-    monkeypatch.setattr(server, "build_plugin", spy)
+    seen = _counting_materialise(monkeypatch)
     second = KnowledgeBase(config, cache)
-    assert harvested == []
-    assert second._records["flatsource"] == first._records["flatsource"]
 
-    # Its fetch's tree gone, the flatsource plugin is rebuilt and nothing else is.
-    gone = skills_dir / "flatsource"
-    for path in sorted(gone.rglob("*"), reverse=True):
-        path.rmdir() if path.is_dir() else path.unlink()
-    gone.rmdir()
-    third = KnowledgeBase(config, cache)
-    assert harvested == []
-    assert third.status["plugins"]["flatsource"]["status"] == "failed"
-    assert third._records["deepsource"] == first._records["deepsource"]
+    assert seen == _keys(config, "flatsource")
+    assert _fetch(second, "flatsource")["status"] == "failed"
+    assert second.status["plugins"]["flatsource"]["status"] == "failed"
+    assert _fetch(second, "deepsource")["status"] == "ok"
+    assert _fetch(second, "deepsource")["built"] == _fetch(first, "deepsource")["built"]
+
+
+@pytest.mark.unit
+def test_every_boot_harvests_every_plugin_from_disk(skills_dir, cache, monkeypatch):
+    """No harvest is reused (D2): a boot walks every plugin's tree, and fetches
+    none of them."""
+    config = make_config(skills_dir)
+    first = KnowledgeBase(config, cache)
+    harvested = _harvests(monkeypatch)
+    seen = _counting_materialise(monkeypatch)
+    KnowledgeBase(config, cache)
+    assert sorted(harvested) == sorted(p.id for p in first._plugins)
+    assert seen == []
 
 
 SIGNATURE = pygit2.Signature("Test", "test@example.com", 1700000000, 0)
@@ -303,15 +337,16 @@ def test_a_cross_repository_entry_whose_lists_changed_is_harvested_again(
     knowledge_base.refresh()
 
     assert _served(knowledge_base, "tools@up") == ["beta"]
-    assert harvested == ["tools@up"], "the untouched plugin is not harvested again"
+    # Every plugin is harvested again on every generation (D2).
+    assert sorted(harvested) == ["own", "tools@up"]
 
 
 @pytest.mark.unit
-def test_a_cold_start_reuses_a_marketplace_entrys_records(
+def test_a_cold_start_re_harvests_a_marketplace_entry_from_disk(
     cross_repo, tmp_path, monkeypatch
 ):
-    """The lists a marketplace entry yields survive the index round trip, so a
-    restart over the same cache harvests nothing."""
+    """A restart over the same cache re-reads the marketplace and harvests its
+    entry off the trees on disk, and fetches nothing."""
     market, config = cross_repo
     _publish(
         market,
@@ -323,9 +358,11 @@ def test_a_cold_start_reuses_a_marketplace_entrys_records(
     KnowledgeBase(config, cache)
 
     harvested = _harvests(monkeypatch)
+    seen = _counting_materialise(monkeypatch)
     again = KnowledgeBase(config, cache)
 
-    assert harvested == []
+    assert "tools@up" in harvested
+    assert seen == []
     assert _served(again, "tools@up") == ["alpha"]
 
 
@@ -358,14 +395,12 @@ def test_refresh_rebuilds_only_the_fetch_whose_fingerprint_changed(skills_dir, c
     config = make_config(skills_dir)
     knowledge_base = KnowledgeBase(config, cache)
     before = _fetch(knowledge_base, "deepsource")["built"]
-    deepsource = knowledge_base._records["deepsource"]
 
     _touch(skills_dir / "flatsource" / "alpha" / "SKILL.md")
 
     assert knowledge_base.refresh() == _keys(config, "flatsource")
     assert knowledge_base.generation == 1
     assert _fetch(knowledge_base, "deepsource")["built"] == before
-    assert knowledge_base._records["deepsource"] is deepsource, "reused, not rebuilt"
 
 
 @pytest.mark.unit
@@ -568,7 +603,7 @@ def test_persistence_failure_does_not_leave_records_ahead_of_the_snapshot(
     skills_dir, cache, monkeypatch
 ):
     """M5: `_write_index` is best-effort and must run after the commit, not
-    inside it -- otherwise a raise there leaves `_records` advanced while
+    inside it -- otherwise a raise there leaves `_harvests` advanced while
     `snapshot` stays on the old generation forever.
     """
     knowledge_base = KnowledgeBase(make_config(skills_dir), cache)
@@ -585,7 +620,7 @@ def test_persistence_failure_does_not_leave_records_ahead_of_the_snapshot(
     assert knowledge_base.generation == 1
     assert (
         knowledge_base.snapshot.status["plugins"]["deepsource"]["built"]
-        == knowledge_base._records["deepsource"].built
+        == knowledge_base._harvests["deepsource"].built
     )
 
 

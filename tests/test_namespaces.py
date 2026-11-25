@@ -238,18 +238,18 @@ async def test_a_plugin_named_like_a_main_skill_conflicts(tmp_path):
     assert "tidy." in await _read(kb, "skill://lib/tidy/SKILL.md")
 
 
-def test_an_index_row_carrying_a_folder_reads_as_none(superpowers, tmp_path):
-    """A skill row no longer carries a folder: the library decides it. An index
-    written with one fails the shape check and is rebuilt, never half-read."""
+def test_a_v11_skill_row_carrying_a_folder_is_never_read(superpowers, tmp_path):
+    """A skill's folder is the library's to decide, and the index holds no skill
+    rows to carry one (D1): a v11 file whose rows do is read for its fetches
+    alone, and every address is the library's again."""
     kb = _kb(tmp_path, **superpowers)
     path = next((tmp_path / "cache").rglob("index.json"))
-    assert Index.read(path) is not None
-
     raw = json.loads(path.read_text(encoding="utf-8"))
-    for record in raw["plugins"].values():
-        for row in record["skills"]:
-            row["folder"] = ""
+    assert "plugins" not in raw
+
+    row = {"name": "x", "description": "d", "path": "/x", "folder": "elsewhere"}
+    raw |= {"version": 11, "plugins": {"p": {"skills": [row]}}}
     path.write_text(json.dumps(raw), encoding="utf-8")
 
-    assert Index.read(path) is None
+    assert Index.read(path).fetches.keys() == raw["fetches"].keys()
     assert _addresses(_kb(tmp_path, **superpowers)) == _addresses(kb)
