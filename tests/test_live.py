@@ -127,6 +127,103 @@ def test_an_edit_upstream_is_visible_on_the_next_read_without_a_refresh(
     assert knowledge_base.generation == 0, "no refresh happened; the read did the work"
 
 
+def test_the_rereading_read_builds_the_set_it_pinned(webdav, tmp_path):
+    """N6 and MD-57: the read whose view re-reads a live skill FastMCP now
+    refuses still builds the set it pinned, against that set's state, so it
+    serves the old copy; the read after it serves nothing at the skill."""
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+    # Served, and never read: a read now would keep a build of the set, which
+    # the re-reading read would then share instead of making its own.
+    plugin = next(p for p in serving_of(knowledge_base)._mcp.plugins)
+    assert URI in plugin.skills
+
+    webdav.write("skills/x/SKILL.md", "---\nname: x\ndescription: ''\n---\nBody.\n")
+
+    assert "first" in (read_served(knowledge_base, URI) or ""), "N6: the re-adding read"
+    assert read_served(knowledge_base, URI) is None, "MD-57: x no longer builds"
+
+
+def _skill_site(serving, view_key=None):
+    """The ``Site`` kubed-mcp's build hands the rewriter for x's ``SKILL.md``."""
+    from kubed.mcp.plugins import Site
+
+    plugin = next(p for p in serving._mcp.plugins if p.namespace == "notes")
+    assert URI in plugin.skills
+    return Site(
+        plugin=plugin,
+        namespace=plugin.namespace,
+        kind="skill",
+        path="skills/x/SKILL.md",
+        uri=URI,
+        view=view_key,
+        admitted=(plugin,),
+        skills={"skills/x": SKILL},
+    )
+
+
+def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
+    webdav, tmp_path
+):
+    """A refresh publishing from another thread while a build is in flight: the
+    build's rewriter reads the state its request's view pinned, not the new one;
+    a build no view pinned reads what is published now (N13)."""
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+    serving = serving_of(knowledge_base)
+    text = (webdav.root / "skills/x/SKILL.md").read_text()
+    pinned = contextvars.copy_context()
+    view = pinned.run(serving.view)
+    site = _skill_site(serving, view.key)
+
+    webdav.write("skills/x/.draft.md", "draft\n")
+    with ThreadPoolExecutor(1) as pool:
+        assert pool.submit(knowledge_base.refresh, force=True).result() == [KEY]
+    assert SKILL.removeprefix("skill://") in serving._published.hidden
+
+    assert "first" in pinned.run(serving.rewrite, site, text)
+    with pytest.raises(ValueError, match="hidden file"):
+        contextvars.Context().run(serving.rewrite, site, text)
+
+
+def test_a_build_pinned_before_a_serve_that_raises_reads_its_own_generation(
+    webdav, tmp_path, monkeypatch
+):
+    """A refresh whose ``serve()`` raises serves nothing new: a build pinned
+    before it reads its own generation, inside the window too, and after it
+    both a pinned and an unpinned build read the generation still served."""
+    import contextvars
+
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+    serving = serving_of(knowledge_base)
+    mcp = serving._mcp
+    previous = serving._published
+    text = (webdav.root / "skills/x/SKILL.md").read_text()
+    pinned = contextvars.copy_context()
+    view = pinned.run(serving.view)
+    site = _skill_site(serving, view.key)
+    during = {}
+
+    def refused(staging):
+        # A build of the set served, made while the new state is swapped in.
+        try:
+            during["pinned"] = pinned.run(serving.rewrite, site, text)
+        except ValueError as exc:
+            during["pinned"] = f"raised: {exc}"
+        raise RuntimeError("the plugin layer fell over")
+
+    monkeypatch.setattr(mcp, "serve", refused)
+    webdav.write("skills/x/.draft.md", "draft\n")
+    with pytest.raises(RuntimeError, match="fell over"):
+        knowledge_base.refresh(force=True)
+
+    assert "first" in during["pinned"]
+    assert serving._published is previous
+    assert "first" in pinned.run(serving.rewrite, site, text)
+    assert "first" in contextvars.Context().run(serving.rewrite, site, text)
+
+
 def test_an_edit_upstream_fastmcp_refuses_unlists_the_skill(webdav, tmp_path):
     """MD-57 for a live skill: once it no longer builds, nothing names it --
     from the read after the one that re-adds its plugin (N6)."""
