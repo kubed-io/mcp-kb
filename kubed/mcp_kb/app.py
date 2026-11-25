@@ -21,6 +21,7 @@ from kubed.mcp.skills import SkillsExtension
 
 from . import routes
 from .catalogue.uris import Catalogue
+from .config import BUILTIN_SCHEMES
 from .mcp import prompts, resources, tools
 from .mcp.agents import AgentsExtension
 from .mcp.announce import AnnounceChanges
@@ -29,6 +30,7 @@ from .mcp.pins import RefuseEmptyScope, what_is_wrong
 from .mcp.request import client_reads_resources, client_uses_prompts
 from .mcp.skill_catalogue import SkillCatalogue
 from .server import KnowledgeBase
+from .sources import ServedTrees
 from .spec import package_version
 
 
@@ -39,6 +41,7 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
     mcp = QuickMCP(
         "mcp-kb",
         config=config,
+        header_prefix="Kb",
         version=package_version(),
         lifespan=knowledge_base.lifespan,
         # A client may hold a listing for as long as the shortest refresh
@@ -48,6 +51,15 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
         # headers.
         cache_ttl=ttl,
         cache_scope=None if ttl is None else "private",
+    )
+
+    # kubed-mcp is handed kb's own address, never a cache path: the trees it
+    # reads are the ones kb serves, the last good one included.
+    mcp.add_loader(
+        ServedTrees(
+            (*BUILTIN_SCHEMES, *(source.name for source in config.sources)),
+            knowledge_base.served_tree,
+        )
     )
 
     # Built at boot, not on first use: a refused credential has to stop the

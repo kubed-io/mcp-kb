@@ -335,15 +335,54 @@ async def test_a_sibling_link_with_dot_segments_reads_the_sibling(url):
     )
 
 
-async def test_dot_segments_clamp_at_the_library_and_never_leave_it(url):
-    """`..` past the library's root is dropped, as RFC 3986 does, never popped
-    into the authority: the library is the first thing in the URI, not a path."""
+async def test_a_dot_segment_past_the_root_reads_nothing(url):
+    """Dots resolve over the whole path below ``skill://`` (the library is a
+    segment, not an authority), and a `..` with nothing left to pop resolves to
+    nothing. A `..` that stays inside reads what the resolved address reads."""
     escape = "skill://other/../../grafana-lgtm/loki/SKILL.md"
-    assert "Another loki." in await _raw(url, escape)
-    assert "Another loki." in await _tool(url, escape)
+    raw = await _raw(url, escape)
+    assert raw.startswith("error:")
+    assert "not found" in raw
+    assert "Another loki." not in raw
+    assert "Query logs." not in raw
     across = "skill://other/../grafana/grafana-lgtm/loki/SKILL.md"
-    assert "Query logs." not in await _raw(url, across)
+    assert "Query logs." in await _raw(url, across)
+    # The mirror tool is kb's own and does not go through kubed-mcp's
+    # middleware, so it still clamps at the library; Task 4 retires it.
+    assert "Another loki." in await _tool(url, escape)
     assert "Query logs." not in await _tool(url, across)
+    # Scope applies to the resolved address: `extra` admits grafana-extra alone, which has no loki.
+    assert "Query logs." not in await _raw(url, across, tags="extra")
+    assert "Query logs." not in await _tool(url, across, tags="extra")
+
+
+async def _directory(url, uri):
+    """``resources/directory/read`` of ``uri`` as sent, the listing's URIs."""
+    from mcp import types
+    from mcp.types import RequestParams
+    from pydantic import ConfigDict, TypeAdapter
+
+    class Params(RequestParams):
+        model_config = ConfigDict(extra="allow")
+
+    async with _client(url) as client:
+        answer = await client.session.send_request(
+            types.Request(
+                method="resources/directory/read", params=Params(uri=uri)
+            ),
+            TypeAdapter(dict),
+        )
+    return answer["resources"]
+
+
+async def test_a_directory_read_drops_a_dot_segment_at_the_library(url):
+    """kubed-mcp passes dots through for ``resources/directory/read`` and kb
+    resolves them by its own rule: a `..` at the library is dropped, so the
+    address never leaves it."""
+    plain = await _directory(url, "skill://grafana")
+    assert plain
+    assert await _directory(url, "skill://grafana/grafana-k6/../..") == plain
+    assert await _directory(url, "skill://grafana/../../..") == plain
 
 
 async def test_a_dot_segment_read_out_of_scope_reads_as_a_missing_one(url):
@@ -365,7 +404,10 @@ async def test_a_hidden_file_reached_through_dot_segments_is_still_refused(url):
 
 async def test_a_dot_segment_address_of_a_directory_names_the_file_to_read(url):
     uri = "skill://grafana/grafana-k6/../grafana-lgtm/loki"
-    assert f"{LOKI}/SKILL.md" in await _raw(url, uri)
+    hinted = f"{uri}/SKILL.md"
+    assert hinted in await _raw(url, uri)
+    assert "Query logs." in await _raw(url, hinted)
+    # The mirror tool resolves dots itself and names the canonical spelling.
     assert f"{LOKI}/SKILL.md" in await _tool(url, uri)
 
 

@@ -81,11 +81,15 @@ name in different folders or libraries are both served.
 **SKL-12.** A path below a library resolves to the skill whose address is its longest prefix, so a
 file under a nested skill belongs to the nested skill.
 
-**SKL-13.** Before any other check, the path below the library has its `.` and `..` segments
-removed as in RFC 3986. A `..` with nothing before it is dropped, so no address leaves its library.
-This holds for `resources/read`, `read_resource` and `resources/directory/read` alike. Percent-escapes
-are not decoded, so an escaped `/` (`%2F`) is no separator and a URI holding one resolves to
-nothing. A URI that does not start with `skill://` resolves to nothing.
+**SKL-13.** Before any other check, the path below `skill://` has its `.` and `..` segments
+resolved as in RFC 3986, over the whole path: the library is a segment, not an authority. A `..` with
+nothing left to pop makes the address resolve to nothing, so no address climbs past the root. Scope
+applies to the resolved address. kubed-mcp resolves the dots for `resources/read`. `resources/directory/read`
+and the `read_resource` tool still resolve them by kb's older rule -- a `..` at the library is
+dropped and the address never leaves it -- until the plugin layer serves them. A miss is reported
+under the address as sent. Percent-escapes are not
+decoded, so an escaped `/` (`%2F`) is no separator and a URI holding one resolves to nothing. A URI
+that does not start with `skill://` resolves to nothing.
 
 ## The listing
 

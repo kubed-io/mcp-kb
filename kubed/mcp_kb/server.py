@@ -225,7 +225,7 @@ class KnowledgeBase:
                 continue
             root = plugin_root(Path(record.root or ""), address.subdir)
             if root is None:
-                errors[name] = not_in(address.subdir, fetch)
+                errors[name] = not_in(address.subdir, fetch.key)
                 continue
             if find_marketplace(root) is None:
                 errors[name] = f"no marketplace.json under {address.subdir or '/'}"
@@ -302,7 +302,8 @@ class KnowledgeBase:
             return plugin, failed_plugin(plugin, fetch.error or "the fetch failed")
         root = plugin_root(Path(fetch.root or ""), plugin.subdir)
         if root is None:
-            return plugin, failed_plugin(plugin, not_in(plugin.subdir, plugin.fetch))
+            refusal = not_in(plugin.subdir, plugin.fetch.key)
+            return plugin, failed_plugin(plugin, refusal)
         try:
             plugin, globs = with_manifest(plugin, root)
         except ValueError as exc:
@@ -425,6 +426,23 @@ class KnowledgeBase:
             # the records advanced while snapshot still holds the old generation.
             self._write_index()
             return rebuilt
+
+    def served_tree(self, key: str) -> Path | None:
+        """The tree being served for fetch ``key``, or None.
+
+        The last good one counts: a fetch that went ``stale`` on a refresh still
+        answers its old root.
+
+        Takes no lock, and must not: ``refresh`` publishes while holding
+        ``_lock`` (a plain ``Lock``), and that publisher reaches this through the
+        plugin layer. Reading is safe because ``_fetches`` is replaced whole under
+        ``_lock`` and never changed once published; the one in-place mutation is
+        ``_cold_start`` inside ``__init__``, before any reader exists.
+        """
+        record = self._fetches.get(key)
+        if record is None or not _serving(record):
+            return None
+        return Path(record.root or "")
 
     async def refresh_async(self, **kwargs) -> list[str]:
         """``refresh`` off the event loop, because all of it blocks."""
