@@ -227,7 +227,8 @@ one set of bytes:
 
 - **Rewrite when the build is made, never on read** (SKL-60). `SkillServing.rewrite`
   is kb's one rewriter: it renders a root `SKILL.md` (qualified names, then
-  placeholders: SKL-55, then SKL-25 and SKL-52) and an agent's body for the request's scope, and gives every
+  placeholders: SKL-55, then SKL-25 and SKL-52) and an agent's or a command's body
+  for the request's scope, and gives every
   text file of a skill LF line endings; kubed-mcp writes the gateway prefix after
   it. So the entry's digests, the `_manifest` and the read agree. A middleware
   that rewrote a `skill://` file on read would break every client that verifies a

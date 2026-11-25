@@ -19,7 +19,8 @@ from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
-from tests.conftest import http_client, serve_http, server_of
+from kubed.mcp_kb.mcp.skills import NOT_SELECTED, RENAMED
+from tests.conftest import http_client, serve_http, server_of, serving_of
 from tests.test_plugin_serving import _write, market
 
 pytestmark = pytest.mark.unit
@@ -359,7 +360,31 @@ async def test_a_file_kb_left_out_is_not_logged(tmp_path, caplog):
     quiet = logging.getLogger(PLUGINS).filters
     assert sum(isinstance(f, QuietSelection) for f in quiet) == 1
     # Still in the layer's own record, and out of /health.
+    (served,) = [p for p in serving_of(kb)._mcp.plugins if "lib_a" in p.prompts]
+    assert ("commands/b.md", NOT_SELECTED) in served.skipped
     assert not kb.status["plugins"]["p"].get("skipped")
+
+
+async def test_a_file_the_layer_names_otherwise_is_skipped(tmp_path):
+    """D2: ``commands: "./"`` beside a file under ``commands/`` hands the layer
+    both folders, so it reads ``commands/x.md`` twice. Through ``./commands``
+    it is ``lib_x``, as PLG-25 names it; through ``./`` it would be
+    ``lib_commands_x``, and the reader refuses that name."""
+    kb = KnowledgeBase(
+        market(
+            tmp_path,
+            [{"name": "lib", "source": "./", "commands": "./"}],
+            {"commands/x.md": CMD, "y.md": CMD},
+        ),
+        tmp_path / "cache",
+    )
+    assert await _names(kb) == ["lib_x", "lib_y"]
+    (served,) = serving_of(kb)._mcp.plugins
+    renamed = RENAMED.format(name="lib_commands_x", expected="lib_x")
+    assert ("commands/x.md", renamed) in served.skipped
+    # It served under its own name, so /health has no row for it.
+    [pid] = kb.status["plugins"]
+    assert not kb.status["plugins"][pid].get("skipped")
 
 
 def test_command_entries_follow_the_selection():

@@ -118,7 +118,7 @@ for the caller, as in [scoping-and-instructions.md](scoping-and-instructions.md)
 
 **HTTP-27.** Both answers advertise the `io.modelcontextprotocol/skills` and
 `io.modelcontextprotocol/agents` extensions: the first once a plugin with a skill is served
-(SKL-44), the second once one with a skill or an agent is (AGT-1). Their methods are in [skills.md](skills.md) and [agents.md](agents.md).
+(SKL-44), the second once one with a skill, an agent or a prompt file is (AGT-1). Their methods are in [skills.md](skills.md) and [agents.md](agents.md).
 
 **HTTP-28.** Asking for a missing prompt argument by elicitation happens only on a modern
 connection whose client declared form elicitation, as in [prompts.md](prompts.md).
@@ -174,9 +174,9 @@ written only when the level is `DEBUG`.
 
 **TOOL-1.** The server has up to four tools, each mirroring a native MCP feature. The prompt pair
 is kb's and always registered. The resource pair is kubed-mcp's plugin layer's (DLV-6), registered
-once kb adds its first plugin to the plugin set, which needs a plugin with a skill or an agent;
-until then the server has only the prompt pair. It is switched by the request's resources setting
-(DLV-2).
+once kb adds its first plugin to the plugin set, which needs a plugin with a skill, an agent or
+a prompt file; until then the server has only the prompt pair. It is switched by the request's
+resources setting (DLV-2).
 
 | Tool | Mirrors | Listed when the request says |
 |---|---|---|

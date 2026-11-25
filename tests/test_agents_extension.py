@@ -19,9 +19,11 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 from kubed.mcp.protocol import MCPError, types
 
+from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.mcp.request import AGENTS_EXTENSION_ID, EXTENSION_ID
 from tests.conftest import server_of
 from tests.test_agents import DIAGRAMMER, agents_tree
+from tests.test_plugin_serving import market
 from tests.test_skills_extension import request
 
 ERAS = pytest.mark.parametrize("mode", ["auto", "legacy"])
@@ -64,6 +66,29 @@ async def test_both_extensions_are_declared(tmp_path, mode):
         caps = client.session.server_capabilities
         assert caps.extensions[AGENTS_EXTENSION_ID] == {"listChanged": False}
         assert caps.extensions[EXTENSION_ID] == {"directoryRead": True}
+
+
+@pytest.mark.unit
+async def test_a_plugin_with_only_prompts_brings_the_agents_extension(tmp_path):
+    """AGT-1, SKL-44, TOOL-1: a plugin with a prompt file and no skill or agent
+    is added to the plugin layer, so the Agents extension is declared, with no
+    agent to list, and the resource pair is registered; the Skills extension
+    still waits for a skill."""
+    server = KnowledgeBase(
+        market(tmp_path, [{"name": "lib", "source": "./"}], {"prompts/x.md": COMMAND}),
+        tmp_path / "cache",
+    )
+    async with Client(server_of(server)) as client:
+        caps = client.session.server_capabilities
+        assert caps.extensions[AGENTS_EXTENSION_ID] == {"listChanged": False}
+        assert EXTENSION_ID not in caps.extensions
+        assert [p.name for p in await client.list_prompts()] == ["lib_x"]
+        assert _ours(await request(client, "agents/list"))["agents"] == []
+        listed = await client.call_tool("list_resources", {})
+        assert not listed.is_error
+        with pytest.raises(MCPError) as error:
+            await request(client, "skills/list")
+        assert error.value.code == -32601
 
 
 @pytest.mark.unit

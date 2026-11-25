@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Discover and load verified skills in MCP Skills clients through `skills/list` and `skills/get`.
 - Skill links work behind a multiplexing gateway: set `Kb-Resource-Prefix` (or `?prefix=`), e.g. `kb+`, and kb writes it in front of every address in text.
 - A library can list `categories`, and `Kb-Category` (`?category=`) selects every library listing one.
-- A plugin's `commands` may be an object map, and commands in subfolders are served as `<library>_<folder>_<name>`.
+- Commands in subfolders of a plugin's `commands` are served as `<library>_<folder>_<name>`.
 - **Discover the agents your plugins ship** through the experimental `agents/list` and `agents/get`, scoped like everything else, with kubed-mcp's `io.kubed/agent` in `_meta` and each agent's file at `agents://<library>/…`.
 - A client can tell kb serves `skill://` addresses from `resources/templates/list`.
 - A `<plugin>:<skill>` name in a skill, prompt or agent reads as the skill's `skill://` address.
@@ -51,8 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** A skill's `_manifest` names the skill by its `name`, not its address, and gives the size and hash of the bytes a read returns, the same as its `skills/get` entry.
 - **BREAKING:** A skill's file that is not UTF-8 text, or has no or an unrecognised extension (such as `scripts/run`), reads as a blob, and `read_resource` no longer returns its text.
 - `list_resources` and `read_resource` are kubed-mcp's, and return the rows and contents `resources/list` and `resources/read` do.
-- `list_resources`, `read_resource` and the Agents extension exist only once a plugin with a skill or an agent is served, and the Skills extension once one with a skill is.
-- An edit to a live skill or agent is served from the request after the one that notices it.
+- `list_resources`, `read_resource` and the Agents extension exist only once a plugin with a skill, an agent or a prompt file is served, and the Skills extension once one with a skill is.
+- An edit to a live skill, agent or prompt is served from the request after the one that notices it.
+- A library can no longer be named `mcp-kb`, the server's own name.
 - `skills/get` of a skill that is not served answers `Unknown skill URI: <uri>`.
 - Plugin sources (git, WebDAV, `file://`) load through kubed-mcp plugin loaders.
 

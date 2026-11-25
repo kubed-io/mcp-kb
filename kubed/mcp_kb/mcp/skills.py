@@ -413,6 +413,8 @@ class SkillServing:
                     table[key] = _Row(lib.name, plugin, frozenset(lib.categories))
                     last = self._published.live.get(key)
                     watch: _Watch | None = None
+                    # Kept as served: what it was published with stands.
+                    kept = True
                     try:
                         if served_now is not None and key not in (moved or {}):
                             # Not moved: carried as served, unread (D9), its
@@ -462,10 +464,13 @@ class SkillServing:
                         continue
                     if watch is not None:
                         live[key] = watch
-                    if key in self._prompt_reads:
-                        prompts[key] = self._prompt_reads[key]
-                    else:
-                        prompts[key] = self._published.prompts.get(key, {})
+                    # Added: this add's reads alone, none when no file read,
+                    # never a generation's before it (PRM-60).
+                    prompts[key] = (
+                        self._published.prompts.get(key, {})
+                        if kept
+                        else self._prompt_reads.get(key, {})
+                    )
                     added.append((lib, plugin, served))
         finally:
             _ENTERING.reset(entering)
@@ -511,7 +516,7 @@ class SkillServing:
                 # A re-read: a file the plugin served that no longer reads would
                 # leave it serving less, so the plugin keeps its build (D7).
                 self._vet(
-                    key,
+                    served_now,
                     _Row(lib.name, plugin, frozenset(lib.categories)),
                     self._root_of(plugin),
                     commands,
@@ -536,17 +541,24 @@ class SkillServing:
 
     def _vet(
         self,
-        key: Key,
+        served_now: Served,
         row: _Row,
         root: Path | None,
         commands: PluginCommands | None = None,
     ) -> None:
-        """Raise ``ValueError`` when a prompt file ``key`` last served does not
-        read now, in the dialect its text says (PRM-59, PRM-60)."""
+        """Raise ``ValueError`` when a prompt file ``served_now`` serves does not
+        read now, in the dialect its text says (PRM-59, PRM-60).
+
+        Only the first read of each name it serves, as ``_prompts_of`` keeps
+        them: a file that lost its name to another served nothing to keep."""
         # Not _reading(): on a re-read that is the entering state, whose prompts
         # are still empty; ``_published`` is what is being replaced (D6).
-        published = self._published
-        for path, last in published.prompts.get(key, {}).items():
+        key = (served_now.namespace, served_now.address)
+        names = set(served_now.prompts)
+        for path, last in self._published.prompts.get(key, {}).items():
+            if last.name not in names:
+                continue
+            names.discard(last.name)
             try:
                 if root is None:
                     raise OSError("the plugin's tree is not served")

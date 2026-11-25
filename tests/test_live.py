@@ -341,6 +341,64 @@ async def test_a_live_prompt_saved_too_deep_keeps_the_last_good_build(
     )
 
 
+def test_a_prompt_broken_by_a_refresh_does_not_block_a_live_skill_edit(
+    webdav, tmp_path, caplog
+):
+    """PRM-60: a refresh that finds the plugin's only prompt broken adds the
+    plugin with no prompt read, so a later re-read has no prompt to vet, and a
+    skill's edit serves from the next request."""
+    webdav.write("prompts/p.md", PROMPT.format(body="the first body"))
+    kb = _knowledge_base(webdav, tmp_path)
+    assert "first" in read_served(kb, URI)
+    webdav.write("prompts/p.md", "no frontmatter here at all, and longer than before\n")
+    kb.refresh(force=True)
+    assert [p.name for p in kb.prompts] == []
+    webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
+        assert "first" in read_served(kb, URI), "N6: the re-adding read"
+        assert "edited in nextcloud" in read_served(kb, URI)
+    assert not [r for r in caplog.records if "not read again" in r.getMessage()]
+
+
+def test_a_broken_edit_to_a_file_that_lost_its_name_does_not_block_a_reread(
+    webdav, tmp_path, caplog
+):
+    """PRM-60 vets what the plugin served: a file the layer refused for a name
+    another file took serves nothing, so breaking it blocks no re-read."""
+    config = Config.model_validate(
+        {
+            "sources": [
+                {
+                    "name": "notes",
+                    "url": webdav.url,
+                    "auth": {"username": USERNAME, "password": {"env": ENV}},
+                    "cache": "live",
+                }
+            ],
+            "plugins": [
+                {
+                    "name": "notes",
+                    "source": KEY,
+                    # Both are notes_p: a/p.md is read first and claims it.
+                    "prompts": ["prompts/a/*.md", "prompts/b/*.md"],
+                }
+            ],
+            "libraries": [{"name": "notes", "plugins": ["notes"]}],
+        }
+    )
+    webdav.write("prompts/a/p.md", PROMPT.format(body="the served body"))
+    webdav.write("prompts/b/p.md", PROMPT.format(body="the losing body"))
+    kb = KnowledgeBase(config, tmp_path / "cache")
+    assert "first" in read_served(kb, URI)
+    assert [p.template for p in kb.prompts] == ["the served body\n"]
+    webdav.write("prompts/b/p.md", "no frontmatter here, and longer than before\n")
+    webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
+        assert "first" in read_served(kb, URI), "N6: the re-adding read"
+        assert "edited in nextcloud" in read_served(kb, URI)
+    assert not [r for r in caplog.records if "not read again" in r.getMessage()]
+
+
 # -- and what it does not ------------------------------------------------------
 
 

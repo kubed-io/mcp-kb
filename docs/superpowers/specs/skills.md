@@ -315,8 +315,10 @@ request that takes over 1 second, serves the copy on disk, and that source is no
 serves follows a live re-read (SKL-37): a skill's files, its `_manifest`, its extension entry and
 the plugin's agents and prompts. kb's own listing rows, index lines and their descriptions, and
 files added or removed upstream, follow the next refresh, except that a skill a re-read leaves
-unserved drops out of them, and comes back when it serves again (SKL-45). Only files already served
-are watched, so a skill or a prompt file added to a live plugin is served from the next refresh.
+unserved drops out of them, and comes back when it serves again (SKL-45). Only files already
+harvested are watched, served or not: a prompt file skipped as broken serves from the request after
+the one that notices its fix, and a skill or a prompt file added to a live plugin is served from the
+next refresh.
 
 ## Addresses behind a gateway
 
@@ -359,9 +361,10 @@ the URI the client sent.
 `io.modelcontextprotocol/skills` (value `{"directoryRead": true}`) on `server/discover` and on
 `initialize`, whether or not the client declared it (HTTP-27), and goes on declaring it for the
 life of the process. The extension is FastMCP's, through kubed-mcp's plugin layer (SKL-58), and
-adds nothing to `resources/list`. Until then (a deployment serving only prompts or only agents,
-or a cold start with every source down) `server/discover` does not declare it, and `skills/list`
-and `skills/get` answer `-32601` `Method not found`; legacy `initialize` declares it all the same.
+adds nothing to `resources/list`. Until then (a deployment whose plugins serve only prompts or
+agents, or a cold start with every source down) `server/discover` does not declare it, and
+`skills/list` and `skills/get` answer `-32601` `Method not found`; legacy `initialize` declares it
+all the same.
 
 **SKL-45.** Every served skill passes FastMCP's checks: strict YAML frontmatter that converts to
 JSON, a `name` matching its address's last segment, a `description` of 1 to 1024 characters,

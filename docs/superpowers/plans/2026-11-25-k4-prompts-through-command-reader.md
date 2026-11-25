@@ -9,6 +9,11 @@
 > **Approved** 2026-11-25 (for Dr K): D8 and P7, D7 and P3, D9 and P5 as written; P8 changed to a
 > log filter (see P8 and Task 3); the changelog takes a **BREAKING:** line for P1 and a line for
 > P7. Task 0 found rc2 names prompts as PLG-25 does and lists no `prompts://` row (P6).
+>
+> **Shipped** on this branch, Tasks 0 to 6. One change to the approval: object-map commands
+> were added after v0.1.0 and never released, so `[Unreleased]` has no BREAKING line for P1.
+> Its Added line that claimed them was corrected instead, because release notes that add and
+> remove a feature in one release mislead the reader.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -912,22 +917,22 @@ git commit -m "A library named like the server is refused: its prompts would hav
 **Files:**
 - Modify: `wiki/Prompts.md` (drop "the commands map" section; rewrite the live paragraph at
   ~289 to PRM-58 to PRM-60), `wiki/Plugins.md:106-107`, on the wiki's `issue-82` branch
-- Modify: `CHANGELOG.md` (`[Unreleased]`: one **BREAKING:** line for P1, one line for P7;
-  Dr K's ruling, no `no changelog` label)
+- Modify: `CHANGELOG.md` (`[Unreleased]`: one line for P7, and P1 as a correction of the
+  unreleased Added line that claimed object maps; no `no changelog` label)
 
-- [ ] **Step 1: Update the wiki**
+- [x] **Step 1: Update the wiki**
 
 Make the pages say what the spec now says. Run `python scripts/generate_wiki.py`, and commit
 whatever it moves on the wiki's `issue-82` branch.
 
-- [ ] **Step 2: Run every check**
+- [x] **Step 2: Run every check**
 
 Run: `ruff check .`, then `pytest`, then `python scripts/generate_wiki.py --check`, then
 `python scripts/generate_openapi.py` and the OpenAPI lint CI runs on its output.
 Expected: ruff is clean. pytest is green, with the K3 baseline's skips and its one xfail (N15).
 The wiki check and the lint are clean.
 
-- [ ] **Step 3: Commit, and write the PR body**
+- [x] **Step 3: Commit, and write the PR body**
 
 ```bash
 git add -A CHANGELOG.md wiki
