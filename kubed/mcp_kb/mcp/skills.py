@@ -26,8 +26,12 @@ Four hooks make what kubed-mcp serves kb's:
   decides at the read, and a build re-reads its rewritten text in that same
   dialect (D3).
 - **``agent_meta``** adds kb's ``io.kubed.mcp-kb/agent`` key to an agent's
-  ``_meta``. It never sees a scope, so its ``skills`` names the agent's own
-  plugin's skills alone (N9).
+  ``_meta``, its ``frontmatter`` read through kubed-mcp's own ``parse_agent``
+  (``_frontmatter``), so kb parses no agent itself. It is kb's veto too: it
+  raises for a file that is not a regular file inside the plugin root, at the
+  path ``readable`` resolves, or that kb's harvest did not find (D4), and the
+  set skips that agent. It never sees a scope, so its ``skills`` names the
+  agent's own plugin's skills alone (N9).
 
 **The parity guard.** After the set is staged, kb's catalogue is narrowed to
 what kubed-mcp reports serving -- each added plugin's ``skills`` URIs -- so no
@@ -75,15 +79,16 @@ import threading
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
 from kubed.mcp import Prompt, QuickMCP
+from kubed.mcp.agents import META_KEY, parse_agent
 from kubed.mcp.plugins import Plugin as Served
 from kubed.mcp.plugins import PluginError, PluginSet, Site, View
 
-from ..catalogue.agents import Agent, ServedAgent, parse_agent
+from ..catalogue.agents import ServedAgent
 from ..catalogue.harvest import readable
 from ..catalogue.names import split_frontmatter
 from ..catalogue.prompts import (
@@ -171,8 +176,8 @@ class _Watch:
     # The folder the plugin was added from: a refresh points its fetch at a
     # new export before it publishes, and a re-read must not add from that.
     root: Path | None = None
-    # Its agents as the add read them, by path from the root (N6).
-    read: Mapping[str, Agent] = field(default_factory=dict)
+    # Its agents' frontmatter as the add read it, by path from the root (N6).
+    read: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
     # Its selected prompt files, as paths under ``root`` (D7).
     commands: tuple[Path, ...] = ()
 
@@ -309,10 +314,10 @@ class SkillServing:
         # What the parity guard has said, so a refresh does not say it again.
         self._noted: set[str] = set()
         # While a set is staged: the live watches of the plugins kept unread,
-        # and the agents ``agent_meta`` read for those added, by key and path,
-        # and the prompts ``read_command`` read for them alike.
+        # and the agent frontmatter ``agent_meta`` read for those added, by key
+        # and path, and the prompts ``read_command`` read for them alike.
         self._carried: dict[Key, _Watch] = {}
-        self._reads: dict[Key, dict[str, Agent]] = {}
+        self._reads: dict[Key, dict[str, Mapping[str, object]]] = {}
         self._prompt_reads: dict[Key, dict[str, FilePrompt]] = {}
 
     def attach(self) -> None:
@@ -1086,7 +1091,8 @@ class SkillServing:
 
         Raises, so the set skips the agent (PLUG-73), for a file kb's harvest
         did not find (D4) -- every agent served is then one AGT-3's fallback
-        refuses -- and for one kb cannot read."""
+        refuses -- and for one kb cannot read (``_frontmatter``). ``frontmatter``
+        is what kubed-mcp's own parser makes of the file, so the two keys agree."""
         published, _ = self._reading()
         key = (plugin.namespace, plugin.address)
         row = published.table.get(key)
@@ -1103,22 +1109,17 @@ class SkillServing:
         if carried is not None:
             # Kept unread: as its last add read it.
             read = carried.read.get(path)
+            if read is None:
+                # kb cannot say what this agent is, so the set skips it (PLUG-73).
+                raise ValueError(f"kb cannot read agent file {path}")
         else:
             # Added: what the file says now, which a live re-read is for (N6).
-            read = _read_agent(
-                row.library, row.library_categories, row.plugin, plugin.root, path
-            )
-            if read is not None and is_live(row.plugin.fetch):
+            # A file kb cannot read raises, so the set skips it (PLUG-73).
+            read = _frontmatter(Path(plugin.root), path)
+            if is_live(row.plugin.fetch):
                 self._reads.setdefault(key, {})[path] = read
-        if read is None:
-            # kb cannot say what this agent is, so the set skips it (PLUG-73).
-            raise ValueError(f"kb cannot read agent file {path}")
         value = catalogue.agent_meta(
-            row.library,
-            row.plugin.id,
-            path,
-            read.parsed.frontmatter,
-            row.plugin.servers,
+            row.library, row.plugin.id, path, read, row.plugin.servers
         )
         served = set(plugin.skills)
         value["skills"] = {k: v for k, v in value["skills"].items() if v in served}
@@ -1155,39 +1156,24 @@ def _stamp(snapshot: Snapshot, skills: Sequence[Skill], files: Sequence[Path]) -
     return tuple(parts)
 
 
-def _read_agent(
-    library: str,
-    library_categories: frozenset[str],
-    plugin: Plugin,
-    root: Path,
-    path: str,
-) -> Agent | None:
-    """An agent file the plugin layer serves, read for kb's ``_meta`` key, with
-    the file's stem as the name its frontmatter does not give (N10); None when
-    kb cannot read it. Named by the plugin layer, whose name replaces it.
+def _frontmatter(root: Path, path: str) -> dict[str, object]:
+    """The frontmatter of the agent file at ``path`` under ``root``, as kubed-mcp's
+    own parser reads it (``parse_agent``, with no prefix: GW-8), for kb's
+    ``_meta`` key.
 
     Only a regular file inside ``root``, read at the path ``readable`` resolves:
-    a symlink out of the plugin is refused here whatever the plugin layer
-    lists, so ``agent_meta`` raises and the set skips it (PLUG-73)."""
-    found = readable(root, path)
-    if found is None:
-        return None
+    a symlink out of the plugin, a directory or a ``..`` is refused here whatever
+    the plugin layer lists. Raises ``ValueError``, so ``agent_meta`` skips the
+    agent (PLUG-73), naming ``path`` and never the cache path under it."""
+    target = readable(root, path)
     try:
-        parsed = parse_agent(found, stem=Path(path).stem)
-    except OSError:
-        return None
+        if target is None:
+            raise FileNotFoundError
+        text = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        # No errno or decode text in the reason: either can carry a path.
+        raise ValueError(f"kb cannot read agent file {path}") from None
+    parsed = parse_agent(text, stem=PurePosixPath(path).stem)
     if isinstance(parsed, str):
-        return None
-    return Agent(
-        name=parsed.name,
-        library=library,
-        plugin=plugin.id,
-        root=root,
-        path=root / path,
-        parsed=parsed,
-        servers=plugin.servers,
-        category=plugin.category,
-        tags=plugin.labels,
-        library_categories=library_categories,
-        live=is_live(plugin.fetch),
-    )
+        raise ValueError(f"agent file {path}: {parsed}")
+    return dict(parsed.detail["_meta"][META_KEY]["frontmatter"])

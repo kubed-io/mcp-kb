@@ -74,8 +74,13 @@ plugin:
 | A later file of one plugin taking a name already taken in it | `agent <name> is already served by <path>`, the served name and the first file's path |
 | A file that is not UTF-8 | The decode error, as `'utf-8' codec can't decode byte 0xe9 in position 11: invalid continuation byte`, which names no path |
 
-kb then reads each file the layer serves for its own `_meta` key (AGT-9). A file kb cannot read is
-skipped with `agent_meta failed: kb cannot read agent file <path>`. An agent file the plugin layer
+kb then reads each file the layer serves for its own `_meta` key (AGT-9), with the plugin layer's own
+parser, so a file the layer serves parses for kb too unless it changed between the two reads. A file
+kb cannot read is skipped with `agent_meta failed: kb cannot read agent file <path>`: one that is not
+a regular file inside its plugin root, by the path kb resolves, or is not UTF-8 text. A file that no
+longer parses when kb reads it is skipped with `agent_meta failed: agent file <path>: <reason>`, the
+reason one of the table's, but for a name that is not usable, whose reason quotes the frontmatter
+name, or else the stem, with no library prefix or folders. An agent file the plugin layer
 finds that kb's harvest did not is not served either, and is not listed under `skipped`: kb logs
 `agent file <path> of plugin <id> is not served: kb's harvest did not find it` once, and the plugin
 layer logs its own refusal each time the plugin is added.
@@ -128,8 +133,12 @@ exists elsewhere in the library.
 | `instructions` | The body, rendered by kb's rewriter (SKL-60) as a prompt body is: qualified skill names by AGT-17, `${CLAUDE_PLUGIN_ROOT}` by PRM-48 and PRM-61, every client-only placeholder left as written (PRM-50, `${CLAUDE_SKILL_DIR}` included), then the gateway prefix (SKL-41), with leading and trailing whitespace trimmed. Omitted when the body is blank |
 | `modelRoutingHint` | From `model`, by family: `opus` → `{"role": "large", "vision": false}`, `sonnet` → `medium`, `haiku` → `small`, whether `model` is an alias or a full id (`claude-opus-5-5`). The value is lowercased and split into words, a word being a run of letters and digits, and the family is the first word by position that is one of the three (`opus-then-sonnet` is `large`, and `opus4` names none). Omitted for `inherit`, a missing or non-string `model`, or a value naming none of the three |
 | `tools` | `[]` |
-| `_meta["io.kubed.mcp-kb/agent"]` | kb's key: `plugin` (its id), `library`, `path` (the file, relative to its plugin root), `frontmatter` (verbatim, as JSON), `servers`: the names of the MCP servers the plugin declares (PLG-27), and `skills` (AGT-17) |
+| `_meta["io.kubed.mcp-kb/agent"]` | kb's key: `plugin` (its id), `library`, `path` (the file, relative to its plugin root), `frontmatter` (verbatim, as JSON, as the plugin layer parses it), `servers`: the names of the MCP servers the plugin declares (PLG-27), and `skills` (AGT-17) |
 | `_meta["io.kubed/agent"]` | The plugin layer's key: `frontmatter`, and `skills`, the `SKILL.md` URI of each of the agent's own plugin's skills its frontmatter `skills` names |
+
+The plugin layer's agent-meta hook (PLUG-73) adds kb's key as the agent enters the plugin set. kb
+reads only a regular file inside the plugin root that its harvest found as an agent file; any other
+agent file is not served (AGT-6).
 
 The gateway prefix is written over the whole agent file, so the card's `description` and
 `io.kubed/agent`'s `frontmatter` carry it too, and kb's `_meta` key does not.

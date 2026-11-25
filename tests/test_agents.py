@@ -16,7 +16,6 @@ import pytest
 from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.catalogue.agents import routing_hint
 from kubed.mcp_kb.catalogue.uris import AGENT_META
 from kubed.mcp_kb.config import Config
 from tests.conftest import (
@@ -207,26 +206,19 @@ def test_capabilities_are_a_list_of_strings_or_nothing(tmp_path, value, kept):
 
 
 @pytest.mark.parametrize(
-    ("model", "role"),
+    ("model", "hint"),
     [
-        ("opus", "large"),
-        ("sonnet", "medium"),
-        ("haiku", "small"),
-        ("claude-opus-5-5", "large"),
-        ("claude-3-5-sonnet-20241022", "medium"),
-        ("us.anthropic.claude-haiku-4-5-v1:0", "small"),
-        ("Opus[1m]", "large"),
-        ("sonnet-distilled-from-opus", "medium"),
-        ("opus-then-sonnet", "large"),
+        ("sonnet", {"role": "medium", "vision": False}),
+        ("claude-opus-5-5", {"role": "large", "vision": False}),
+        ("opus-then-sonnet", {"role": "large", "vision": False}),
+        ("opus4", None),
+        ("inherit", None),
     ],
 )
-def test_routing_hint_by_family(model, role):
-    assert routing_hint(model) == {"role": role, "vision": False}
-
-
-@pytest.mark.parametrize("model", [None, "inherit", "gpt-5", "opusx", ""])
-def test_no_routing_hint(model):
-    assert routing_hint(model) is None
+def test_the_routing_hint_is_agt9s(tmp_path, model, hint):
+    agent = f"---\nname: a\ndescription: d\nmodel: {model}\n---\nB.\n"
+    got = _served(_kit_agent(tmp_path, agent))["kit_a"]
+    assert got.get("modelRoutingHint") == hint
 
 
 def _record(tree: AgentsTree, tmp_path: Path, plugin: str):

@@ -496,7 +496,7 @@ git commit -m "K5: the harvest records agent paths; /health reads what the plugi
   - It raises `ValueError(f"agent file {path}: {reason}")` when `parse_agent` gives a reason.
   - Otherwise it returns a copy of the frontmatter.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Replace `tests/test_parity.py::test_kb_reads_no_agent_file_linked_out_of_the_root`'s
 `_read_agent` calls:
@@ -528,12 +528,12 @@ def test_the_routing_hint_is_agt9s(tmp_path, model, hint):
 `test_the_definition` and `test_agent_meta_keeps_kbs_key` stay as they are: all six fields of
 kb's key, beside `io.kubed/agent`.
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `pytest tests/test_parity.py -k linked_out -v`
 Expected: FAIL on the import of `_frontmatter`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `_frontmatter`: `target = readable(root, path)`. Read `target.read_text(encoding="utf-8")`, never
   `root / path`. Then `kubed.mcp.agents.parse_agent(text, stem=PurePosixPath(path).stem)`, and
@@ -549,7 +549,7 @@ Expected: FAIL on the import of `_frontmatter`.
 - `grep -rn "parse_agent\|ParsedAgent\|routing_hint\|_read_agent\|from ..catalogue.agents import Agent" kubed tests`
   finds only `kubed.mcp.agents`' `parse_agent` in `mcp/skills.py` and `tests/test_agent_layer.py`.
 
-- [ ] **Step 4: Update the spec and AGENTS.md**
+- [x] **Step 4: Update the spec and AGENTS.md**
 
 - AGT-9, kb's key: the plugin layer's agent-meta hook (PLUG-73) adds it as the agent enters the
   set, with `frontmatter` as the plugin layer parses it. kb reads only a regular file inside the
@@ -559,13 +559,13 @@ Expected: FAIL on the import of `_frontmatter`.
   - in the Agents extension paragraph, kb's veto is `agent_meta`'s raise (PLUG-73), read at the
     path `readable` returns; `ServedTrees` hands over a directory and cannot leave one file out.
 
-- [ ] **Step 5: Run the checks**
+- [x] **Step 5: Run the checks**
 
 Run: `ruff check .` then
 `pytest tests/test_parity.py tests/test_agents.py tests/test_agents_extension.py tests/test_live.py tests/test_boundaries.py -v`
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A kubed/mcp_kb tests docs/superpowers/specs AGENTS.md

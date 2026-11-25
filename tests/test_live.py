@@ -1175,18 +1175,18 @@ def test_a_kept_plugins_agents_are_not_read_again(webdav, tmp_path, monkeypatch)
     knowledge_base = _two_libraries(webdav, tmp_path)
     serving_of(knowledge_base)
     read = []
-    original = serving_module._read_agent
+    original = serving_module._frontmatter
 
-    def counted(library, categories, plugin, root, path):
-        read.append((library, path))
-        return original(library, categories, plugin, root, path)
+    def counted(root, path):
+        read.append(path)
+        return original(root, path)
 
-    monkeypatch.setattr(serving_module, "_read_agent", counted)
+    monkeypatch.setattr(serving_module, "_frontmatter", counted)
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
     read_served(knowledge_base, URI)
     assert "edited in nextcloud" in read_served(knowledge_base, URI)
 
-    assert ("other", "agents/z.md") not in read
+    assert "agents/z.md" not in read
 
     async def get(client):
         return await ext_request(client, "agents/get", name="other_helper")

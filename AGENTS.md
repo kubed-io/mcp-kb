@@ -60,7 +60,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `harvest.py` | what counts as a skill (`skill_dirs`, the folders Claude Code and kubed-mcp read), a prompt or a library file, and a plugin's globs for the last two |
 | ⤷ `skills.py` | the domain — `Skill`, `SkillIndex`, and the scoping rules. Imports no FastMCP |
 | ⤷ `uris.py` | the `skill://` address space — `Catalogue`, the grammar |
-| ⤷ `agents.py` | `ServedAgent`, what the plugin layer serves of one agent file; and `parse_agent`, `routing_hint` and `Agent`, kb's own reading of one for its `_meta` key. Imports no FastMCP |
+| ⤷ `agents.py` | `ServedAgent`, what the plugin layer serves of one agent file. Imports no FastMCP |
 | ⤷ `prompts/` | `FilePrompt`, `parse_prompt` (from text, never from disk), `dialect_of`, the dialect seam, rendering — no FastMCP |
 | ⤷⤷ `detect.py` | which dialect a file is, strongest signal first |
 | ⤷⤷ `mcpkb.py`, `claude.py`, `copilot.py` | one module per dialect: `parse` into `Parsed`, `substitute` back out |
@@ -168,7 +168,8 @@ the scoping rules directly rather than only through a tool call, and
 
 Where FastMCP is used, it arrives through `kubed-mcp`'s facade: kb imports
 `kubed.mcp`, `kubed.mcp.protocol`, `kubed.mcp.request`, `kubed.mcp.plugins` (the
-plugin set, its view and its rewriter's `Site`), `kubed.mcp.skills` and
+plugin set, its view and its rewriter's `Site`), `kubed.mcp.skills`,
+`kubed.mcp.agents` (its `parse_agent`, imported by `mcp/skills.py` alone) and
 `kubed.mcp.gateway`, never `fastmcp`, `mcp` or `mcp_types` directly. `kubed-mcp` owns the FastMCP pin, so
 `pyproject.toml` declares none. A name the facade lacks is added there, in
 kubed-io/quick-mcp, not imported around it; `mcp.server` is the FastMCP instance,
@@ -242,10 +243,13 @@ one set of bytes:
   exactly, and kb's `Catalogue` resolves dots itself in `uris.parse`.
 - **The parity guard: a skill kubed-mcp does not serve is not in the catalogue.**
   After the set is staged, kb narrows its catalogue to each added plugin's
-  `skills` and `agent_files`, logging once anything either side has alone, and
-  that narrowed catalogue is the `snapshot.catalogue` every other surface reads,
-  prompts and the scope refusal included. So no index, hint or rewritten name
-  points at a skill that does not read. kb's `snapshot.prompts` are what kb's
+  `skills`, logging once anything either side has alone, and that narrowed
+  catalogue is the `snapshot.catalogue` every other surface reads, prompts and
+  the scope refusal included. So no index, hint or rewritten name points at a
+  skill that does not read. The agents are not in the catalogue: each added
+  plugin's `agent_files` is recorded in `snapshot.agents`, which `/health` counts
+  and the scope refusal reads, and an agent file kb's harvest found that the
+  layer neither served nor skipped is logged once. kb's `snapshot.prompts` are what kb's
   reader read as the set was staged, kept to the names kubed-mcp serves, so
   `/health`'s counts and the scope refusal read what is served. A plugin
   kubed-mcp refuses is a conflict in its library (LIB-29), a prompt name an
@@ -261,8 +265,14 @@ The **Agents extension** is kubed-mcp's too: `agents/list` and `agents/get` serv
 the subagents Claude-format plugins ship, from the same plugin set, and add no
 listing row, no tool and no line of instructions. kb's rewriter renders an
 agent's body (AGT-17, PRM-48), and `SkillServing.agent_meta` adds kb's
-`io.kubed.mcp-kb/agent` key beside kubed-mcp's `io.kubed/agent`; its `skills`
-names the agent's own plugin's skills alone, because it never sees a scope (N9).
+`io.kubed.mcp-kb/agent` key beside kubed-mcp's `io.kubed/agent`, its
+`frontmatter` read through kubed-mcp's own `parse_agent`, so kb parses no agent
+itself; its `skills` names the agent's own plugin's skills alone, because it
+never sees a scope (N9). kb's veto is `agent_meta`'s raise (PLUG-73): it reads
+the file at the path `harvest.readable` returns, and raises for one that is not
+a regular file inside the plugin root or that kb's harvest did not find, so the
+set skips that agent. `ServedTrees` hands the layer a directory, and cannot leave
+one file of it out.
 An agent's name is its library's, claimed in the order kb adds plugins — a later
 plugin's clash is `<name>@<plugin>` — and no owner is stored anywhere, so a
 plugin appended to a library renames nothing. An agent's file also reads at an
