@@ -84,7 +84,6 @@ def _knowledge_base(webdav, tmp_path, cache="live"):
                 {
                     "name": "notes",
                     "source": KEY,
-                    "skills": ["skills/*/SKILL.md"],
                     "prompts": ["prompts/*.md"],
                     "files": ["docs/**/*"],
                 }

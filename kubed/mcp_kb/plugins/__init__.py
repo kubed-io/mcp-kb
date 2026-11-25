@@ -70,6 +70,11 @@ class Globs:
     manifest decides, and failing that the conventions. An empty tuple is a
     decision -- serve none of that kind.
 
+    ``skills`` is not globs but the declared skill *folders*, each a skill or
+    the parent of skills (``harvest.skill_dirs``), searched after the
+    conventional ``skills/``: ``None`` declares none, so ``skills/`` alone is
+    read, and ``()`` serves no skill at all.
+
     ``commands`` is not a kind and serves nothing: it is which of the
     ``prompts`` patterns came from a *command* declaration -- a manifest's
     ``commands`` or an entry's -- because that is a Claude signal and the file
@@ -113,8 +118,6 @@ class Plugin:
     # A marketplace entry's own components; None for a declared plugin.
     entry: Components | None = None
     strict: bool = True
-    # The entry's source is the marketplace's own subdir in its own fetch.
-    root_entry: bool = False
     # Set by ``with_manifest``: it has a plugin.json or is a marketplace entry,
     # the MCP server names it declares (read, never run), and what its
     # manifest and entry got wrong without failing it.

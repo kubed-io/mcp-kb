@@ -83,7 +83,7 @@ def grafana_root(tmp_path: Path) -> Path:
     for skills in GRAFANA_SKILLS.values():
         for rel in skills:
             _skill(root, rel.removeprefix("./"))
-    _skill(root, "skills/template")
+    _skill(root, "template")  # grafana/skills' scaffolding, at its root
     _catalog(
         root,
         *(
@@ -352,14 +352,17 @@ def test_strict_false_without_a_manifest_is_the_manifest(tmp_path):
     assert _served(knowledge_base) == {"b", "c"}
 
 
-def test_a_declared_plugins_config_globs_still_win(tmp_path):
+def test_a_declared_plugins_skills_add_to_its_manifests_and_the_scan(tmp_path):
     root = tmp_path / "kit"
     _skill(root, "x/one")
     _skill(root, "y/two")
     _skill(root, "skills/three")
+    _skill(root, "z/four")
     _manifest(root, name="kit", skills=["./y"])
 
-    assert _served(_declared(tmp_path, root, skills=["x/**/SKILL.md"])) == {"one"}
+    served = _served(_declared(tmp_path, root, skills=["./x"]))
+
+    assert served == {"one", "two", "three"}
 
 
 def test_claude_format(tmp_path):

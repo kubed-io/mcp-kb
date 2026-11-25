@@ -170,20 +170,21 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
 
     The components merge as Claude Code merges them, per kind:
 
-    - a declared plugin's own ``skills:`` and ``prompts:`` are exactly what it
-      serves of that kind (LIB-33);
-    - a manifest's ``skills`` add to the conventions (PLG-20), and so do an
-      entry's (LIB-30) -- except an entry at the marketplace root, whose list
-      is all it serves beside the manifest's (LIB-32);
+    - ``skills/`` is always scanned, and the folders a manifest (PLG-20), an
+      entry (LIB-30) and a declared plugin's own ``skills:`` list add to it, in
+      that order -- the lists kubed-mcp is handed -- except a declared
+      ``skills: []``, which serves none;
+    - a declared plugin's own ``prompts:`` is exactly what it serves (LIB-33);
     - ``commands`` and ``agents`` replace their conventions (PLG-21, PLG-22),
       the entry's appended to the manifest's, and a default folder they leave
       unread is noted (PLG-23);
     - only a Claude-format plugin -- one with a manifest, or a marketplace
       entry -- has agents at all.
 
-    ``None`` for a kind is ``harvest.DEFAULTS``. A manifest that does not
-    parse raises, and so does a ``strict: false`` entry that names components
-    beside one (LIB-31): either is the plugin's failure, not a reason to guess.
+    ``None`` for a kind is ``harvest.DEFAULTS``, or for skills the scan alone.
+    A manifest that does not parse raises, and so does a ``strict: false``
+    entry that names components beside one (LIB-31): either is the plugin's
+    failure, not a reason to guess.
     """
     manifest = read_manifest(root)
     entry = plugin.entry
@@ -195,14 +196,13 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
     config = plugin.globs
     notes = [*found.notes, *listed.notes]
 
-    if config.skills is not None:
-        skills = config.skills
-    elif plugin.root_entry and listed.skills is not None:
-        skills = _joined(listed.skills, found.skills)
-    elif found.skills is None and listed.skills is None:
-        skills = None
+    # The declared skill folders, as kubed-mcp merges them; `skills: []` in
+    # the config is the one way to serve none (`()`), and no folder at all
+    # leaves the scan of `skills/` (`None`).
+    if config.skills == ():
+        skills: tuple[str, ...] | None = ()
     else:
-        skills = _joined(harvest.DEFAULTS["skills"], found.skills, listed.skills)
+        skills = _joined(found.skills, listed.skills, config.skills) or None
 
     prompts = config.prompts
     commands: tuple[str, ...] = ()
@@ -348,7 +348,9 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
     plugin*, not the caller.
     """
     try:
-        dirs = harvest.skill_dirs(root, globs)
+        dirs = (
+            [] if globs.skills == () else harvest.skill_dirs(root, globs.skills or ())
+        )
         # Rows carry no library; the one given here is discarded by from_skill.
         skills = load_skills(dirs, library="", plugin=plugin, root=root)
         files = harvest.library_files(root, globs, dirs)

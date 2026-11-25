@@ -252,14 +252,20 @@ class Selector(Strict):
         return _groups(self.tags)
 
 
+# What makes a string a glob to ``Path.glob``: refused in a skills folder.
+GLOB_CHARS = frozenset("*?[")
+
+
 class PluginConfig(Strict):
     """A folder of skills and prompts: a path under a source, plus its metadata.
 
     The metadata fields are Claude's marketplace-entry fields, so a plugin
     declared here and one read out of a ``marketplace.json`` carry the same
-    shape and a selector cannot tell them apart. The glob lists are this
-    server's own: omitted, a kind is the conventions and the plugin's own
-    ``plugin.json`` and entry, merged per kind as Claude Code merges them.
+    shape and a selector cannot tell them apart. ``prompts`` and ``files``
+    are this server's own glob lists: omitted, a kind is the conventions and
+    the plugin's own ``plugin.json`` and entry, merged per kind as Claude Code
+    merges them. ``skills`` lists folders, added to ``skills/`` as Claude
+    Code adds a manifest's.
     """
 
     name: str = Field(pattern=NAME)
@@ -269,7 +275,14 @@ class PluginConfig(Strict):
     keywords: list[str] = Field(default_factory=list)
     version: str | None = None
     source: str
-    skills: list[str] | None = None
+    skills: list[str] | None = Field(
+        default=None,
+        description=(
+            "Folders, not globs: each is a skill, or holds skills one level down,"
+            " and adds to the skills/ folder every plugin is read from. [] serves"
+            " no skill."
+        ),
+    )
     prompts: list[str] | None = None
     files: list[str] | None = None
     dialect: Literal["auto", "mcp-kb", "claude", "copilot"] = "auto"
@@ -296,6 +309,17 @@ class PluginConfig(Strict):
                 msg = f"pattern {pattern!r} must be a relative path without '..'"
                 raise ValueError(msg)
         return patterns
+
+    @field_validator("skills")
+    @classmethod
+    def _folders(cls, folders: list[str] | None) -> list[str] | None:
+        # A skills item is a folder, as Claude Code and kubed-mcp read one: a
+        # glob is a config written for the old reading, and served nothing now.
+        for folder in folders or []:
+            if any(c in folder for c in GLOB_CHARS):
+                msg = f"skills item {folder!r} is a folder, not a glob"
+                raise ValueError(msg)
+        return folders
 
     @property
     def address(self) -> Address:

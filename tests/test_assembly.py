@@ -801,7 +801,8 @@ async def test_nothing_under_claude_plugin_is_harvested_or_served(tmp_path):
     """The fingerprint walk sees that directory; the harvest must not. A
     `marketplace.json` and a `plugin.json` say *what* to serve and are not
     themselves a skill, a prompt or a library file -- not even under the
-    widest globs a config can write."""
+    widest globs a config can write, or the plugin root declared as a skill
+    folder, whose dot children are never skills."""
     root = tmp_path / "tree"
     _skill(root, "skills/real", "real")
     _write(root, "prompts/ok.md", "---\ndescription: Fine.\n---\nFine.\n")
@@ -815,7 +816,7 @@ async def test_nothing_under_claude_plugin_is_harvested_or_served(tmp_path):
                 {
                     "name": "p",
                     "source": f"file://{root}",
-                    "skills": ["**/SKILL.md"],
+                    "skills": ["."],
                     "prompts": ["prompts/**/*.md"],
                     "files": ["**/*"],
                 }

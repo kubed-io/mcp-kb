@@ -158,11 +158,6 @@ def _plugin(
         marketplace=library.name,
         entry=_components(raw),
         strict=raw.get("strict") is not False,
-        root_entry=(
-            isinstance(raw.get("source"), str)
-            and where == fetch
-            and subdir == _join(address.subdir, "")
-        ),
     )
 
 

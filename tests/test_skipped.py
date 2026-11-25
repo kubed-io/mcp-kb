@@ -87,7 +87,10 @@ def _overlapping(root):
     _write(root, "shared/ok.md", "fine\n")
 
 
-OVERLAP_GLOBS = {"files": ["shared/**", "grafana-lgtm/**", "docs/**", "_index.md"]}
+OVERLAP_GLOBS = {
+    "skills": ["./skills/grafana-lgtm", "./skills/grafana-k6"],
+    "files": ["shared/**", "grafana-lgtm/**", "docs/**", "_index.md"],
+}
 
 
 async def test_a_library_file_inside_one_of_its_own_plugins_skills_is_skipped(tmp_path):
@@ -143,13 +146,17 @@ def _misnamed(root):
     _skill(root, "skills/f/Upper", "Upper", "Upper.")
     _skill(root, "skills/f/mismatch", "other", "Mismatch.")
     _skill(root, "skills/f/idx", "_index.md", "Index.")
-    # One address reached from two skill roots: the first found serves.
-    _skill(root, ".claude/skills/dup", "dup", "First dup.")
-    _skill(root, "skills/dup", "dup", "Second dup.")
+    # One address reached from two skill folders: the first claimed serves, and
+    # skills/ is claimed before any declared folder.
+    _skill(root, "skills/dup", "dup", "First dup.")
+    _skill(root, ".claude/skills/dup", "dup", "Second dup.")
+
+
+MISNAMED_GLOBS = {"skills": ["./skills/f", "./.claude/skills"]}
 
 
 async def test_a_skill_that_cannot_be_one_address_segment_is_skipped(tmp_path):
-    kb = _kb(tmp_path, _misnamed, {})
+    kb = _kb(tmp_path, _misnamed, MISNAMED_GLOBS)
     health = await _health(kb)
 
     entry = health["plugins"]["src"]
@@ -159,14 +166,14 @@ async def test_a_skill_that_cannot_be_one_address_segment_is_skipped(tmp_path):
     for path in ("skills/f/dotdot", "skills/f/slash", "skills/f/Upper", "skills/f/idx"):
         assert "naming rule" in skipped[path], path
     assert "directory" in skipped["skills/f/mismatch"]
-    assert skipped["skills/dup"] == "dup is already served by .claude/skills/dup"
+    assert skipped[".claude/skills/dup"] == "dup is already served by skills/dup"
     assert set(skipped) == {
         "skills/f/dotdot",
         "skills/f/slash",
         "skills/f/Upper",
         "skills/f/mismatch",
         "skills/f/idx",
-        "skills/dup",
+        ".claude/skills/dup",
     }
 
     folder = await _read(kb, "skill://lib/f/_index.md")
@@ -192,7 +199,7 @@ async def test_a_plugin_that_is_one_skill_need_not_match_its_cache_directory(tmp
     kb = _kb(
         tmp_path,
         lambda r: _skill(r, ".", "whole", "The whole plugin."),
-        {"skills": ["SKILL.md"]},
+        {"skills": ["."]},
     )
     health = await _health(kb)
 

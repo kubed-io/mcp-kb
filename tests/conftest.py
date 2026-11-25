@@ -21,12 +21,17 @@ FLAT = {"alpha": "First skill.", "beta": "Second skill."}
 NESTED = {"plugin-a": {"gamma": "Third skill."}, "plugin-b": {"delta": "Fourth skill."}}
 
 # Each synthetic library is one plugin whose root is that library's directory,
-# so the globs are relative to it rather than to the tree root. "**/SKILL.md"
-# finds a skill at any depth under a library -- flatsource lays its directly
-# under itself, deepsource one level deeper under a folder -- and
-# harvest.folder_of() (via SKILL_ROOTS) gives the nested ones their folder.
-SKILLS_GLOBS = Globs(skills=("**/SKILL.md",), files=("**/*",))
-LIBRARY_GLOBS = {"flatsource": SKILLS_GLOBS, "deepsource": SKILLS_GLOBS}
+# so its skill folders are relative to it rather than to the tree root.
+# flatsource lays its skills directly under itself and declares that folder
+# ("."); deepsource lays them in a folder below skills/ and declares each
+# folder, which harvest.folder_of() then names them by.
+FLAT_FOLDERS = (".",)
+DEEP_FOLDERS = tuple(f"./skills/{folder}" for folder in NESTED)
+SKILL_FOLDERS = {"flatsource": FLAT_FOLDERS, "deepsource": DEEP_FOLDERS}
+LIBRARY_GLOBS = {
+    name: Globs(skills=folders, files=("**/*",))
+    for name, folders in SKILL_FOLDERS.items()
+}
 PROMPT_GLOBS = Globs(skills=(), prompts=("*.md",))
 
 # What each synthetic skills plugin declares about itself. A tag per plugin, so
@@ -153,7 +158,7 @@ def load_all_skills(root):
     for library, globs in LIBRARY_GLOBS.items():
         library_root = root / library
         if library_root.is_dir():
-            dirs = harvest.skill_dirs(library_root, globs)
+            dirs = harvest.skill_dirs(library_root, globs.skills)
             skills += load_skills(
                 dirs,
                 library=library,
@@ -169,7 +174,7 @@ def build_library_files(root):
     for library, globs in LIBRARY_GLOBS.items():
         library_root = root / library
         if library_root.is_dir():
-            dirs = harvest.skill_dirs(library_root, globs)
+            dirs = harvest.skill_dirs(library_root, globs.skills)
             files = harvest.library_files(library_root, globs, dirs)
             resources.add(
                 library,
@@ -198,7 +203,9 @@ def load_all_prompts(root):
     return prompts
 
 
-def make_config(skills_dir=None, prompts_dir=None, libraries=None, refresh=None):
+def make_config(
+    skills_dir=None, prompts_dir=None, libraries=None, refresh=None, folders=None
+):
     """A ``Config`` whose ``file://`` plugins mirror the fixture trees above.
 
     One plugin per top-level directory under ``skills_dir`` and one
@@ -211,7 +218,11 @@ def make_config(skills_dir=None, prompts_dir=None, libraries=None, refresh=None)
     ``refresh`` puts the plugins behind a declared ``local`` source carrying
     that interval instead of the built-in ``file://`` scheme, which carries
     none -- the shape a test of the refresh loop needs.
+
+    ``folders`` maps a plugin name to the skill folders it declares, in place
+    of ``SKILL_FOLDERS``'s; a plugin in neither declares its own root.
     """
+    folders = {**SKILL_FOLDERS, **(folders or {})}
     plugins = []
     members: dict[str, list[str]] = {}
     for base, is_prompts in ((skills_dir, False), (prompts_dir, True)):
@@ -234,7 +245,7 @@ def make_config(skills_dir=None, prompts_dir=None, libraries=None, refresh=None)
                     "name": name,
                     "source": source,
                     "tags": list(PLUGIN_TAGS.get(name, ())),
-                    "skills": ["**/SKILL.md"],
+                    "skills": list(folders.get(name, FLAT_FOLDERS)),
                     "files": ["**/*"],
                 }
             plugins.append(plugin)
@@ -259,7 +270,7 @@ def _build_tree(root):
         _write(root / "flatsource" / name, name, desc)
     for plugin, skills in NESTED.items():
         for name, desc in skills.items():
-            _write(root / "deepsource" / plugin / name, name, desc)
+            _write(root / "deepsource" / "skills" / plugin / name, name, desc)
     # Library-level files: outside every skill directory, so not skills themselves.
     (root / "deepsource" / "README.md").write_text("not a skill\n")
     shared = root / "deepsource" / "shared"
@@ -324,7 +335,7 @@ def skills_dir(tmp_path):
     """A skills root holding one flat plugin and one two-level plugin.
 
     Mirrors the real libraries: n8n is ``<root>/<skill>/`` while grafana is
-    ``<root>/<folder>/<skill>/``.
+    ``<root>/skills/<folder>/<skill>/``.
     """
     return _build_tree(tmp_path)
 

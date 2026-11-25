@@ -206,7 +206,7 @@ def test_a_declared_plugin_keeps_its_name_as_its_id_and_its_subdir():
             tags=["runbooks", "oncall"],
             version="1.2.3",
             source="github://my-team/my-repo//foo?ref=main",
-            skills=["runbooks/*"],
+            skills=["./runbooks"],
         ),
     )
 
@@ -215,7 +215,7 @@ def test_a_declared_plugin_keeps_its_name_as_its_id_and_its_subdir():
     assert plugin.category == "engineering"
     assert plugin.version == "1.2.3"
     assert plugin.marketplace is None
-    assert plugin.globs == Globs(skills=("runbooks/*",))
+    assert plugin.globs == Globs(skills=("./runbooks",))
     assert plugin.dialect == "auto"
 
 
@@ -589,9 +589,8 @@ def test_every_escape_has_one_note_saying_so(tmp_path):
 
 @pytest.mark.unit
 def test_a_root_skills_path_is_the_plugin_root(tmp_path):
-    """`"."` is kept in the components, and harvested as the plugin root --
-    a directory hit -- rather than handed to `Path.glob`, which raises."""
-    from kubed.mcp_kb.catalogue.harvest import DEFAULTS
+    """`"."` is kept in the components, and harvested as the plugin root: a
+    declared folder whose direct children holding a `SKILL.md` are skills."""
     from kubed.mcp_kb.catalogue.snapshot import build_plugin, with_manifest
 
     root = manifest(tmp_path, {"skills": "./"})
@@ -603,14 +602,14 @@ def test_a_root_skills_path_is_the_plugin_root(tmp_path):
     completed, globs = with_manifest(plugin(), root)
     record = build_plugin(completed, root, globs=globs)
 
-    assert globs.skills == (*DEFAULTS["skills"], ".")
+    assert globs.skills == (".",)
     assert record.status == "ok"
     assert [row.name for row in record.skills] == ["a"]
 
 
 @pytest.mark.unit
 def test_a_root_entry_skills_path_builds_without_raising(tmp_path):
-    """`"."` is the plugin root for a root entry's skills as for a manifest's."""
+    """`"."` is the plugin root for an entry's skills as for a manifest's."""
     from dataclasses import replace
 
     from kubed.mcp_kb.catalogue.snapshot import build_plugin, with_manifest
@@ -618,9 +617,7 @@ def test_a_root_entry_skills_path_builds_without_raising(tmp_path):
 
     (tmp_path / "a").mkdir()
     (tmp_path / "a" / "SKILL.md").write_text("---\nname: a\ndescription: d\n---\nb\n")
-    root_entry = replace(
-        plugin(), entry=read_components({"skills": ["./"]}), root_entry=True
-    )
+    root_entry = replace(plugin(), entry=read_components({"skills": ["./"]}))
 
     completed, globs = with_manifest(root_entry, tmp_path)
     record = build_plugin(completed, tmp_path, globs=globs)

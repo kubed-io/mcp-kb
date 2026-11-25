@@ -43,7 +43,7 @@ from ..plugins.manifest import CommandEntry
 from .prompts import PromptSource
 from .skills import Skill
 
-INDEX_VERSION = 7
+INDEX_VERSION = 8
 
 
 @dataclass(frozen=True)

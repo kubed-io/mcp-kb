@@ -107,7 +107,7 @@ def test_a_missing_or_corrupt_index_reads_as_none(tmp_path):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("version", [INDEX_VERSION + 1, 6, 5, 4, 3, 2, 1])
+@pytest.mark.parametrize("version", [INDEX_VERSION + 1, 7, 6, 5, 4, 3, 2, 1])
 def test_a_different_version_reads_as_none(tmp_path, version):
     """Older as well as newer, by literal and not only by offset.
 
@@ -115,7 +115,8 @@ def test_a_different_version_reads_as_none(tmp_path, version):
     the literals are the shapes before this one (1 on main, 2 part-way through
     the address-space work, 3 before a record carried `skipped`, 4 the
     per-source shape before plugins, 5 before a prompt row carried its name, 6
-    before a plugin record carried the globs it was harvested with):
+    before a plugin record carried the globs it was harvested with, 7 while a
+    plugin's skills were globs rather than the folders kubed-mcp reads):
     lowering `INDEX_VERSION` back to any of them must fail here, which an
     offset from the current value alone never would.
     """

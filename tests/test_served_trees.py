@@ -30,7 +30,6 @@ def _file_config(tree):
                 {
                     "name": "library",
                     "source": f"file://{tree}",
-                    "skills": ["skills/*/SKILL.md"],
                 }
             ],
             "libraries": [{"name": "library", "plugins": ["library"]}],

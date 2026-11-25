@@ -1,8 +1,9 @@
 """The ``skill://`` grammar, read back through a running server.
 
 The tree is shaped like the grafana library upstream: skills two levels down
-under folders (``skills/<folder>/<skill>/SKILL.md``), a skill directly in the
-skill root, a skill nested deeper still, two skills sharing a name in different
+under folders (``skills/<folder>/<skill>/SKILL.md``, each folder declared, as
+grafana's catalog entries declare theirs), a skill directly in ``skills/``, a
+skill nested deeper still, two skills sharing a name in different
 folders, a library-level file, and a prompt. A second plugin feeds the same
 library, and a second library reuses a folder and a skill name, which are the
 shapes scope and the listing have to keep apart.
@@ -101,15 +102,25 @@ def _build(base):
                     "name": "grafana",
                     "source": f"file://{grafana}",
                     "tags": ["core"],
+                    "skills": [
+                        "./skills/grafana-lgtm",
+                        "./skills/grafana-k6",
+                        "./skills/grafana-plugins/app",
+                    ],
                     "files": ["shared/**"],
                 },
                 {
                     "name": "grafana-extra",
                     "source": f"file://{extra}",
                     "tags": ["extra"],
+                    "skills": ["./skills/grafana-ops"],
                     "files": ["extra/**"],
                 },
-                {"name": "other", "source": f"file://{other}"},
+                {
+                    "name": "other",
+                    "source": f"file://{other}",
+                    "skills": ["./skills/grafana-lgtm"],
+                },
                 {
                     "name": "handbook",
                     "source": f"file://{handbook}",

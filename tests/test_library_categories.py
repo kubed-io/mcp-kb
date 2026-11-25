@@ -40,7 +40,7 @@ def _plugin(root, name, skills, **extra):
     return {
         "name": name,
         "source": f"file://{root / name}",
-        "skills": ["**/SKILL.md"],
+        "skills": ["."],
         "files": ["**/*"],
         **extra,
     }

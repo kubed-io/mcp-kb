@@ -185,16 +185,25 @@ async def test_frontmatter_too_deep_for_the_parser_is_not_served(skills_dir):
 
 
 def test_a_skill_inside_a_skill_is_refused_and_its_files_are_the_outers(tmp_path):
-    from kubed.mcp_kb.catalogue.skills import SkillIndex
+    from kubed.mcp_kb.catalogue import harvest
+    from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex, load_skills
     from kubed.mcp_kb.catalogue.uris import Catalogue
-    from tests.conftest import build_library_files, load_all_skills
+    from tests.conftest import fake_plugin
 
-    outer = tmp_path / "flatsource" / "outer"
+    root = tmp_path / "flatsource"
+    outer = root / "skills" / "outer"
     for path, name in ((outer, "outer"), (outer / "inner", "inner")):
         path.mkdir(parents=True)
         (path / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\n")
+    # Nothing below a skill is searched, so only a folder declared in its own
+    # right puts one skill inside another.
+    dirs = harvest.skill_dirs(root, ("./skills/outer/inner",))
+    plugin = fake_plugin("flatsource", root)
+    files = LibraryFiles()
+    files.add("flatsource", root, [], dirs, plugin=plugin)
     catalogue = Catalogue(
-        SkillIndex(load_all_skills(tmp_path)), build_library_files(tmp_path)
+        SkillIndex(load_skills(dirs, library="flatsource", plugin=plugin, root=root)),
+        files,
     )
     skills = SkillCatalogue(lambda: catalogue)
 

@@ -1,10 +1,13 @@
 """Turn a plugin's directory into the things the catalogue serves.
 
-A plugin root is a directory (``sources/`` materialised the tree it sits in);
-what to serve out of it is a set of globs per kind, and the conventions below
-are the defaults. Setting a kind *replaces* its default rather than appending
-to it -- an append would leave no way to stop serving a convention -- and an
-empty list turns a kind off.
+A plugin root is a directory (``sources/`` materialised the tree it sits in).
+Its skills are found the way Claude Code and kubed-mcp find them
+(``skill_dirs``): each folder directly in ``skills/`` that holds a ``SKILL.md``,
+then the folders a manifest, an entry or the config declares. Its prompts and
+library files are a set of globs per kind, and the conventions below are the
+defaults. Setting a prompt or file kind *replaces* its default rather than
+appending to it -- an append would leave no way to stop serving a convention --
+and an empty list turns a kind off.
 
 Everything found is resolved and checked to lie inside the root, the same
 guard ``uris.py`` applies on read, so a glob like ``../**`` finds nothing.
@@ -34,13 +37,10 @@ AGENTS_DIR = "agents"
 
 PLUGIN_ROOT = PurePosixPath(".")
 
+# The folder whose direct children are a plugin's skills by convention.
+SKILLS_DIR = "skills"
+
 DEFAULTS: dict[str, tuple[str, ...]] = {
-    "skills": (
-        "skills/**/SKILL.md",
-        ".github/skills/*/SKILL.md",
-        ".claude/skills/*/SKILL.md",
-        ".agents/skills/*/SKILL.md",
-    ),
     "prompts": ("prompts/**/*.md", ".github/prompts/*.prompt.md", "commands/**/*.md"),
     "files": (),
 }
@@ -51,16 +51,9 @@ DEFAULTS: dict[str, tuple[str, ...]] = {
 # detect.py cannot see paths, so the caller says it (§C1.34).
 COMMAND_DIRS: tuple[str, ...] = ("commands", ".claude/commands")
 
-# The directories that hold skills by convention. A skill's folder is its path
-# below the deepest of these that contains it, so a skill directly in one has none.
-SKILL_ROOTS: tuple[str, ...] = (
-    "",
-    "skills",
-    ".github/skills",
-    ".claude/skills",
-    ".agents/skills",
-)
-
+# The dot directories agent tooling keeps its files in. Never hidden, so a
+# prompt convention (``.github/prompts``, ``.claude/commands``), a ``files:``
+# glob or a declared skill folder can reach into one.
 CONVENTIONAL_DOTDIRS: frozenset[str] = frozenset({".github", ".claude", ".agents"})
 
 # Where this server's own metadata files live: a `marketplace.json` and a
@@ -130,9 +123,9 @@ def hidden(rel: Path) -> bool:
 def _matches(base: Path, pattern: str) -> Iterator[Path]:
     """Every glob hit that is safely inside ``base``, as the path that matched.
 
-    Shared by ``files`` and ``skill_dirs`` so the guards are written once: a
-    hit that escapes the root is rejected whether it turns out to be a file or
-    a directory.
+    Shared by every glob kind so the guards are written once: a hit that
+    escapes the root is rejected whether it turns out to be a file or a
+    directory.
 
     The *resolved* path decides containment and nothing else. What is yielded,
     and so what becomes a catalogue row, an index entry or a ``skill://`` path,
@@ -140,9 +133,8 @@ def _matches(base: Path, pattern: str) -> Iterator[Path]:
     to ``..<timestamp>/shared/foo.md``, a name no client asked for and a
     directory Kubernetes deletes on the next update.
 
-    ``"."`` is the plugin root itself, a directory hit: a manifest says
-    ``"skills": ["./"]`` for a plugin whose skills sit at its root, and
-    ``Path.glob(".")`` raises rather than answer it.
+    ``"."`` is the plugin root itself, a directory hit: ``Path.glob(".")``
+    raises rather than answer it.
 
     A pattern ``Path.glob`` refuses matches nothing: before Python 3.13 a
     ``**`` inside a component (``"x**.md"``) raises ``ValueError``, and the
@@ -267,38 +259,59 @@ def agent_paths(root: Path, globs: Globs) -> tuple[Path, ...]:
     return tuple(found)
 
 
-def skill_dirs(root: Path, globs: Globs) -> list[Path]:
-    """The skill directories a plugin's ``skills`` globs select.
+def skill_dirs(root: Path, declared: Sequence[str] = ()) -> list[Path]:
+    """A plugin's skill folders, in the order they are claimed.
 
-    A glob may name either the ``SKILL.md`` or the *directory*, because both
-    spellings mean the same thing to whoever writes the config:
+    The rule Claude Code and kubed-mcp read a plugin by, and nothing deeper.
+    ``skills/`` is read first and then each of ``declared``, in order, and each
+    is read the same way: the folder itself when it holds a ``SKILL.md``, else
+    each folder directly in it that does, by name. A folder reached twice is
+    found once, where it was first reached.
 
-        skills: ["skills/*/SKILL.md"]   # the file that makes it a skill
-        skills: ["skills/*"]            # each of those folders IS a skill
-        skills: ["skills"]              # everything under here is
+    A folder named ``.…`` directly in one is never a skill, and neither is one
+    that is itself a symlink: ``os.walk``, which kubed-mcp reads a folder with,
+    does not descend into either. The folder read may be a symlink, as
+    ``os.walk``'s top may be -- a ConfigMap mounts ``skills -> ..data/skills``.
+    A path that is not a folder inside the root finds nothing, and neither
+    does a ``SKILL.md`` symlinked out of it. ``skills/g/b/SKILL.md`` is not a
+    skill unless ``skills/g`` or ``skills/g/b`` is declared.
 
-    A matched directory contributes every skill beneath it, so pointing at a
-    leaf registers one and pointing at a composite registers the set -- which
-    is what a folder of folders already means to a reader. Without it the
-    directory spelling would match nothing and say nothing -- the same silent
-    empty ``_globstar`` exists to prevent.
+    What is returned is the path as it was reached, not its symlink target, so
+    a ConfigMap key is not swapped for the ``..<timestamp>`` it resolves to.
     """
     base = root.resolve()
-    found: set[Path] = set()
-    for pattern in patterns("skills", globs):
-        for hit in _matches(base, pattern):
-            if hit.is_file():
-                if hit.name == MAIN_FILE:
-                    found.add(hit.parent)
-            elif hit.is_dir():
-                for main in hit.rglob(MAIN_FILE):
-                    # The same guards a file glob gets: a SKILL.md symlinked out
-                    # of the root must not register the directory holding it.
-                    if hidden(main.relative_to(base)):
-                        continue
-                    if inside(main, base) is not None and main.is_file():
-                        found.add(main.parent)
-    return sorted(found)
+    found: dict[Path, None] = {}
+    for folder in (SKILLS_DIR, *declared):
+        for skill in _skills_in(base, folder):
+            found.setdefault(skill)
+    return list(found)
+
+
+def _skills_in(base: Path, folder: str) -> list[Path]:
+    """The skill ``folder`` is, or the skills directly in it, sorted."""
+    start = base / folder
+    if inside(start, base) is None or not start.is_dir():
+        return []
+    if _is_skill(start, base):
+        return [start]
+    try:
+        children = sorted(start.iterdir())
+    except OSError:
+        return []
+    return [
+        child
+        for child in children
+        if not child.name.startswith(".")
+        and not child.is_symlink()
+        and child.is_dir()
+        and _is_skill(child, base)
+    ]
+
+
+def _is_skill(folder: Path, base: Path) -> bool:
+    """Whether ``folder`` holds a ``SKILL.md`` that is a regular file in ``base``."""
+    main = inside(folder / MAIN_FILE, base)
+    return main is not None and main.is_file()
 
 
 def command_files(root: Path, globs: Globs) -> set[Path]:
@@ -331,27 +344,19 @@ def library_files(root: Path, globs: Globs, skill_dirs: Sequence[Path]) -> list[
 
 
 def folder_of(skill_dir: Path, root: Path) -> str:
-    """The folders between a skill and its plugin's skill root, as a posix path.
+    """The folders between a skill and its plugin's ``skills/``, as a posix path.
 
-    Empty for a skill that sits directly in a root. The deepest root wins, so
-    ``skills/grafana-lgtm/loki`` is in ``grafana-lgtm`` and not in
-    ``skills/grafana-lgtm``: every skill of a plugin loses the same leading
-    segments, which keeps a sibling reference like ``../other/SKILL.md``
-    pointing at the sibling's address.
+    Empty for a skill directly in ``skills/``, and for one anywhere else -- a
+    declared folder outside ``skills/``, or the plugin root. So
+    ``skills/grafana-lgtm/loki`` is in ``grafana-lgtm``: every skill of a
+    plugin loses the same leading segment, which keeps a sibling reference
+    like ``../other/SKILL.md`` pointing at the sibling's address.
     """
-    # Not resolved: a skill reached through a symlink is placed by where the
-    # config found it, not by the timestamp directory it happens to live in.
-    base = root.resolve()
-    if skill_dir == base:
+    # Not resolved: a skill reached through a symlink is placed by where it
+    # was found, not by the timestamp directory it happens to live in.
+    try:
+        rel = skill_dir.relative_to(root.resolve() / SKILLS_DIR)
+    except ValueError:
         return ""
-    rel = skill_dir.parent.relative_to(base).as_posix()
-    if rel == ".":
-        return ""
-    for skill_root in sorted(SKILL_ROOTS, key=len, reverse=True):
-        if not skill_root:
-            continue
-        if rel == skill_root:
-            return ""
-        if rel.startswith(f"{skill_root}/"):
-            return rel[len(skill_root) + 1 :]
-    return rel
+    parent = rel.parent.as_posix()
+    return "" if parent == "." else parent

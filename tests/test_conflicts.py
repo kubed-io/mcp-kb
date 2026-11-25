@@ -30,6 +30,11 @@ def _skill(root, rel, name, description):
     _write(root, f"{rel}/SKILL.md", frontmatter)
 
 
+# The folders below skills/ these trees put skills in, declared by both plugins
+# so a skill one level further down is found; a folder a tree lacks finds none.
+FOLDERS = ("./skills/folder", "./skills/guides", "./skills/x")
+
+
 def _pair(tmp_path, first, second, files=("shared/**",), libraries=None):
     """Two plugins feeding library `lib`, in that order; each gets a tree.
 
@@ -42,7 +47,12 @@ def _pair(tmp_path, first, second, files=("shared/**",), libraries=None):
         root.mkdir()
         build(root)
         plugins.append(
-            {"name": name, "source": f"file://{root}", "files": list(files)}
+            {
+                "name": name,
+                "source": f"file://{root}",
+                "skills": list(FOLDERS),
+                "files": list(files),
+            }
         )
     config = Config.model_validate(
         {

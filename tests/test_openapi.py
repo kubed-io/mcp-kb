@@ -56,7 +56,7 @@ def every_status(skills_dir, cache, monkeypatch):
         {
             "name": "clash",
             "source": f"file://{skills_dir / 'flatsource'}",
-            "skills": ["**/SKILL.md"],
+            "skills": ["."],
             "version": "1",
         }
     )
