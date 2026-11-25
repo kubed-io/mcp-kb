@@ -40,6 +40,9 @@ def server_url(skills_dir_module, prompts_dir_module):
         "See skill://flatsource/beta/SKILL.md.\n"
     )
     (alpha / "notes.md").write_text("Also skill://flatsource/alpha/SKILL.md.\n")
+    # A folder inside a skill, whose read hint is kubed-mcp's (FolderNotFound).
+    (alpha / "refs").mkdir()
+    (alpha / "refs" / "x.md").write_text("See skill://flatsource/beta/SKILL.md.\n")
     (skills_dir_module / "flatsource" / "beta" / "already.md").write_text(
         "kb+skill://flatsource/beta/SKILL.md and myskill://flatsource/beta.\n"
     )
@@ -152,6 +155,47 @@ async def test_prefixed_directory_hint_names_the_prefixed_file(server_url):
             {"uri": "kb+skill://flatsource/alpha"},
             {**BOTH, "X-MCP-Resources": "off"},
         )
+
+
+# A library, a folder, a skill's root and a folder inside a skill.
+DIRECTORIES = (
+    "skill://flatsource",
+    "skill://deepsource/plugin-a",
+    "skill://flatsource/alpha",
+    "skill://flatsource/alpha/refs",
+)
+# The files a hint names: an index, a skill's SKILL.md or _manifest, _files.md.
+_HINTED = re.compile(r"\S*skill://\S*?(?:_index\.md|SKILL\.md|_manifest|_files\.md)")
+
+
+async def _missed(url, uri, headers, tools):
+    """The error a read of directory ``uri`` fails with, as a resource or a tool."""
+    with pytest.raises(Exception) as missed:
+        if tools:
+            await tool(url, "read_resource", {"uri": uri}, headers)
+        else:
+            await read(url, uri, headers)
+    return str(missed.value)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("tools", [False, True], ids=["resources", "tools"])
+@pytest.mark.parametrize("sent", ["prefixed", "plain"])
+@pytest.mark.parametrize("directory", DIRECTORIES)
+async def test_a_directory_hint_is_prefixed_once(server_url, directory, sent, tools):
+    # I1: the prefix is written into a hint once, whichever form the client sent.
+    headers = {**PREFIX, **({"Kb-Resources": "off"} if tools else {})}
+    uri = f"kb+{directory}" if sent == "prefixed" else directory
+    message = await _missed(server_url, uri, headers, tools)
+    assert "kb+kb+" not in message
+    hinted = _HINTED.findall(message)
+    assert hinted, message
+    for address in hinted:
+        assert address.startswith("kb+skill://"), message
+        if tools:
+            assert await tool(server_url, "read_resource", {"uri": address}, headers)
+        else:
+            assert await read(server_url, address, headers)
 
 
 @pytest.mark.integration

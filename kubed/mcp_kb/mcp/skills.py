@@ -27,7 +27,9 @@ Commands are skipped by ``read_command``: kb serves its prompts itself until K4.
 what kubed-mcp reports serving -- each added plugin's ``skills`` URIs, and its
 ``agent_files`` -- so no index, hint, listing or rewritten name points at a
 skill or an agent that does not read. Anything either side has alone is logged
-once. A plugin kubed-mcp refuses is a conflict in its library, as LIB-28's are.
+once, and a skill only kubed-mcp found is failed in the rewriter, so it is not
+served either: kb never vetted it (N13). A plugin kubed-mcp refuses is a
+conflict in its library, as LIB-28's are.
 
 The rewriter and ``agent_meta`` read the snapshot being published, held here
 and set before ``serve()``: a build made between ``serve()`` and the swap in
@@ -58,7 +60,6 @@ from kubed.mcp import QuickMCP
 from kubed.mcp.plugins import Plugin as Served
 from kubed.mcp.plugins import PluginError, PluginSet, Site, View
 
-from ..catalogue import harvest
 from ..catalogue.agents import Agent, AgentRoster, parse_agent
 from ..catalogue.names import split_frontmatter
 from ..catalogue.skills import Skill
@@ -303,7 +304,10 @@ class SkillServing:
                             elif is_live(plugin.fetch):
                                 # Stamped first, so what is added is what it says.
                                 watch = self._watch(
-                                    snapshot, plugin, found.get(own, ())
+                                    snapshot,
+                                    plugin,
+                                    found.get(own, ()),
+                                    agents.get(own, ()),
                                 )
                             served, kept = self._add(
                                 staged, key, plugin, served_now, last, lib, noted
@@ -396,18 +400,22 @@ class SkillServing:
         return None if tree is None else plugin_root(tree, plugin.subdir)
 
     def _watch(
-        self, snapshot: Snapshot, plugin: Plugin, skills: Sequence[Skill]
+        self,
+        snapshot: Snapshot,
+        plugin: Plugin,
+        skills: Sequence[Skill],
+        harvested: Sequence[Agent],
     ) -> _Watch:
-        """A live ``plugin``'s root, skills and agent files, stamped now."""
-        agents: tuple[Path, ...] = ()
+        """A live ``plugin``'s root, skills and agent files, stamped now.
+
+        The agent files are the ones ``snapshot`` harvested for it, its roster's
+        paths: what its ``plugin.json`` or entry lists decides them, and a fresh
+        glob of the config's ``agents:`` would miss a listed file and watch an
+        ignored one."""
         root = self._root_of(plugin)
-        if plugin.claude_format and root is not None:
-            try:
-                agents = tuple(
-                    path for path, _ in harvest.agent_files(root, plugin.globs)
-                )
-            except OSError:
-                agents = ()
+        agents = (
+            tuple(agent.path for agent in harvested) if plugin.claude_format else ()
+        )
         stamp = _stamp(snapshot, tuple(skills), agents)
         return _Watch(tuple(skills), agents, stamp, root)
 
@@ -488,11 +496,8 @@ class SkillServing:
                     f"skill {address} is not served: the plugin layer refused it",
                 )
             for address in sorted(theirs - mine):
-                self._note(
-                    noted,
-                    f"skill {address} is served by the plugin layer, but kb did"
-                    " not find it",
-                )
+                # Its SKILL.md fails in the rewriter, which finds no such skill.
+                self._note(noted, f"skill {address} is not served: kb did not find it")
             matched: set[str] = set()
             for file in served.agent_files:
                 if file.renamed:
@@ -668,6 +673,10 @@ class SkillServing:
             if address in published.hidden:
                 # Fails the whole skill, in every build (PLUG-59): N13.
                 raise ValueError(f"skill {address} holds a hidden file")
+            if published.snapshot.index.get(address) is None:
+                # One kb's harvest did not find, so never vetted for N13: fail
+                # closed, as for a hidden one. The parity guard said why, once.
+                raise ValueError(f"skill {address} is not one kb found")
             return catalogue.instructions(address, text, requested_scope())
         if site.kind == "agent":
             head, body = split_frontmatter(text)

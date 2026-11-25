@@ -9,8 +9,8 @@ model already knows how to drive it: list the resources, read a URI. A server
 that invents ``read_skill(skill, file)`` alongside it is asking the model to
 learn a second vocabulary for the same act. So the catalogue below is written
 once, in URIs, and both halves of the protocol are thin projections of it --
-``resources.py`` serves it as resources, ``tools.py`` as two tools with the same
-shape for clients that have no resources.
+``resources.py`` serves it as resources, and kubed-mcp's ``list_resources`` and
+``read_resource`` read those same resources for clients that have none.
 
 The grammar follows the MCP Skills extension (SEP-2640), which is the whole
 API::
@@ -25,15 +25,17 @@ API::
 
 ``<folder>`` is the skill's plugin's place in the library: empty for the
 library's main plugin, the plugin's name for any other
-(``snapshot.folder_for``). The last segment before the file is always the
-skill's name. A skill is found by the longest prefix of the path that names
-one, so a nested skill wins over the skill whose directory holds it.
+(``snapshot.folder_for``). It never comes from where the skill sits inside its
+plugin. The last segment before the file is always the skill's name. A skill is
+found by the longest prefix of the path that names one, so a nested skill wins
+over the skill whose directory holds it.
 
-An index lists what is *directly* under it: each folder as its own
-``_index.md``, with how many skills are below it, and each skill in no deeper
-folder as its ``SKILL.md``. A library of fifty skills in seven folders is then
-seven lines, and the reader chooses which one to open, rather than paying for
-every skill's description to find the folder it wanted.
+An index lists what is *directly* under it: a library's, each folder as its own
+``_index.md`` with how many skills are in it, then each of the main plugin's
+skills as its ``SKILL.md``; a folder's, its plugin's skills. A library of fifty
+skills in seven folders is then seven lines, and the reader chooses which one to
+open, rather than paying for every skill's description to find the folder it
+wanted.
 
 Every other address is a directory -- a library, a folder, a skill's root --
 and serves nothing, as on any other skill server. ``hint`` says which file to
@@ -41,7 +43,7 @@ read instead, for the error a caller sees, and ``directory`` lists a library's
 or a folder's direct children, for ``resources/directory/read`` and
 ``_index.json``.
 
-A skill's own files, its ``_manifest`` and its folders' indexes are served by
+A skill's own files, its ``_manifest`` and the folders inside it are served by
 kubed-mcp's plugin layer, which reads each plugin itself; kb's rewriter
 renders a ``SKILL.md`` through ``instructions`` and an agent's body through
 ``agent_instructions``, and ``agent_meta`` is kb's key in an agent's ``_meta``.

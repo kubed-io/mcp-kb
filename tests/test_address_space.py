@@ -31,6 +31,7 @@ from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.resources import CatalogueProvider, SkillTemplate
 from tests.conftest import server_of
 from tests.test_header_scope import _free_port
+from tests.test_skills_extension import request
 
 pytestmark = pytest.mark.integration
 
@@ -410,20 +411,8 @@ async def test_a_dot_segment_past_the_root_reads_nothing(url):
 
 async def _directory(url, uri):
     """``resources/directory/read`` of ``uri`` as sent, the listing's URIs."""
-    from mcp import types
-    from mcp.types import RequestParams
-    from pydantic import ConfigDict, TypeAdapter
-
-    class Params(RequestParams):
-        model_config = ConfigDict(extra="allow")
-
     async with _client(url) as client:
-        answer = await client.session.send_request(
-            types.Request(
-                method="resources/directory/read", params=Params(uri=uri)
-            ),
-            TypeAdapter(dict),
-        )
+        answer = await request(client, "resources/directory/read", uri=uri)
     return answer["resources"]
 
 
@@ -817,7 +806,7 @@ async def test_a_library_file_named_manifest_is_not_labelled_json(tmp_path):
 
 
 async def test_a_skill_nested_inside_a_skill_is_the_outer_skills_files(tmp_path):
-    """FastMCP's catalogue has no room for a skill inside another (SKL-7).
+    """Nothing deeper than ``skills/<name>/`` is a skill (SKL-1).
 
     The enclosing skill is served, with the nested one's files among its own,
     so they read at their address under it; the nested skill is not served as a

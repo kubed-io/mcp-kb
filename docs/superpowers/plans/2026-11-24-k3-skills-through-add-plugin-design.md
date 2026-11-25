@@ -1,7 +1,8 @@
 # K3: skills through kubed-mcp's plugin layer — design
 
-> **History.** Proposed for #79 (PR #89, into `issue-80`, epic #80). Not shipped. This is K3's
-> design of record, and [the plan](2026-11-24-k3-skills-through-add-plugin.md) implements it.
+> **History.** Proposed for #79 (PR #89, into `issue-80`, epic #80). Shipped in PR #89: D1-D11
+> and N1-N18 are as built, and the living spec says what holds now. This is K3's design of
+> record, and [the plan](2026-11-24-k3-skills-through-add-plugin.md) implements it.
 > There was no draft spec on the branch. Its second round follows Dr K's rulings of 2026-11-24
 > (23:01) on PR #89, and his answers of 2026-11-25. Those rulings replaced the first round's staged trees.
 > Revised on 2026-11-25 (05:56) when Task 4 found that kb's agents can't stay kb's beside a served
@@ -113,7 +114,7 @@ declared)`:
 - each direct child of `skills/` holding `SKILL.md`;
 - then each declared entry (the manifest's, then the entry's, then a declared plugin's
   `skills:`): the entry itself if it holds `SKILL.md`, else its direct children that do;
-- the first claim wins, and dot folders are skipped.
+- the first claim wins, and dot folders and symlinked folders are skipped.
 
 **What goes:**
 - kb's skill globs;
@@ -156,8 +157,9 @@ library's plugins in its order, then `mcp.serve(set)`.
 
 `mcp.add_rewriter(serving.rewrite)`. On a skill's root `SKILL.md`, it applies
 `Catalogue.instructions(address, text, requested_scope())`: SKL-55, then SKL-25 and SKL-52, as
-today. On an agent's file it rewrites the body as D11 says. Every other site is returned as
-written. `to_mcp_form` isn't registered.
+today. On an agent's file it rewrites the body as D11 says. Every text file of a skill, its
+`SKILL.md` included, has its CRLF and CR line endings normalised to LF first (SKL-22); every
+other site is returned as written. `to_mcp_form` isn't registered.
 
 The request's scope is safe to read here: a build runs in the request that pinned its key, and
 every scope with that key admits the same plugins. GW-5 writes the prefix after it.
@@ -301,6 +303,16 @@ needed: a holding knob that keeps kb's extension would exist only to delay adopt
 - **N16.** A skill's file with no extension, or one kubed-mcp doesn't count as text, or bytes
   that aren't UTF-8, is served as an `application/octet-stream` blob (PLUG-75), where kb served
   every file as text, `text/markdown` by default.
+- **N17.** The resource tools exist only once a plugin with a skill or an agent is served; before
+  K3 kb always registered them. So do the extensions: `server/discover` declares the Skills
+  extension once a plugin with a skill is served, and the Agents extension once one with a skill
+  or an agent is. Until then `skills/list`, `skills/get`, `agents/list` and `agents/get` answer
+  `Method not found`; before K3 kb declared and answered both from boot. Legacy `initialize`
+  still declares the Skills extension from boot (SKL-44, AGT-1).
+- **N18.** A library's and a folder's `_index.json` carry the gateway prefix, on every address in
+  them (each `uri` and any in a description), as their `_index.md` does and kubed-mcp's
+  `_index.json` inside a skill does (GW-5): one writer for every text a client reads (SKL-56).
+  Before K3 they were written without it.
 
 Everything else stays the same as the before-dump, under all ten scopes, with and without `kb+`.
 
@@ -310,7 +322,9 @@ Everything else stays the same as the before-dump, under all ten scopes, with an
   - SKL-2 and SKL-7 go;
   - SKL-1, SKL-10, SKL-24, SKL-37, SKL-45, SKL-52 (its plugin-root-skill clause) and SKL-58 are
     reworded;
-  - SKL-59 (a library's namespaces and its main plugin) and SKL-60 (kb's rewriter) are new.
+  - SKL-59 (a library's namespaces and its main plugin) and SKL-60 (kb's rewriter) are new;
+  - SKL-3, SKL-13, SKL-14, SKL-21 to SKL-23 and SKL-39 are reworded too (N13, N14, N16, D9);
+  - SKL-44 is reworded (N17), and SKL-56 notes the prefix (N18).
 - **[plugins-and-libraries.md](../specs/plugins-and-libraries.md):**
   - PLG-9 and PLG-20 are reworded: a skill is found the native way, and a declared plugin's
     `skills:` is folders;
@@ -318,15 +332,18 @@ Everything else stays the same as the before-dump, under all ten scopes, with an
   - LIB-33 is reworded;
   - LIB-29 gains: a plugin kubed-mcp refuses is reported the same way.
 - **[config-and-sources.md](../specs/config-and-sources.md):** SRC-53 is reworded: the
-  served-tree loader for every scheme replaces `LocalLoader`. A CFG row refuses a glob in
-  `skills:`.
+  served-tree loader for every scheme replaces `LocalLoader`. CFG-14 refuses a glob in
+  `skills:`, and SRC-21 is the one-request-late live re-read.
 - **[scoping-and-instructions.md](../specs/scoping-and-instructions.md):** SCP-36 is new: one
-  build per admitted set, `EMPTY` shared, and a refused scope builds nothing.
+  build per admitted set, `EMPTY` shared, and a refused scope builds nothing. SCP-2 and SCP-3
+  gain `Kb-Resources` and `Kb-Prompts`.
 - **[http-and-tools.md](../specs/http-and-tools.md):** the TOOL rows for `list_resources` and
-  `read_resource` point at kubed-mcp's DLV-6, and their `?resources=` switch at DLV-2.
-- **[agents.md](../specs/agents.md):** AGT-7 to AGT-9 and AGT-17 say kubed-mcp serves them
-  (PLUG-63, PLUG-64, PLUG-73) with kb's `_meta` and rewriter; AGT-16 is reworded to D9's re-add
-  (N6); a new AGT row names the `agents://` file (N7).
+  `read_resource` point at kubed-mcp's DLV-6, and their `?resources=` switch at DLV-2: TOOL-1
+  (up to four tools, N17), TOOL-3, TOOL-4, TOOL-6, TOOL-8, TOOL-10 to TOOL-12 and TOOL-14;
+  HTTP-27 says when the extensions are declared (N17).
+- **[agents.md](../specs/agents.md):** AGT-1 is reworded (N17); AGT-7 to AGT-9 and AGT-17 say
+  kubed-mcp serves them (PLUG-63, PLUG-64, PLUG-73) with kb's `_meta` and rewriter; AGT-16 is
+  reworded to D9's re-add (N6); AGT-18 is new and names the `agents://` file (N7).
 
 ## Settled by Dr K (2026-11-25)
 

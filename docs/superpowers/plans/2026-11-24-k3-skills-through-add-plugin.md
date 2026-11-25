@@ -1,8 +1,9 @@
 # K3: Skills Through kubed-mcp's Plugin Layer Implementation Plan
 
-> **History.** Proposed for #79 (PR #89, into `issue-80`). Not shipped. Revised to Dr K's rulings
-> of 2026-11-24 (23:01): one library per namespace, with its main plugin on top; each plugin
-> added as itself; no staged trees. Revised again on 2026-11-25 (05:56): kb's agents go to kubed-mcp
+> **History.** Proposed for #79 (PR #89, into `issue-80`). Shipped in PR #89, as
+> [the design](2026-11-24-k3-skills-through-add-plugin-design.md) says (D1-D11, N1-N18).
+> Revised to Dr K's rulings of 2026-11-24 (23:01): one library per namespace, with its main
+> plugin on top; each plugin added as itself; no staged trees. Revised again on 2026-11-25 (05:56): kb's agents go to kubed-mcp
 > in Task 4 (design D11), commands are skipped with a `command_reader`, and no empty component
 > list is passed.
 

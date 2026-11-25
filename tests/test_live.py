@@ -711,6 +711,49 @@ def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock):
     assert listed[name]["description"] == "Helps again."
 
 
+def test_a_live_watch_stamps_the_agents_the_manifest_lists(webdav, tmp_path, clock):
+    """I2: the watch stamps the agent files kb harvested, which a ``plugin.json``
+    listing ``agents`` decides, not the config's globs: an edit to the listed
+    ``roles/r.md`` re-reads, one to the unlisted ``agents/old.md`` does not."""
+    webdav.write(
+        ".claude-plugin/plugin.json",
+        json.dumps({"name": "notes", "agents": ["./roles/r.md"]}),
+    )
+    webdav.write("roles/r.md", AGENT.format(description="Roles.", body="Role first."))
+    webdav.write(
+        "agents/old.md",
+        "---\nname: old\ndescription: Old.\n---\n\nNot listed.\n",
+    )
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+    mcp = serving_of(knowledge_base)._mcp
+    name = "notes_helper"
+
+    async def twice(client):
+        first = await ext_request(client, "agents/get", name=name)
+        got = await ext_request(client, "agents/get", name=name)
+        return first, got
+
+    assert run_client(knowledge_base, twice)[1]["instructions"] == "Role first."
+    generation = mcp.generation
+
+    webdav.write(
+        "agents/old.md",
+        "---\nname: old\ndescription: Old, edited.\n---\n\nNot listed, and longer.\n",
+    )
+    clock(2.5)
+    run_client(knowledge_base, twice)
+    assert mcp.generation == generation, "an unlisted file is not watched"
+
+    webdav.write(
+        "roles/r.md", AGENT.format(description="Roles, edited.", body="Role, edited.")
+    )
+    clock(2.5)
+    first, got = run_client(knowledge_base, twice)
+    assert first["instructions"] == "Role first.", "N6: the re-adding request"
+    assert got["instructions"] == "Role, edited."
+    assert mcp.generation == generation + 1
+
+
 def test_no_reread_while_a_refresh_builds(webdav, tmp_path, monkeypatch):
     """A refresh points the fetch at its new export before it builds and
     publishes. A re-read in that window would add the plugin from the new tree
@@ -738,6 +781,60 @@ def test_no_reread_while_a_refresh_builds(webdav, tmp_path, monkeypatch):
     assert seen == {"hidden": None, "moved": 0}
     assert read_served(knowledge_base, f"{SKILL}/.secret.md") is None
     assert read_served(knowledge_base, URI) is None, "N13: x holds a hidden file"
+
+
+def test_a_publisher_that_raises_leaves_the_records_as_they_were(
+    webdav, tmp_path, monkeypatch
+):
+    """I3: a refresh whose publish raises keeps the fetches, plugins, libraries
+    and records it had, so live re-reads go on against the tree being served,
+    and the next refresh publishes the new content."""
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+    mcp = serving_of(knowledge_base)._mcp
+    snapshot = knowledge_base.snapshot
+    before = (
+        knowledge_base._fetches,
+        knowledge_base._plugins,
+        knowledge_base._libraries,
+        knowledge_base._records,
+    )
+    publish = knowledge_base._publish
+    raised = []
+
+    def flaky(published):
+        if not raised:
+            raised.append(published.generation)
+            raise RuntimeError("the plugin layer fell over")
+        return publish(published)
+
+    monkeypatch.setattr(knowledge_base, "_publish", flaky)
+    webdav.skill("x", "edited for the refresh that fails to publish")
+    with pytest.raises(RuntimeError, match="fell over"):
+        knowledge_base.refresh(force=True)
+    assert raised
+    assert knowledge_base.snapshot is snapshot
+    assert (
+        knowledge_base._fetches,
+        knowledge_base._plugins,
+        knowledge_base._libraries,
+        knowledge_base._records,
+    ) == before
+
+    # Live re-reads resume against the tree being served (N6: one request late).
+    webdav.skill("x", "edited live after the failed refresh, and longer again")
+    read_served(knowledge_base, URI)
+    assert "edited live after the failed refresh" in read_served(knowledge_base, URI)
+
+    webdav.skill("x", "edited for the refresh that publishes, much longer than that")
+    generation = mcp.generation
+    assert knowledge_base.refresh(force=True) == [KEY]
+    assert knowledge_base.snapshot.generation == snapshot.generation + 1
+    assert mcp.generation > generation
+    assert "edited for the refresh that publishes" in read_served(knowledge_base, URI)
+
+    webdav.skill("x", "and live again after it, the longest edit of all of them")
+    read_served(knowledge_base, URI)
+    assert "and live again after it" in read_served(knowledge_base, URI)
 
 
 def test_a_reread_that_reads_a_new_export_is_abandoned(

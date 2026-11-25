@@ -427,15 +427,24 @@ class KnowledgeBase:
             # was built, so it belongs in what was rebuilt; otherwise
             # `/reindex` and the log both omit a clone that really happened.
             rebuilt += [key for key in fetches if key not in known]
+            # Assigned before the build and the publish, which read them: the
+            # publisher finds the new trees through ``served_tree``. A raise in
+            # either puts back the four it replaced, so nothing points at a
+            # generation that was never swapped in.
+            was = self._fetches, self._plugins, self._libraries, self._records
             self._fetches, self._plugins = fetches, plugins
             self._libraries, self._records = libraries, records
-            snapshot = self._build(generation=self.snapshot.generation + 1)
-            if self._publish is not None:
-                snapshot = self._publish(snapshot)
+            try:
+                snapshot = self._build(generation=self.snapshot.generation + 1)
+                if self._publish is not None:
+                    snapshot = self._publish(snapshot)
+            except BaseException:
+                self._fetches, self._plugins, self._libraries, self._records = was
+                raise
             log_changes(self.snapshot.status, snapshot.status)
             self.snapshot = snapshot
-            # Best-effort and therefore last: a raise here must not leave
-            # the records advanced while snapshot still holds the old generation.
+            # Best-effort and therefore last, after the swap: a raise here
+            # leaves the records and the snapshot one generation, the new one.
             self._write_index()
             return rebuilt
 

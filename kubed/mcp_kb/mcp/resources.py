@@ -209,6 +209,12 @@ class NameTheFileToRead(Middleware):
     The hint is answered from the caller's own scope, so it never confirms a
     directory the caller could not have listed: out of scope, the error is the
     same bare one a missing URI gets. The code is unchanged, -32602.
+
+    It runs outside every other middleware, kubed-mcp's included, so it sees the
+    URI the client sent and the error after kubed-mcp has named that URI in it,
+    and writes the prefix into its hint once (SKL-41). Inside kubed-mcp's
+    ``_TakeThePrefix`` it saw the plain address, and that middleware's rename of
+    a miss to the URI as sent prefixed a hint kb had prefixed already.
     """
 
     def __init__(self, catalogue: Callable[[], Catalogue]):
@@ -224,12 +230,18 @@ class NameTheFileToRead(Middleware):
                 requested_scope(),
                 requested_addressing(),
             )
-            hint = catalogue.hint(a.canonical(uri), scope)
-            if hint is None and isinstance(miss, FolderNotFound):
+            address = canonical(uri, a)
+            hint = catalogue.hint(address, scope)
+            if hint is not None:
+                # Naming the address as sent, dot segments and all, as kubed-mcp
+                # names a miss; the prefix is written below.
+                hint = hint.replace(address, a.canonical(uri).rstrip("/"))
+            elif isinstance(miss, FolderNotFound):
                 # A folder inside a skill, which kubed-mcp named: its index.
                 hint = miss.hint
             if hint is None:
                 raise
+            # Idempotent, so a hint naming the prefixed URI as sent stays as it is.
             hint = a.text(hint)
             raise MCPError(
                 code=INVALID_PARAMS,
@@ -329,10 +341,13 @@ def register(mcp: QuickMCP, catalogue: Callable[[], Catalogue]) -> None:
     """Publish the catalogue as ``skill://`` resources, read per request.
 
     After the plugin layer's skills provider, so a skill's file is always its.
-    The hints run outside the address, so an error names the URI the client
-    sent: kb's own first, then kubed-mcp's for a folder inside a skill.
+    The hints run outside everything, kubed-mcp's prefix middleware included,
+    so an error names the URI the client sent and its hint carries the prefix
+    once: kb's own first, then kubed-mcp's for a folder inside a skill.
+    QuickMCP has no way to add a middleware outside its own, so it goes first in
+    the FastMCP server's list.
     """
     mcp.add_provider(CatalogueProvider(catalogue))
-    mcp.add_middleware(NameTheFileToRead(catalogue))
+    mcp.server.middleware.insert(0, NameTheFileToRead(catalogue))
     mcp.add_middleware(ReadTheAddress())
     mcp.add_middleware(NameTheIndex())

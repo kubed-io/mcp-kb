@@ -502,6 +502,35 @@ async def test_a_skill_holding_a_symlink_is_not_served(tmp_path, caplog):
     assert lines == ["skill lib/other is not served: the plugin layer refused it"]
 
 
+async def test_a_skill_kb_did_not_find_is_not_served(tmp_path, caplog, monkeypatch):
+    """M3: N13 fails closed. A skill the plugin layer finds and kb's harvest did
+    not is one kb never vetted, so its ``SKILL.md`` fails in kb's rewriter and
+    it is not served at all; the server says so once."""
+    from kubed.mcp_kb.catalogue import harvest
+
+    real = harvest.skill_dirs
+
+    def missing_other(root, globs):
+        return [d for d in real(root, globs) if Path(d).name != "other"]
+
+    monkeypatch.setattr(harvest, "skill_dirs", missing_other)
+    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.mcp.skills"):
+        knowledge_base = kit(tmp_path)
+        server_of(knowledge_base)
+        async with Client(server_of(knowledge_base)) as client:
+            for uri in ("skill://lib/other/SKILL.md", "skill://lib/other/_manifest"):
+                with pytest.raises(MCPError):
+                    await client.read_resource(uri)
+            listing = await ext_request(client, "skills/list")
+            assert "The kit" in await _text(client, "skill://lib/kit/SKILL.md")
+            # A second session: still not served, and not said again.
+            async with Client(server_of(knowledge_base)) as again:
+                await ext_request(again, "skills/list")
+    assert {entry["uri"] for entry in listing["skills"]} == {"skill://lib/kit/SKILL.md"}
+    lines = [r.getMessage() for r in caplog.records if r.name == "kubed.mcp_kb.mcp.skills"]
+    assert lines == ["skill lib/other is not served: kb did not find it"]
+
+
 async def test_a_misnamed_folder_claimed_first_takes_the_address(tmp_path, caplog):
     """Brief fact 2: ``skills/x`` names itself ``y``, so kb skips it and serves
     the declared ``extra/x``; kubed-mcp's first claim of ``x`` wins and is

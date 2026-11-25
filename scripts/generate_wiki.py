@@ -360,12 +360,12 @@ def _reveals() -> dict[str, tuple[str, str, str]]:
     resources = (
         "Resource mirror",
         request_module.RESOURCES_PARAM,
-        request_module.RESOURCES_HEADER,
+        request_module.RESOURCES_KB_HEADER,
     )
     prompts = (
         "Prompt mirror",
         request_module.PROMPTS_PARAM,
-        request_module.PROMPTS_HEADER,
+        request_module.PROMPTS_KB_HEADER,
     )
     pairs = dict.fromkeys(sorted(tools_module.RESOURCE_TOOLS), resources)
     pairs.update(dict.fromkeys(sorted(prompts_module.PROMPT_TOOLS), prompts))

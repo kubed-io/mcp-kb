@@ -46,7 +46,7 @@ installer's, against whatever image tag it chooses.
 | Path | What it is |
 | --- | --- |
 | `kubed/mcp_kb/server.py` | `KnowledgeBase`: cold start, the refresh loop, which snapshot is current. No FastMCP, no tool bodies |
-| `kubed/mcp_kb/app.py` | `create_app` — the composition root: the `QuickMCP` (kubed-mcp) over a `KnowledgeBase`, its container's `KnowledgeBase` singleton and `Catalogue` transient, and every `register(...)` |
+| `kubed/mcp_kb/app.py` | `create_app` — the composition root: the `QuickMCP` (kubed-mcp) over a `KnowledgeBase`, its `ServedTrees` loader, its container's `KnowledgeBase` singleton and `Catalogue` transient, `SkillServing`, and every `register(...)` |
 | `kubed/mcp_kb/main.py` | CLI and env parsing, and the `mcp-kb` console script |
 | `kubed/mcp_kb/routes.py` | the plain-HTTP surface: `/health`, `/reindex`, `/openapi.yaml` |
 | `kubed/mcp_kb/config.py` | the config file's model — `Config`, `SourceConfig`, `PluginConfig`, `LibraryConfig`, `Selector`, `BasicAuth`, `EnvRef`, `schema()` |
@@ -57,7 +57,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `manifest.py` | a plugin's own `plugin.json`: the components it says it ships |
 | ⤷ `select.py` | `pluginSelector` and `?tag=` — the comma rule, in one place |
 | `kubed/mcp_kb/catalogue/` | what is served, and how it is found, addressed and persisted |
-| ⤷ `harvest.py` | a plugin's globs, and what counts as a skill, a prompt or a library file |
+| ⤷ `harvest.py` | what counts as a skill (`skill_dirs`, the folders Claude Code and kubed-mcp read), a prompt or a library file, and a plugin's globs for the last two |
 | ⤷ `skills.py` | the domain — `Skill`, `SkillIndex`, and the scoping rules. Imports no FastMCP |
 | ⤷ `uris.py` | the `skill://` address space — `Catalogue`, the grammar |
 | ⤷ `agents.py` | a plugin's agent file, parsed — `parse_agent`, `routing_hint`, `Agent`, `AgentRoster`. Imports no FastMCP |
@@ -69,16 +69,15 @@ installer's, against whatever image tag it chooses.
 | ⤷ `index.py` | `Index`, `FetchRecord`, `PluginRecord` — the on-disk `index.json` a cold start reads |
 | ⤷ `snapshot.py` | `Snapshot`, `build_snapshot` — the immutable view every request reads |
 | ⤷ `refresh.py` | when a fetch is due to be looked at again, bounded to the shortest configured interval, and what a failure does to the last good one |
-| `kubed/mcp_kb/sources/` | where bytes come from, one `Fetch` at a time — a kubed-mcp `PluginLoader` per source in `__init__.py`, over `file.py`, `git.py`, `webdav.py`, the shared per-version `export.py`, `errors.py`, and `live.py`, because revalidation is a source concern |
+| `kubed/mcp_kb/sources/` | where bytes come from, one `Fetch` at a time — a loader per source in `__init__.py`, over `file.py`, `git.py`, `webdav.py`, the shared per-version `export.py`, `errors.py`, and `live.py`, because revalidation is a source concern; and `ServedTrees`, the one loader kubed-mcp is handed, which answers a plugin's address with the tree kb is serving for it and never fetches |
 | `kubed/mcp_kb/mcp/` | what an agent sees |
-| ⤷ `skill_catalogue.py` | `SkillCatalogue` — the skills, served by FastMCP's skills provider (through kubed-mcp) from a catalogue built per scope and prefix |
+| ⤷ `skills.py` | `SkillServing` — the skills and agents, served by kubed-mcp's plugin layer: `publish` adds every plugin to a plugin set each generation, `view` is kb's scope, `rewrite` its one rewriter, `read_command` skips every command, `agent_meta` adds kb's `_meta` key, the parity guard narrows the catalogue to what is served, and the live re-read |
 | ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `ReadTheAddress`, `HideMirrorTools` |
-| ⤷ `tools.py`, `prompts.py` | the two mirror pairs |
+| ⤷ `tools.py`, `prompts.py` | `prompts.py` the prompt mirror pair; `tools.py` names kubed-mcp's resource pair (DLV-6) and holds the read-only annotations |
 | ⤷ `request.py`, `scope.py` | what the current request says about itself, and the `Scope` it becomes |
 | ⤷ `instructions.py` | `ScopedInstructions` — sets the `instructions` on each `initialize` and `server/discover` answer |
 | ⤷ `announce.py` | `AnnounceChanges` — telling a session its listing moved |
 | ⤷ `pins.py` | `RefuseEmptyScope` — a scope that names nothing fails every request, saying what there is |
-| ⤷ `agents.py` | `AgentsExtension` — `agents/list` and `agents/get`, the envelope and the errors over `Catalogue` |
 | `kubed/mcp_kb/spec/` | `builder.py`, the OpenAPI document for the HTTP surface |
 | `scripts/` | `generate_openapi.py`, `generate_wiki.py`, and `requirements.py` for the image build |
 | `examples/config.yaml` | the worked config the image ships — four marketplace libraries, and one plugin of our own beside penpot's |
@@ -94,10 +93,14 @@ closed unanswered), so each module exposes a `register(...)` that `create_app` c
 Mounting sub-servers is the other option and is wrong here: it namespaces tool
 names with a prefix, and these names are the agent's API.
 
-- **Adding a tool** → `mcp/tools.py`. Never `server.py` or `app.py`. But think first: the
-  tools are a *mirror* of the resources and the prompts, and one that is not
-  breaks the promise the whole design rests on — that a client which knows how
-  to read MCP resources already knows how to drive this server.
+- **Adding a tool** → a module of its own in `mcp/` with a `register(...)`, as
+  `mcp/prompts.py` registers the prompt mirror, called from `create_app`; its
+  shared annotations are `mcp/tools.py`'s `READ_ONLY`. Never `server.py` or
+  `app.py`. `list_resources` and `read_resource` are kubed-mcp's (DLV-6), and it
+  refuses a tool of either name, so `mcp/tools.py` defines none. But think
+  first: the tools are a *mirror* of the resources and the prompts, and one that
+  is not breaks the promise the whole design rests on — that a client which
+  knows how to read MCP resources already knows how to drive this server.
 - **Changing the URI grammar, or what a URI resolves to** → `catalogue/uris.py`.
   Resources and tools both project from `Catalogue`, so a change there lands on
   both at once, which is the point.
@@ -128,7 +131,8 @@ names with a prefix, and these names are the agent's API.
   `catalogue/uris.py` for where it is applied. Every `Catalogue` method takes a
   `Scope`, so there is no method that can be called without deciding about it —
   a handler that reimplements that filter is how a pinned client ends up seeing
-  another library.
+  another library. What the plugin layer serves is decided by the same
+  `Scope.admits`, per plugin, in `SkillServing.view`.
 - **Adding a prompt** → a file matching a plugin's `prompts:` globs, its
   manifest's `commands`, or the convention; exposed as `<library>_<name>`
   (PLG-25): the folders below a commands directory then the stem
@@ -152,16 +156,20 @@ names with a prefix, and these names are the agent's API.
   resolution in `config.py`, which is the one other reader — and it resolves a
   credential where it is declared so it never travels as a plain `str`.
 - **Anything that changes what the catalogue holds** goes through
-  `KnowledgeBase.refresh` and produces a new `Snapshot`; never mutate one.
+  `KnowledgeBase.refresh` and produces a new `Snapshot`; never mutate one. The
+  one other swap is `KnowledgeBase.renarrowed`: after a live re-read,
+  `SkillServing` swaps in the same generation narrowed again, and only while the
+  snapshot it narrowed is still the one served.
 
 `catalogue/` and `plugins/` import no FastMCP, deliberately: both are testable
 without an MCP client, `tests/test_skills.py` and `tests/test_uris.py` exercise
 the scoping rules directly rather than only through a tool call, and
 `tests/test_boundaries.py` fails if either package grows the import.
 
-Where FastMCP is used, it arrives through `kubed-mcp`'s facade: `kubed.mcp`,
-`kubed.mcp.protocol`, `kubed.mcp.auth` and `kubed.mcp.request`, never `fastmcp`,
-`mcp` or `mcp_types` imported directly. `kubed-mcp` owns the FastMCP pin, so
+Where FastMCP is used, it arrives through `kubed-mcp`'s facade: kb imports
+`kubed.mcp`, `kubed.mcp.protocol`, `kubed.mcp.request`, `kubed.mcp.plugins` (the
+plugin set, its view and its rewriter's `Site`), `kubed.mcp.skills` and
+`kubed.mcp.gateway`, never `fastmcp`, `mcp` or `mcp_types` directly. `kubed-mcp` owns the FastMCP pin, so
 `pyproject.toml` declares none. A name the facade lacks is added there, in
 kubed-io/quick-mcp, not imported around it; `mcp.server` is the FastMCP instance,
 for what `QuickMCP` does not pass through (a transform, a custom route).
@@ -171,7 +179,9 @@ for what `QuickMCP` does not pass through (a transform, a custom route).
 Resources are the interface. The tools mirror them and nothing else:
 `list_resources()` returns the rows `resources/list` returns,
 `read_resource(uri)` takes the URI `resources/read` takes, and `list_prompts` /
-`get_prompt` do the same for prompts. An agent that can drive MCP resources can
+`get_prompt` do the same for prompts. The resource pair is kubed-mcp's (DLV-6),
+over every resource the server has, so kb defines neither tool and may not
+(DLV-7); the prompt pair is kb's, in `mcp/prompts.py`. An agent that can drive MCP resources can
 drive this server without learning anything.
 
 Progressive disclosure lives in the address space, so adding a library adds
@@ -184,9 +194,9 @@ neither tools nor listing rows:
 | read `skill://grafana/grafana-lgtm/loki/SKILL.md` | the instructions to follow | one file |
 
 `<library>` is the first segment of every skill URI (the MCP Skills
-extension's "server-chosen prefix"), `<folder>` mirrors the skill's directory
-below its plugin root with the conventional skill roots stripped, and the last
-segment before the file is always the skill's `name`. A library, a folder or a skill's own
+extension's "server-chosen prefix"), `<folder>` is the skill's plugin's name,
+empty for the library's main plugin (SKL-10, SKL-59), and the last segment
+before the file is always the skill's `name`. A library, a folder or a skill's own
 directory is a directory address and serves nothing; see `catalogue/uris.py`'s
 module docstring for the grammar in full.
 
@@ -203,48 +213,64 @@ template read. The `uriTemplate` is never prefixed, because a gateway prefixes
 it itself and kb doing so as well would prefix it twice; the description is
 text, and is prefixed like any other.
 
-**A skill's files are FastMCP's to serve** (MD-55, MD-61): `mcp/skill_catalogue.py`'s
-`SkillCatalogue` is kubed-mcp's `EntryOnlySkillProvider`, whose `load_skills()`
-builds the catalogue for the request's scope and prefix from `Catalogue.skill_files`,
-memoised per (generation, scope, prefix). FastMCP then serves every file, the
-`_manifest`, `skills/list` and `skills/get`, and kubed-mcp the folders inside a
-skill. Three rules keep it one set of bytes:
+**A skill's files are kubed-mcp's to serve** (SKL-58): `mcp/skills.py`'s
+`SkillServing.publish` adds every plugin of every library to a kubed-mcp plugin
+set each generation, in config order and each library's plugin order, each
+plugin as itself at its namespace (`<library>` for the main plugin,
+`<library>/<plugin name>` for the rest, SKL-59) and from kb's own address through
+`ServedTrees`, and serves the set before the snapshot swaps. kubed-mcp then
+serves every file, the `_manifest`, `skills/list` and `skills/get`, and the
+folders inside a skill, built per view and prefix. kb's scope is the view: the
+`(namespace, address)` pairs a request's scope admits, which is the build key,
+and every scope admitting nothing shares `EMPTY` (SCP-36). Three rules keep it
+one set of bytes:
 
-- **Rewrite when the catalogue is built, never on read** (MD-59). Placeholders,
-  qualified names and the gateway prefix are applied to the text a `Skill` is
-  built from, so the entry's digests, the `_manifest` and the read agree. A
-  middleware that rewrote a `skill://` file on read would break every client that
-  verifies a skill.
+- **Rewrite when the build is made, never on read** (SKL-60). `SkillServing.rewrite`
+  is kb's one rewriter: it renders a root `SKILL.md` (qualified names, then
+  placeholders: SKL-55, then SKL-25 and SKL-52) and an agent's body for the request's scope, and gives every
+  text file of a skill LF line endings; kubed-mcp writes the gateway prefix after
+  it. So the entry's digests, the `_manifest` and the read agree. A middleware
+  that rewrote a `skill://` file on read would break every client that verifies a
+  skill.
 - **`CatalogueProvider` is registered after it, and never answers a skill's
   file** (`Catalogue.read` answers none): it serves the indexes,
-  `_files.md`, library files and the fallbacks. `ReadTheAddress` hands every
-  provider the canonical address (the request's prefix off, dot segments
-  resolved), because FastMCP matches skill URIs exactly.
-- **A skill FastMCP refuses is not served at all**, and `SkillCatalogue.catalogue()`
-  is the `Catalogue` the request reads: less those skills, and less any that failed
-  to build for its own scope and prefix. Every other surface reads through it,
-  prompts and the scope refusal included, so no index, hint or rewritten name
-  points at a skill that does not read. Never read `snapshot.catalogue` for that.
+  `_files.md`, library files and the fallbacks. `create_app` attaches
+  `SkillServing` before `resources.register` for that reason. `ReadTheAddress`
+  hands every provider the canonical address (the request's prefix off, dot
+  segments resolved), because skill URIs are matched exactly.
+- **The parity guard: a skill kubed-mcp does not serve is not in the catalogue.**
+  After the set is staged, kb narrows its catalogue to each added plugin's
+  `skills` and `agent_files`, logging once anything either side has alone, and
+  that narrowed catalogue is the `snapshot.catalogue` every other surface reads,
+  prompts and the scope refusal included. So no index, hint or rewritten name
+  points at a skill that does not read. A plugin kubed-mcp refuses is a conflict
+  in its library (LIB-29). What it cannot cover is a skill that fails one view's
+  build alone (N15): that one is still named in kb's indexes under that view.
 
-The provider's `_get_resource` keeps kb's media types and always answers text
-(`ServedFile`), and names the skill by its address in `_manifest`. Both
-`server/discover` and legacy `initialize` advertise the extension with
-`directoryRead`.
+kubed-mcp's own types and naming apply to a skill's files: a file that is not
+UTF-8 text, or has no or an unknown extension, is a blob (SKL-22), its media type is the plugin layer's (SKL-23), and
+`_manifest` names the skill by its `name` (SKL-24). Both `server/discover` and
+legacy `initialize` advertise the Skills extension with `directoryRead`.
 
-The **Agents extension** is another, in `mcp/agents.py`: `agents/list` and
-`agents/get` serve the subagents Claude-format plugins ship, from `Catalogue`'s
-`AgentRoster`, and add no listing row, no tool and no line of instructions. An
-agent's name is its library's, claimed in library order — a later plugin's
-clash is `<name>@<plugin>` — and no owner is stored anywhere, so a plugin
-appended to a library renames nothing. Agent files never go through the
-plugin-root fallback: one reads at a `skill://` address only when an
-operator's `files:` glob names it. No method takes a scope param; the
-connection's scope is the only filter, and out of scope is `Agent not found`,
-as absent is.
+The **Agents extension** is kubed-mcp's too: `agents/list` and `agents/get` serve
+the subagents Claude-format plugins ship, from the same plugin set, and add no
+listing row, no tool and no line of instructions. kb's rewriter renders an
+agent's body (AGT-17, PRM-48), and `SkillServing.agent_meta` adds kb's
+`io.kubed.mcp-kb/agent` key beside kubed-mcp's `io.kubed/agent`; its `skills`
+names the agent's own plugin's skills alone, because it never sees a scope (N9).
+An agent's name is its library's, claimed in the order kb adds plugins — a later
+plugin's clash is `<name>@<plugin>` — and no owner is stored anywhere, so a
+plugin appended to a library renames nothing. An agent's file also reads at an
+unlisted `agents://<namespace>/<path>` (AGT-18), but never through the
+plugin-root fallback: one reads at a `skill://` address only when an operator's
+`files:` glob names it. No method takes a scope param; the connection's scope
+is the only filter, and out of scope is `Agent not found`, as absent is.
+Commands are kb's prompts until K4, so `read_command` skips every one.
 
-A client declares it cannot read resources with `?resources=off` or
-`X-MCP-Resources: off`, and only then is the resource mirror listed; prompts
-work the same way with `?prompts=off`. There is no protocol signal for either —
+A client declares it cannot read resources with `?resources=off`,
+`Kb-Resources: off` or `X-MCP-Resources: off`, and only then does kubed-mcp list
+the resource mirror (DLV-2); prompts work the same way with `?prompts=off` or
+`Kb-Prompts: off`, which kb reads itself. There is no protocol signal for either —
 prompts are a server capability, so a client cannot advertise using them. The
 tools stay callable either way: hiding one from a listing is presentation,
 refusing to run one would be a different and worse contract.
@@ -305,15 +331,18 @@ which generation is being served, and has a refresh picked up an edit yet.
   error, and never ask for input (elicitation) through the mirror. Keep it FastMCP's: a prompt is role-tagged messages,
   which a resource or a hand-written tool would flatten to text.
 - **Do not reach for `ResourcesAsTools`, or back for `SkillsDirectoryProvider`.**
-  Both enumerate every skill on every listing call — `resources/list` is 1.9 KB
-  for this catalogue and was 77 KB before `Catalogue` replaced it with a dozen
-  indexes. `SkillsDirectoryProvider` also keys a skill on its folder name alone,
-  so two libraries shipping a `testing/` collapse into one and the loser
-  vanishes from the server entirely. Neither failure raises anything.
+  The resource mirror is kubed-mcp's DLV-6 pair and the skills are its plugin
+  layer's. Both FastMCP pieces enumerate every skill on every listing call —
+  `resources/list` is 1.9 KB for this catalogue and was 77 KB before `Catalogue`
+  replaced it with a dozen indexes. `SkillsDirectoryProvider` also keys a skill
+  on its folder name alone, so two libraries shipping a `testing/` collapse into
+  one and the loser vanishes from the server entirely. Neither failure raises
+  anything.
 - **A provider that stores a `Catalogue` serves the old generation forever** —
-  read through the getter (`SkillCatalogue.catalogue`, over
-  `lambda: knowledge_base.snapshot.catalogue`), or take it as `Inject[Catalogue]`,
-  as the mirror tools do, never a captured reference. A `Revalidator` has the same shape of bug and a nastier
+  read through the getter (the `catalogue()` `create_app` defines, which returns
+  `knowledge_base.snapshot.catalogue` and is handed to `resources.register`,
+  `ScopedInstructions` and the prompts), or take the container's `Catalogue` transient, never a captured reference. A
+  `Revalidator` has the same shape of bug and a nastier
   symptom: a refresh exports a source to a *new* directory, so one that outlives
   its snapshot goes on revalidating into a tree nothing is serving, and the edit
   never appears. It is built in `build_snapshot` and retired with the snapshot.
@@ -336,10 +365,36 @@ which generation is being served, and has a refresh picked up an edit yet.
   read and `COOLDOWN_SECONDS` stops a wedged server costing anything after the
   first. **Making the read path async — a thread for the blocking call, or an
   async WebDAV client — is the outstanding follow-up**, and it is a change to
-  `mcp/resources.py`, `catalogue/uris.py` (the skill and library-file read, and
-  `Catalogue._agent_parsed`, the live agent read under `agents/get`) and
+  `mcp/resources.py`, `catalogue/uris.py` (the library-file read, and
+  `Catalogue.live_stamp`), `mcp/skills.py` (`_stamp`, which the view calls to
+  revalidate a live plugin's skill and agent files before kubed-mcp builds) and
   `catalogue/prompts/` (`FilePrompt.body()`, the live prompt read), not to
   `sources/live.py`.
+- **A plugin named like one of its library's main plugin's skills is a
+  conflict.** Its namespace, `<library>/<plugin>`, is that skill's own address,
+  so its skills sit inside the skill: the later of the two in the library's order
+  serves nothing in that library (LIB-28), and kubed-mcp's nesting guard refuses
+  the same overlap (LIB-29). Renaming the plugin is the fix; there is no
+  setting that moves a namespace.
+- **A live edit reads one request late.** kubed-mcp pins a request's state
+  before it calls the view, so the request whose view revalidates and re-adds a
+  moved plugin still reads the copy it pinned, and the next request reads the
+  edit (SKL-37, N6). quick-mcp#45 would let the re-read land in its own request;
+  a kb middleware that re-reads before the pin is ruled out. A test of a live
+  edit reads twice.
+- **`served_tree` takes no lock, and must not.** `refresh` publishes the new
+  plugin set while it holds `KnowledgeBase._lock`, a plain `Lock`, and kubed-mcp
+  reaches `served_tree` through `ServedTrees` during that publish, so taking the
+  lock there deadlocks the boot publish. `renarrowed` takes none for the same
+  reason, and the live re-read takes `SkillServing`'s own lock without blocking,
+  never kb's.
+- **A skill holding a hidden file or a symlink is not served at all** (SKL-3,
+  N13, N14). FastMCP reads a skill folder whole, dot files included, so kb fails
+  the skill's `SKILL.md` in its rewriter when its folder holds a hidden path at
+  any depth, and FastMCP refuses a skill holding a symlink; the parity guard
+  drops either from the catalogue and logs it once. One `.gitkeep` under
+  `assets/` is enough, and it is the whole skill that goes, until kubed-mcp skips
+  hidden files.
 - **An export is named by its version, so a rebuild of a version that has not
   moved is a rebuild over a tree being read.** That is the one case a repair
   happens at all — an export that lost files, or one a killed fetch left a temp
@@ -355,6 +410,14 @@ which generation is being served, and has a refresh picked up an edit yet.
   supported interpreter and everything on the newest, with no error either way.
   `harvest._globstar` normalises one in a config; in this repo's own code, write
   it out.
+- **`NameTheFileToRead` runs outside kubed-mcp's middleware.** kubed-mcp's
+  `_TakeThePrefix` takes the prefix off a sent address before kb sees it, and on
+  a miss renames the plain address to the sent one throughout the error message.
+  A hint kb had already prefixed inside it came out `kb+kb+skill://…`. So the
+  hint middleware is inserted first in `mcp.server.middleware`, sees the URI as
+  sent and the error as renamed, and prefixes its hint once (`Addressing.text`
+  is idempotent). `tests/test_addressing_http.py` holds it, prefixed and plain,
+  for resources and the `read_resource` tool.
 
 ## House rules that apply here
 

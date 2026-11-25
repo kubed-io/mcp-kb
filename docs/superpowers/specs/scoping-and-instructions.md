@@ -3,8 +3,8 @@
 A **scope** is the slice of the catalogue one request may see: one library, some categories,
 some tag groups. It is read from the request's headers and query string, and every listing and
 every read goes through it. The **instructions** are the text a client gets when it connects,
-built for that connection from its scope. This file covers both. It does not cover the client
-capability settings (`X-MCP-Resources`, `X-MCP-Prompts`), which are in
+built for that connection from its scope. This file covers both. It names the client capability
+settings (`Kb-Resources`, `Kb-Prompts`) but does not cover what they do, which is in
 [http-and-tools.md](http-and-tools.md), or what a library's description and categories are,
 which is in [plugins-and-libraries.md](plugins-and-libraries.md).
 
@@ -22,9 +22,15 @@ Each is read per MCP request from an HTTP header or a query parameter on the MCP
 | Tag | `Kb-Tag` | `tag` | `X-Skill-Tags` | `tags` |
 | Listing | `Kb-Listing` | `listing` | `X-Skill-Listing` | `skills` |
 | Resource prefix | `Kb-Resource-Prefix` | `prefix` | `X-MCP-Resource-Prefix` | — |
+| Resources | `Kb-Resources` | `resources` | `X-MCP-Resources` | — |
+| Prompts | `Kb-Prompts` | `prompts` | `X-MCP-Prompts` | — |
 
-**SCP-3.** The listing and the resource prefix are read by the same rules as the scope
-(SCP-4 to SCP-7). What they do is specified in [skills.md](skills.md).
+**SCP-3.** The listing, the resource prefix and the two capability settings are read by the same
+rules as the scope (SCP-4 to SCP-7). The resource prefix and the resources setting are kubed-mcp's
+own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its `X-MCP-` alias
+(DLV-16); kb reads the prompts setting the same way. What the listing and the prefix do is
+specified in [skills.md](skills.md), and the capability settings in
+[http-and-tools.md](http-and-tools.md).
 
 **SCP-4.** Header names match case-insensitively. Parameter names match exactly.
 
@@ -90,7 +96,7 @@ plugin, in that library, matches the categories and the tags (SCP-15 to SCP-17).
 
 **SCP-21.** The scope applies to skills, prompts, agents and library-level files alike, and to
 every surface that lists or reads them: `resources/list`, `resources/read`, `prompts/list`,
-`prompts/get`, `skills/list`, `skills/get`, `agents/list`, `agents/get` and the four mirror tools.
+`prompts/get`, `skills/list`, `skills/get`, `agents/list`, `agents/get` and the mirror tools.
 
 **SCP-22.** Out of scope means not listed and not readable. An index (`_index.md`) lists only the
 skills in scope, and `_files.md` lists only the library files in scope. An index or `_files.md`
@@ -154,6 +160,14 @@ declared library whose plugins are down, or up with nothing in them, is served e
 
 **SCP-35.** The refusal names libraries, categories and tags from the operator's config. A scope
 that is not refused learns nothing about what lies outside it.
+
+**SCP-36.** The plugin layer builds what a request reads of skills and agents once per admitted
+set, for each generation and prefix. A build is keyed by the `(namespace, address)` pairs of the
+plugins the request's scope admits (SKL-59), so every scope that admits the same plugins shares one
+build. Every scope that admits no plugin shares one empty build. A refused scope (SCP-29) builds
+nothing: it fails before the plugin layer is asked, so no number of distinct unknown values makes
+a build. The checks of SCP-31 read kb's catalogue as narrowed to what the plugin layer serves
+(SKL-45), never a build.
 
 ## Server instructions
 
