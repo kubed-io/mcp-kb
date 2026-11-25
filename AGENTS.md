@@ -72,7 +72,7 @@ installer's, against whatever image tag it chooses.
 | `kubed/mcp_kb/sources/` | where bytes come from, one `Fetch` at a time — a loader per source in `__init__.py`, over `file.py`, `git.py`, `webdav.py`, the shared per-version `export.py`, `errors.py`, and `live.py`, because revalidation is a source concern; and `ServedTrees`, the one loader kubed-mcp is handed, which answers a plugin's address with the tree kb is serving for it and never fetches |
 | `kubed/mcp_kb/mcp/` | what an agent sees |
 | ⤷ `skills.py` | `SkillServing` — the skills and agents, served by kubed-mcp's plugin layer: `publish` adds every plugin to a plugin set each generation, `view` is kb's scope, `rewrite` its one rewriter, `read_command` skips every command, `agent_meta` adds kb's `_meta` key, the parity guard narrows the catalogue to what is served, and the live re-read |
-| ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `ReadTheAddress`, `HideMirrorTools` |
+| ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `HideMirrorTools` |
 | ⤷ `tools.py`, `prompts.py` | `prompts.py` the prompt mirror pair; `tools.py` names kubed-mcp's resource pair (DLV-6) and holds the read-only annotations |
 | ⤷ `request.py`, `scope.py` | what the current request says about itself, and the `Scope` it becomes |
 | ⤷ `instructions.py` | `ScopedInstructions` — sets the `instructions` on each `initialize` and `server/discover` answer |
@@ -235,9 +235,10 @@ one set of bytes:
 - **`CatalogueProvider` is registered after it, and never answers a skill's
   file** (`Catalogue.read` answers none): it serves the indexes,
   `_files.md`, library files and the fallbacks. `create_app` attaches
-  `SkillServing` before `resources.register` for that reason. `ReadTheAddress`
-  hands every provider the canonical address (the request's prefix off, dot
-  segments resolved), because skill URIs are matched exactly.
+  `SkillServing` before `resources.register` for that reason. kubed-mcp's
+  GW-4 hands every provider the plain address (the request's prefix off, and dot
+  segments resolved on `resources/read`), because skill URIs are matched
+  exactly, and kb's `Catalogue` resolves dots itself in `uris.parse`.
 - **The parity guard: a skill kubed-mcp does not serve is not in the catalogue.**
   After the set is staged, kb narrows its catalogue to each added plugin's
   `skills` and `agent_files`, logging once anything either side has alone, and
@@ -415,7 +416,7 @@ which generation is being served, and has a refresh picked up an edit yet.
   a miss renames the plain address to the sent one throughout the error message.
   A hint kb had already prefixed inside it came out `kb+kb+skill://…`. So the
   hint middleware is inserted first in `mcp.server.middleware`, sees the URI as
-  sent and the error as renamed, and prefixes its hint once (`Addressing.text`
+  sent and the error as renamed, and prefixes its hint once (`prefixed`
   is idempotent). `tests/test_addressing_http.py` holds it, prefixed and plain,
   for resources and the `read_resource` tool.
 

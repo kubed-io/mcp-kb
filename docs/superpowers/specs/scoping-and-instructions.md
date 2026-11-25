@@ -227,9 +227,10 @@ line. With no library selected, the text is the footer alone.
 | Resources (default) | `Read a listed skill at skill://<library>/<path>/SKILL.md; read its _manifest in place of SKILL.md for the other files it ships.` |
 | Tools | `Read these with read_resource.` |
 
-**INS-16.** With a resource prefix, every `skill://` address in the description, the notes, the
-pointer and the resources footer is written with the prefix in front (`kb+skill://…`). The
-prefix's rules are in [skills.md](skills.md).
+**INS-16.** With a resource prefix, every address in the description, the notes, the pointer and
+the resources footer is written with the prefix in front (`kb+skill://…`). kb writes the prefix
+over the whole text with the plugin layer's writer (GW-11), and its rules are SKL-40 and SKL-41
+([skills.md](skills.md)).
 
 **INS-17.** One library selected, names listed, a prefix of `kb+`:
 

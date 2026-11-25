@@ -223,9 +223,9 @@ the same middleware, scope and addressing apply. Text comes back as text, a `tex
 that is UTF-8 as its text, an image blob as image content, and any other blob as a JSON description
 saying it is not returned as text (DLV-6).
 
-**TOOL-11.** Both tools apply the request's resource prefix to the addresses in their text, as
-`resources/read` does, and `list_resources` writes it into each row's `uri` as well. Addressing is
-in [skills.md](skills.md).
+**TOOL-11.** Both tools are the plugin layer's (DLV-6). `list_resources` writes the prefix into each
+row's `uri` (GW-5); `read_resource` returns what `resources/read` returns, its prefix included
+(SKL-41), and taking the prefix off its `uri` is GW-4's. Addressing is in [skills.md](skills.md).
 
 **TOOL-12.** A `read_resource` that finds nothing is an error result (`isError: true`) carrying the
 message `resources/read` fails with: `Resource not found: '<uri>'. <hint>` when the URI is a
