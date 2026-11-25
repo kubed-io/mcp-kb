@@ -85,12 +85,14 @@ file under a nested skill belongs to the nested skill.
 **SKL-13.** Before any other check, the path below `skill://` has its `.` and `..` segments
 resolved as in RFC 3986, over the whole path: the library is a segment, not an authority. A `..`
 with nothing left to pop makes the address resolve to nothing, so no address climbs past the root.
-Scope applies to the resolved address. The plugin layer resolves the dots for `resources/read`
-(GW-4), and so for its `read_resource` tool, which reads through `resources/read` (DLV-6).
-`resources/directory/read` resolves them by kb's own rule instead: a `..` at the library is dropped,
-so the address never leaves the library. A miss is reported under the address as sent.
-Percent-escapes are not decoded, so an escaped `/` (`%2F`) is no separator and a URI holding one
-resolves to nothing. A URI that does not start with `skill://` resolves to nothing.
+Scope applies to the resolved address. The plugin layer resolves the dots on `resources/read`
+(GW-4), and so for its `read_resource` tool, which reads through `resources/read` (DLV-6). On
+`resources/directory/read` it passes them on as sent: kb's own directories, a library and a
+folder, resolve them by kb's rule, so a `..` at the library is dropped and the address never
+leaves the library, while a skill's directory, and a folder inside one, match exactly, so a
+dotted one is `Directory not found`. A miss is reported under the address as sent (GW-4).
+An escaped `/` (`%2F`) anywhere in an incoming address resolves to nothing (GW-4), and
+percent-escapes are never decoded. A URI that does not start with `skill://` resolves to nothing.
 
 ## The listing
 
@@ -283,6 +285,10 @@ fails with `-32602` and `Resource not found: '<uri>'. <hint>`:
 | a folder of skills / of library files | the folder's `_index.md` / the library's `_files.md` |
 | a folder inside a skill | the folder's `_index.md` (`<uri> is a folder: read <uri>/_index.md to list it.`) |
 
+A hint is given only for an address the plugin layer would read as kb does: none for one holding
+`%2F` (SKL-13), and none when its `..` segments, resolved over the whole path as in SKL-13,
+climb past the library and name another address. A hint names the address as sent.
+
 **SKL-35.** A hint is worked out from the caller's scope. An out-of-scope address, directory or
 not, fails exactly as an absent one does. A read that fails for any other reason keeps its error.
 
@@ -312,13 +318,15 @@ of them, and comes back when it serves again (SKL-45).
 
 ## Addresses behind a gateway
 
-**SKL-40.** A request MAY name a **resource prefix** (`Kb-Resource-Prefix` or `?prefix=`, read as
-in SCP-3). A space in the query value reads as `+`. A valid prefix is a letter, then letters,
-digits, `+`, `-` or `.`, ending in `+` (`kb+`). An invalid prefix is ignored.
+**SKL-40.** A request MAY name a **resource prefix**. It is the plugin layer's input (GW-1 to
+GW-3), read with the server's header prefix `Kb` (DLV-16): `Kb-Resource-Prefix`, then
+`X-MCP-Resource-Prefix`, then `?prefix=`, as in SCP-3. A space in the query value reads as `+`. A
+valid prefix is a letter, then letters, digits, `+`, `-` or `.`, ending in `+` (`kb+`). An invalid
+prefix is ignored.
 
-**SKL-41.** With a prefix, every `skill://` in text a client reads is written `<prefix>skill://`,
-except where `skill://` follows a letter, digit, `+`, `-` or `.` (`kb+skill://` and `myskill://`
-stay as they are).
+**SKL-41.** With a prefix, every `skill://`, `prompts://` and `agents://` address in text a client
+reads is written with the prefix in front (`kb+skill://`), except where the scheme follows a
+letter, digit, `+`, `-` or `.` (`kb+skill://` and `myskill://` stay as they are).
 
 | Where | Prefixed |
 |---|---|
@@ -326,10 +334,19 @@ stay as they are).
 | tool results ([http-and-tools.md](http-and-tools.md)), instructions (INS-16), rendered prompts | yes |
 | a listing row's `uri` and `name`, an extension entry's `uri` and each file `uri`, the template's `uriTemplate`, an agent definition's `_meta…skills` values | never |
 
+| Written by | Where |
+|---|---|
+| the plugin layer | a skill's files, the indexes inside a skill and an agent's card (GW-5), and `list_resources`, which writes the prefix into each row's `uri` (DLV-6, GW-5) |
+| kb, through the plugin layer's writer (GW-11) | everything else: resource bodies and listing descriptions outside a skill, read hints, the template's description, instructions, rendered prompts |
+
+A prompt's description, in `prompts/list` and in `list_prompts`, is written as its library wrote
+it, with no prefix. *(proposed: it is written with the prefix, as every other description is.)*
+
 **SKL-42.** An incoming address (`resources/read`, `read_resource`, `skills/get`,
 `resources/directory/read`) MAY be `skill://…` or `<prefix>skill://…` for the request's own prefix.
-Any other prefix resolves to nothing. The prefix is taken off before any provider is asked, so the
-plugin layer sees the plain address; a read still answers with the URI the client sent.
+Any other prefix resolves to nothing. The plugin layer takes the prefix off before any
+provider is asked (GW-4), so every provider sees the plain address; a read still answers with
+the URI the client sent.
 
 **SKL-43.** Neither a scope nor a prefix removes the library segment from an address.
 

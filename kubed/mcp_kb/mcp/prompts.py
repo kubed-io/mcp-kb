@@ -29,6 +29,7 @@ from kubed.mcp import (
     ToolError,
     ValidationError,
 )
+from kubed.mcp.gateway import prefix, prefixed
 from kubed.mcp.protocol import (
     MODERN_PROTOCOL_VERSIONS,
     InputRequiredPromptResult,
@@ -45,7 +46,7 @@ from pydantic import ConfigDict, Field
 from ..catalogue.names import QualifiedNames
 from ..catalogue.prompts import FilePrompt, MissingArguments
 from ..catalogue.uris import SCHEME, Catalogue
-from .request import requested_addressing, requested_scope
+from .request import requested_scope
 from .scope import EVERYTHING, Scope
 from .tools import READ_ONLY
 
@@ -125,7 +126,7 @@ class MCPFilePrompt(Prompt):
             skills=self.skill_dirs,
             names=self.names,
         )
-        return requested_addressing().text(text)
+        return prefixed(text, prefix())
 
     def _ask(self, exc: MissingArguments) -> InputRequiredPromptResult | None:
         """The missing arguments as one form, or None when nobody can fill it.

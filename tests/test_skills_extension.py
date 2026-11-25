@@ -13,11 +13,11 @@ import json
 import pytest
 from fastmcp import Client
 from fastmcp.skills import SkillsClientExtension
+from kubed.mcp.gateway import prefixed
 from kubed.mcp.protocol import MCPError, RequestParams, types
 from pydantic import ConfigDict, TypeAdapter
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.catalogue.addressing import Addressing
 from kubed.mcp_kb.mcp.request import EXTENSION_ID
 from kubed.mcp_kb.mcp.scope import Scope
 from tests.conftest import DEEP_YAML, make_config, server_of
@@ -302,8 +302,10 @@ async def test_every_child_a_directory_names_is_readable(server_url, headers):  
             # An index is text, which kb and the plugin layer both write the
             # prefix into (GW-5, one writer); a directory listing's rows are
             # structured. So the index is the listing, as the prefix writes it.
-            written = Addressing.parse(headers.get("Kb-Resource-Prefix", ""))
-            assert index == json.loads(written.text(json.dumps(listed["resources"])))
+            written = prefixed(
+                json.dumps(listed["resources"]), headers.get("Kb-Resource-Prefix")
+            )
+            assert index == json.loads(written)
             for child in listed["resources"]:
                 seen += 1
                 if child["mimeType"] == "inode/directory":
@@ -508,21 +510,38 @@ def test_a_scope_whose_only_skills_are_refused_names_nothing(tmp_path):
     assert what_is_wrong(kit, config, server.snapshot) is None
 
 
-async def test_dot_segments_and_escaped_slashes_read_alike_everywhere(skills_dir):
-    """SKL-13: ``..`` resolves for every read, an escaped ``/`` for none."""
+async def test_dot_segments_resolve_for_reads_and_escaped_slashes_for_nothing(
+    skills_dir,
+):
+    """SKL-13: ".." resolves for every resources/read; a skill's directories match as
+    sent (G1); an escaped "/" names nothing anywhere."""
     (skills_dir / "flatsource" / "alpha" / "references").mkdir()
     (skills_dir / "flatsource" / "alpha" / "references" / "a.md").write_text("# A\n")
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
     root = "skill://flatsource/alpha"
     async with Client(server_of(server)) as client:
-        up = await request(client, "resources/directory/read", uri=f"{root}/references/..")
-        plain = await request(client, "resources/directory/read", uri=root)
-        assert up["resources"] == plain["resources"]
+        with pytest.raises(MCPError, match="Directory not found"):  # G1
+            await request(
+                client, "resources/directory/read", uri=f"{root}/references/.."
+            )
+        assert (await request(client, "resources/directory/read", uri=root))[
+            "resources"
+        ]
         sibling = f"{root}/references/../../beta/SKILL.md"
         assert (await client.read_resource(sibling))[0].text
         for escaped in ("skill://flatsource%2Falpha/SKILL.md", f"{root}%2fSKILL.md"):
             with pytest.raises(MCPError, match="Resource not found"):
                 await client.read_resource(escaped)
+        with pytest.raises(MCPError, match="Directory not found"):
+            await request(
+                client, "resources/directory/read", uri="skill://flatsource%2Falpha"
+            )
+        with pytest.raises(MCPError, match="Unknown skill URI"):
+            await request(client, "skills/get", uri=f"{root}%2FSKILL.md")
+        with pytest.raises(MCPError, match="Resource not found"):  # G2
+            await client.read_resource(f"{root}/SKILL.md/")
+        with pytest.raises(MCPError, match="Directory not found"):  # G1
+            await request(client, "resources/directory/read", uri=f"{root}/")
         miss = await client.call_tool(
             "read_resource", {"uri": f"{root}/references"}, raise_on_error=False
         )

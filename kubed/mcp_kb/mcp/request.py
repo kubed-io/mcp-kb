@@ -13,11 +13,9 @@ is what stdio is: no headers, no query string, nothing to narrow by.
 
 from __future__ import annotations
 
-from kubed.mcp.gateway import prefix as resolved_prefix
 from kubed.mcp.protocol import client_supports_extension
 from kubed.mcp.request import request_values
 
-from ..catalogue.addressing import Addressing
 from .scope import Scope
 
 # The client capability a host declares when it builds its own skill list.
@@ -39,11 +37,6 @@ TAG_PARAM = "tag"
 TAG_HEADER = "kb-tag"
 TAG_ALIAS = "x-skill-tags"
 TAG_PARAM_ALIAS = "tags"
-
-# What a gateway puts in front of kb's resource addresses, e.g. ``kb+``.
-PREFIX_PARAM = "prefix"
-PREFIX_HEADER = "kb-resource-prefix"
-PREFIX_ALIAS = "x-mcp-resource-prefix"
 
 # How a client declares it cannot use MCP prompts, and so wants them as tools.
 # kb's own header first, as kubed-mcp reads its ``Kb-`` inputs (DLV-16).
@@ -114,17 +107,6 @@ def requested_scope() -> Scope:
         ),
         _read(TAG_HEADER, TAG_PARAM, TAG_ALIAS, TAG_PARAM_ALIAS),
     )
-
-
-def requested_addressing() -> Addressing:
-    """The gateway prefix this request wants in front of addresses in text.
-
-    kubed-mcp's, as it resolved it for this request (DLV-3, DLV-16):
-    ``Kb-Resource-Prefix``, then ``X-MCP-Resource-Prefix``, then ``?prefix=``,
-    an invalid value passed over for the next. One reading, so kb's indexes
-    and the plugin layer's skill files always carry the same prefix.
-    """
-    return Addressing.parse(resolved_prefix() or "")
 
 
 def _declared_on(header: str, param: str, kb_header: str) -> bool:

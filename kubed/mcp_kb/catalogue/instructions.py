@@ -2,30 +2,24 @@
 
 Pure: a catalogue, a scope and two flags in, a string out. No FastMCP, so the
 wording is tested without a server and the middleware only decides when to call it.
+The text is unprefixed; ``mcp/instructions.py`` writes the gateway prefix over it.
 """
 
 from ..mcp.scope import Scope
-from .addressing import DEFAULT, Addressing
 from .uris import Catalogue, LibraryText, index_uri, tidy
 
 _FOOTER = (
-    "Read a listed skill at {prefix}skill://<library>/<path>/SKILL.md; read its "
+    "Read a listed skill at skill://<library>/<path>/SKILL.md; read its "
     "_manifest in place of SKILL.md for the other files it ships."
 )
 TOOLS_FOOTER = "Read these with read_resource."
 
 
-def _footer(a: Addressing) -> str:
-    return _FOOTER.format(prefix=a.prefix)
-
-
 def _section(
-    catalogue: Catalogue, scope: Scope, text: LibraryText, names: bool, a: Addressing
+    catalogue: Catalogue, scope: Scope, text: LibraryText, names: bool
 ) -> list[str]:
-    lines = [
-        a.text(s) for s in (tidy(text.description), tidy(text.notes)) if s
-    ]
-    uri = a.text(index_uri(text.name))
+    lines = [s for s in (tidy(text.description), tidy(text.notes)) if s]
+    uri = index_uri(text.name)
     if names:
         paths = ", ".join(catalogue.skill_paths(text.name, scope))
         lines.append(f"Skills ({uri}): {paths}")
@@ -40,7 +34,6 @@ def build_instructions(
     *,
     resources: bool,
     skills_extension: bool,
-    addressing: Addressing = DEFAULT,
 ) -> str:
     """One section per selected library, then the footer for the mode.
 
@@ -52,9 +45,9 @@ def build_instructions(
     sections = []
     for text in selected:
         names = single and text.list_skills and not skills_extension
-        lines = _section(catalogue, scope, text, names, addressing)
+        lines = _section(catalogue, scope, text, names)
         if not single:
             lines.insert(0, f"[{text.name}]")
         sections.append("\n".join(lines))
-    sections.append(_footer(addressing) if resources else TOOLS_FOOTER)
+    sections.append(_FOOTER if resources else TOOLS_FOOTER)
     return "\n\n".join(sections)

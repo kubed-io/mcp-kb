@@ -10,7 +10,13 @@ from pathlib import Path
 import pytest
 
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex, load_skills
-from kubed.mcp_kb.catalogue.uris import Catalogue, LibraryText, parse, uri_for
+from kubed.mcp_kb.catalogue.uris import (
+    Catalogue,
+    LibraryText,
+    parse,
+    resolved,
+    uri_for,
+)
 from kubed.mcp_kb.mcp.scope import Scope
 from tests.conftest import build_library_files, fake_plugin, load_all_skills, served
 
@@ -511,3 +517,11 @@ def test_library_index_opens_with_its_text():
     assert texted.read("skill://lib/f/_index.md") == plain.read("skill://lib/f/_index.md")
     bare = Catalogue(SkillIndex(skills), LibraryFiles(), libraries=[LibraryText("lib")])
     assert bare.read("skill://lib/_index.md") == before
+
+
+def test_resolved_names_the_address_parse_reads():
+    assert resolved("skill://grafana/a/../b/SKILL.md") == "skill://grafana/b/SKILL.md"
+    assert resolved("skill://grafana/") == "skill://grafana"
+    assert resolved("skill://grafana/../../x") == "skill://grafana/x"
+    assert resolved("kb+skill://grafana/x") is None
+    assert resolved("skill://") is None
