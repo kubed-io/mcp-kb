@@ -30,7 +30,7 @@ dependencies = [
   # server and re-exports every FastMCP and MCP SDK name kb uses, and it owns the
   # FastMCP pin, so kb declares none of its own. Pre-1.0, so a minor is a break.
   # Milestones are release candidates, and a bump moves the pin.
-  "kubed-mcp==0.2.0rc2",
+  "kubed-mcp>=0.3.0,<0.4",
   "pyyaml>=6.0",
   "python-frontmatter>=1.1",
   # git sources. pygit2 bundles libgit2, so the image needs no git binary and

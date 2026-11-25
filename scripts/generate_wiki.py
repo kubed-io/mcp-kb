@@ -426,12 +426,15 @@ def tools_page() -> str:
     sections = []
     for tool in found:
         _, param, header = reveals[tool.name]
+        listed = f"`?{param}=off` or `{header_name(header)}: off`"
+        if tool.name in tools_module.RESOURCE_TOOLS:
+            listed += ", or one kubed-mcp knows as VS Code"
         sections.append(
             f"""## `{tool.name}`
 
 {clean(tool.description)}
 
-Listed only for a client that sent `?{param}=off` or `{header_name(header)}: off`.
+Listed only for a client that sent {listed}.
 It is callable either way — hiding a tool from a listing is a presentation
 choice, not a refusal to run it.
 

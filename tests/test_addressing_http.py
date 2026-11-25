@@ -16,6 +16,7 @@ from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
 from tests.conftest import make_config, server_of
+from tests.test_server import DELIVERY_META, VS_CODE
 from tests.test_skills_extension import request
 
 PIN = {"Kb-Library": "flatsource"}
@@ -69,8 +70,10 @@ def server_url(skills_dir_module, prompts_dir_module):
     thread.join(timeout=5)
 
 
-def _client(url, headers=None):
-    return Client(StreamableHttpTransport(url, headers=headers or {}))
+def _client(url, headers=None, client_info=None):
+    return Client(
+        StreamableHttpTransport(url, headers=headers or {}), client_info=client_info
+    )
 
 
 async def listing(url, headers=None):
@@ -494,3 +497,52 @@ async def test_the_header_beats_the_parameter_in_every_writer(server_url):
         for writer, text in written.items():
             assert "kb+skill://" in text, writer
             assert "other+" not in text, writer
+
+
+async def _echo(client):
+    """The delivery echo (HTTP-42). An HTTP client negotiates the modern era by
+    default, so there is no initialize answer and the echo is discover's."""
+    assert client.initialize_result is None
+    return (await request(client, "server/discover"))["_meta"][DELIVERY_META]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("sent", INPUTS.values(), ids=INPUTS.keys())
+async def test_the_echo_names_the_prefix_every_address_carries(server_url, sent):
+    headers, query = sent
+    url, headers = server_url + query, {**PIN, **headers}
+    alpha = "kb+skill://flatsource/alpha/SKILL.md"
+    async with _client(server_url, PIN) as client:
+        assert (await _echo(client))["prefix"] is None
+    async with _client(url, headers) as client:
+        echo = await _echo(client)
+        (contents,) = await client.read_resource(alpha)
+        index = (await client.read_resource("skill://flatsource/_index.md"))[0].text
+    assert echo["prefix"] == "kb+"
+    assert str(contents.uri) == alpha
+    assert alpha in index
+    rows = json.loads(
+        await tool(url, "list_resources", headers={**headers, "Kb-Resources": "off"})
+    )["resources"]
+    assert rows
+    assert all(row["uri"].startswith("kb+skill://") for row in rows)
+    got = await skills_request(
+        url, "skills/get", headers, uri="skill://flatsource/alpha/SKILL.md"
+    )
+    for file in got["skill"]["resources"]:
+        served = (await read(url, file["uri"], headers)).encode("utf-8")
+        assert file["digest"] == f"sha256:{hashlib.sha256(served).hexdigest()}"
+    assert "kb+kb+" not in json.dumps([echo, contents.text, index, rows, got])
+
+
+@pytest.mark.integration
+async def test_vs_code_can_turn_the_resource_pair_off(server_url):
+    """DLV-15: kubed-mcp reads the header before its table of known clients."""
+    async with _client(server_url, PIN, VS_CODE) as client:
+        assert sorted(t.name for t in await client.list_tools()) == [
+            "list_resources",
+            "read_resource",
+        ]
+    on = {**PIN, "Kb-Resources": "on"}
+    async with _client(server_url, on, VS_CODE) as client:
+        assert await client.list_tools() == []
