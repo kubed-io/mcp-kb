@@ -306,8 +306,14 @@ class Index:
 
 
 def config_hash(config: Config) -> str:
-    """A stable fingerprint of the config, independent of key order."""
-    payload = json.dumps(config.model_dump(mode="json"), sort_keys=True)
+    """A stable fingerprint of the config, independent of key order.
+
+    The telemetry section is left out (SRC-36): it says what the process reports,
+    not what it serves, so changing it must not discard a warm index.
+    """
+    payload = json.dumps(
+        config.model_dump(mode="json", exclude={"telemetry"}), sort_keys=True
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

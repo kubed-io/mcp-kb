@@ -104,3 +104,13 @@ def test_the_httpx_logger_is_held_at_warning_below_debug():
         root.handlers[:] = saved[0]
         root.setLevel(saved[1])
         httpx_logger.setLevel(saved[2])
+
+
+def test_a_typod_telemetry_key_exits_2(tmp_path, capsys):
+    path = tmp_path / "config.yaml"
+    path.write_text("telemetry:\n  profile: http://pyroscope.example.com:4040\n")
+    with pytest.raises(SystemExit) as raised:
+        main(["serve", "--config", str(path)])
+    assert raised.value.code == 2
+    err = capsys.readouterr().err
+    assert "mcp-kb:" in err and "profile" in err

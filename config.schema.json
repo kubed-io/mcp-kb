@@ -306,10 +306,57 @@
       ],
       "title": "SourceConfig",
       "type": "object"
+    },
+    "TelemetrySettings": {
+      "additionalProperties": false,
+      "description": "A ``telemetry`` section a server's config can embed.\n\n``profiles`` is the address of the Pyroscope server. Setting it turns profiles\non; there is no separate enabled flag. ``profile_cpu`` and ``profile_memory``\nchoose which profiles are sent. ``otel`` turns OpenTelemetry on, configured by\nthe standard ``OTEL_*`` variables. ``tags`` are labels added to every profile\nand resource attributes on every trace and metric. An unknown key is an error,\nso a typo stops the boot; a server's own section may subclass it to add keys.",
+      "properties": {
+        "profiles": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pyroscope server address; setting it turns profiles on.",
+          "title": "Profiles"
+        },
+        "profile_cpu": {
+          "default": true,
+          "description": "Sample CPU while profiles are on.",
+          "title": "Profile Cpu",
+          "type": "boolean"
+        },
+        "profile_memory": {
+          "default": true,
+          "description": "Sample allocations while profiles are on.",
+          "title": "Profile Memory",
+          "type": "boolean"
+        },
+        "otel": {
+          "default": false,
+          "description": "Run OpenTelemetry, configured by the standard OTEL_* variables.",
+          "title": "Otel",
+          "type": "boolean"
+        },
+        "tags": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Labels on every profile, and resource attributes on every trace and metric.",
+          "title": "Tags",
+          "type": "object"
+        }
+      },
+      "title": "TelemetrySettings",
+      "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "The whole config file: the sources, the plugins under them, the libraries.",
+  "description": "The whole config file: the sources, the plugins under them, the libraries,\nand the process's telemetry.",
   "properties": {
     "sources": {
       "items": {
@@ -331,6 +378,10 @@
       },
       "title": "Libraries",
       "type": "array"
+    },
+    "telemetry": {
+      "$ref": "#/$defs/TelemetrySettings",
+      "description": "What the process reports: kubed-mcp's profiles, traces and metrics. Absent, every signal is off."
     }
   },
   "title": "Config",

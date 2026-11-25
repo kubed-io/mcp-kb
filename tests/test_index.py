@@ -1,5 +1,6 @@
 """Unit tests for the on-disk index: round trip, corruption, atomicity."""
 
+import hashlib
 import json
 import os
 import tempfile
@@ -369,3 +370,14 @@ def test_a_record_keeps_the_globs_it_was_harvested_with(tmp_path):
 
     assert read == written
     assert read.plugins["flatsource"].globs == globs
+
+
+@pytest.mark.unit
+def test_config_hash_leaves_the_telemetry_section_out(tmp_path):
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("")
+    watched = tmp_path / "watched.yaml"
+    watched.write_text("telemetry:\n  profiles: http://pyroscope.example.com:4040\n")
+    before = json.dumps({"libraries": [], "plugins": [], "sources": []}, sort_keys=True)
+    assert config_hash(load_config(empty)) == hashlib.sha256(before.encode()).hexdigest()
+    assert config_hash(load_config(watched)) == config_hash(load_config(empty))

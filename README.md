@@ -173,6 +173,8 @@ Every flag has an environment fallback: containers are configured with env vars,
 | `HOST` | `--host` | `0.0.0.0` | Bind address, http only |
 | `PORT` | `--port` | `8000` | Port, http only |
 
+Profiles to Pyroscope and OpenTelemetry traces and metrics are switched on in the config file's `telemetry` section (`profiles: http://pyroscope.example.com:4040`, `otel: true`), with metrics pushed over OTLP or scraped from the exporter's own port with `OTEL_METRICS_EXPORTER=prometheus`. The image ships the packages, and a pip install needs `kubed-mcp-kb[telemetry]`.
+
 Per request, on the MCP URL — each with a header form that beats it:
 
 | Parameter | Header | Does |

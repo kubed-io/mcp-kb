@@ -1,6 +1,8 @@
 """The server ``create_app`` builds: the knowledge base and the catalogue it injects."""
 
 import json
+import logging
+import sys
 
 import pytest
 from fastmcp import Client
@@ -9,6 +11,7 @@ from kubed.mcp import Inject
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.app import create_app
 from kubed.mcp_kb.catalogue.uris import Catalogue
+from kubed.mcp_kb.config import Config
 from tests.conftest import make_config
 
 pytestmark = pytest.mark.unit
@@ -56,3 +59,28 @@ async def test_a_call_reads_the_snapshot_serving_when_it_started(skills_dir, tmp
 
     assert seen == [(True, True, True, 0), (True, True, True, 1)]
 
+
+async def test_the_telemetry_section_reaches_the_server(
+    skills_dir, tmp_path, monkeypatch, caplog
+):
+    """The config is validated so that the section is the field's, not an
+    attribute set on the side."""
+    monkeypatch.setitem(sys.modules, "pyroscope", None)
+    base = make_config(skills_dir).model_dump(mode="json", by_alias=True)
+    config = Config.model_validate(
+        {**base, "telemetry": {"profiles": "http://pyroscope.example.com:4040"}}
+    )
+    app = create_app(KnowledgeBase(config, tmp_path / "cache"))
+    with caplog.at_level(logging.WARNING):
+        async with Client(app.server) as client:
+            assert await client.list_resources()
+    warned = [r for r in caplog.records if "kubed-mcp[telemetry]" in r.getMessage()]
+    assert len(warned) == 1
+
+
+async def test_no_telemetry_section_starts_no_signal(skills_dir, tmp_path, caplog):
+    app = create_app(KnowledgeBase(make_config(skills_dir), tmp_path / "cache"))
+    with caplog.at_level(logging.WARNING):
+        async with Client(app.server) as client:
+            assert await client.list_resources()
+    assert not [r for r in caplog.records if "kubed-mcp[telemetry]" in r.getMessage()]

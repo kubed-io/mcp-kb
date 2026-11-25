@@ -53,7 +53,7 @@ installer's, against whatever image tag it chooses.
 | `kubed/mcp_kb/app.py` | `create_app` — the composition root: the `QuickMCP` (kubed-mcp) over a `KnowledgeBase`, its `ServedTrees` loader, its container's `KnowledgeBase` singleton and `Catalogue` transient, `SkillServing`, and every `register(...)` |
 | `kubed/mcp_kb/main.py` | CLI and env parsing, and the `mcp-kb` console script |
 | `kubed/mcp_kb/routes.py` | the plain-HTTP surface: `/health`, `/reindex`, `/openapi.yaml` |
-| `kubed/mcp_kb/config.py` | the config file's model — `Config`, `SourceConfig`, `PluginConfig`, `LibraryConfig`, `Selector`, `BasicAuth`, `EnvRef`, `schema()` |
+| `kubed/mcp_kb/config.py` | the config file's model — `Config`, `SourceConfig`, `PluginConfig`, `LibraryConfig`, `Selector`, `BasicAuth`, `EnvRef`, `schema()`, and `telemetry`, kubed-mcp's `TelemetrySettings` as it is |
 | `kubed/mcp_kb/plugins/` | what the config declares and a marketplace publishes, resolved |
 | ⤷ `address.py` | `<source>://<path>[//<subdir>][?ref=]` — `Address`, and the fetch key that makes two plugins one clone |
 | ⤷ `__init__.py` | `Fetch`, `Globs`, `Plugin`, and the resolution of a declared plugin. Imports no FastMCP |
@@ -159,6 +159,13 @@ names with a prefix, and these names are the agent's API.
   surface. Nothing else in the package reads `os.environ`, except `{env: NAME}`
   resolution in `config.py`, which is the one other reader — and it resolves a
   credential where it is declared so it never travels as a plain `str`.
+- **A telemetry setting** → kubed-io/quick-mcp's `TelemetrySettings`, never a
+  field of kb's. `Config.telemetry` embeds it as it is, `QuickMCP` reads it off
+  the config, and `config_hash` leaves it out because it changes nothing served.
+  Metrics are pushed over OTLP, or scraped from the exporter's own port with
+  `OTEL_METRICS_EXPORTER=prometheus` and `OTEL_EXPORTER_PROMETHEUS_HOST=0.0.0.0`
+  for a scrape from another pod. The server adds no metrics route. Only the
+  image installs the `telemetry` extra.
 - **Anything that changes what the catalogue holds** goes through
   `KnowledgeBase.refresh` and produces a new `Snapshot`; never mutate one. The
   one other swap is `KnowledgeBase.renarrowed`: after a live re-read,
