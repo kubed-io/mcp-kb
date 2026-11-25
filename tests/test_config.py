@@ -640,9 +640,13 @@ def test_a_typod_telemetry_key_is_refused(tmp_path):
         load_config(write(tmp_path, text))
 
 
-@pytest.mark.parametrize("host", ["pyroscope.example.com:4040", "pyroscope:4040"])
+@pytest.mark.parametrize(
+    "host",
+    ["pyroscope.example.com:4040", "pyroscope:4040", "[::1:4040", "[pyroscope]:4040"],
+)
 def test_a_credential_in_the_profiles_address_is_refused(tmp_path, host):
-    # A short host keeps the token's tail inside pydantic's truncated input repr.
+    # A short host keeps the token's tail inside pydantic's truncated input repr,
+    # and a host urlsplit cannot parse must be refused too, not reported as it is.
     text = f"telemetry:\n  profiles: http://me:s3cret@{host}\n"
     with pytest.raises(ConfigError) as raised:
         load_config(write(tmp_path, text))

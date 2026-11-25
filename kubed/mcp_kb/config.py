@@ -423,9 +423,17 @@ class Config(Strict):
     def _telemetry_carries_no_credential(self) -> Config:
         """The profiles address is published, so it may not carry a login.
 
-        The message does not quote the address back: it is the credential.
+        The message does not quote the address back: it is the credential. One
+        urlsplit cannot parse (an unclosed or misplaced bracket) is refused the
+        same way when it holds an ``@``, or its error would quote it instead.
         """
-        parts = urlsplit(self.telemetry.profiles or "")
+        profiles = self.telemetry.profiles or ""
+        try:
+            parts = urlsplit(profiles)
+        except ValueError:
+            if "@" in profiles:
+                raise ValueError(CREDENTIAL_REFUSAL) from None
+            raise
         if parts.username or parts.password:
             raise ValueError(CREDENTIAL_REFUSAL)
         return self
