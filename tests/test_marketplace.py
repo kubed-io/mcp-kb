@@ -443,38 +443,14 @@ def test_a_non_strict_entry_is_a_plugin(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_grafana_entry_is_a_root_entry_listing_skills(tmp_path):
+def test_a_grafana_entry_lists_its_skill_folders(tmp_path):
     plugin = read(tmp_path, GRAFANA).plugins[0]
 
-    assert plugin.root_entry is True
     assert plugin.entry.skills == (
         "skills/grafana-lgtm/loki",
         "skills/grafana-lgtm/tempo",
         "skills/grafana-lgtm/mimir",
     )
-    sub = {"plugins": [{"name": "p", "source": "./plugins/x"}]}
-    elsewhere = only(read(tmp_path, sub))
-    assert elsewhere.root_entry is False
-    for spelled in (".", "./"):
-        dot = {"plugins": [{"name": "p", "source": spelled}]}
-        assert only(read(tmp_path, dot)).root_entry is True
-    github = {"plugins": [{"name": "p", "source": {"source": "github", "repo": "o/r"}}]}
-    assert only(read(tmp_path, github)).root_entry is False
-
-
-@pytest.mark.unit
-def test_a_root_entry_is_relative_to_the_marketplaces_own_subdir(tmp_path):
-    source = "github://grafana/skills//pack?ref=abc"
-    here = only(read(tmp_path, entry(), source=source))
-    sub = {"plugins": [{"name": "p", "source": "./x"}]}
-    below = only(read(tmp_path, sub, source=source))
-
-    slash = {"plugins": [{"name": "p", "source": "./pack/"}]}
-    same = only(read(tmp_path, slash, source=source))
-
-    assert here.root_entry is True
-    assert below.root_entry is False
-    assert same.root_entry is False
 
 
 @pytest.mark.unit

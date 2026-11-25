@@ -9,25 +9,24 @@ globs is in [plugins-and-libraries.md](plugins-and-libraries.md); who may see wh
 
 ## What makes a skill
 
-**SKL-1.** A skill is a directory inside its plugin root that holds a regular file named
-`SKILL.md` and that the plugin's `skills` patterns select (PLG-9). With no patterns from the
-config, these conventions apply, and a manifest's or entry's `skills` add to them (PLG-20, LIB-30);
-an entry at the marketplace root that lists `skills` is the exception (LIB-32). A `SKILL.md` at the
-plugin root is not one of the conventions.
-
-| Pattern | Reaches |
-|---|---|
-| `skills/**/SKILL.md` | any depth |
-| `.github/skills/*/SKILL.md`, `.claude/skills/*/SKILL.md`, `.agents/skills/*/SKILL.md` | one level |
-
-**SKL-2.** A pattern may name the `SKILL.md` or a directory. A matched directory contributes every
-`SKILL.md` beneath it, so `skills: ["skills"]` registers every skill under `skills/`.
+**SKL-1.** A skill is a folder inside its plugin root that holds a regular file named
+`SKILL.md`, found as Claude Code finds one. Each folder directly in the plugin's `skills/` that
+holds one is a skill. Then come the folders the plugin declares: its manifest's `skills`
+(PLG-20), then its marketplace entry's (LIB-30), then a declared plugin's own `skills:` (LIB-33).
+A declared folder that holds a `SKILL.md` is a skill itself; otherwise each folder directly in it
+that holds one is. The first to reach a folder claims it, and a folder reached again is not found
+twice. A child folder whose name starts with `.`, or that is itself a symlink, is never a skill.
+Nothing deeper is found: `skills/g/b/SKILL.md` is a skill only when `skills/g` or `skills/g/b` is
+declared. A declared `skills: []` serves no skill (PLG-9).
 
 **SKL-3.** A path is **hidden** when any segment starts with `.`, except `.github`, `.claude` and
-`.agents`, kept at any depth. Hidden paths are never harvested, listed or read.
+`.agents`, kept at any depth. Hidden paths are never harvested, listed or read. A skill whose
+folder holds a file or a folder whose name starts with `.`, at any depth and with no exception, is
+not served at all (SKL-45), and the server logs it once. Neither is a skill whose folder holds a
+symlink.
 
-**SKL-4.** A pattern hit is kept only when it resolves inside the plugin root. It is named by the
-path the pattern matched, not by its symlink target.
+**SKL-4.** A skill folder, like a pattern hit, is kept only when it resolves inside the plugin
+root. It is named by the path it was reached by, not by its symlink target.
 
 **SKL-5.** A skill's name is its frontmatter `name`, else its directory's name. Its description is
 the frontmatter `description` with each run of whitespace collapsed to one space, else empty.
@@ -36,14 +35,9 @@ counts as absent.
 
 **SKL-6.** A skill's name MUST keep the Agent Skills naming rule: 1 to 64 lowercase letters,
 digits and single hyphens, no hyphen first or last. It MUST equal its directory's name, unless the
-skill is the plugin root itself. A skill that breaks either, or whose address an earlier skill of
-the plugin (in path order) already has, is skipped as in PLG-18.
-
-**SKL-7.** A skill inside another skill's directory is not served as a skill: FastMCP's catalogue
-holds no skill inside another (MD-55). The enclosing skill is served, and the nested one's files are
-among its own files, read at their address under it. The nested skill has no index line, listing row
-or extension entry. Overlapping skills of two plugins in one library are a conflict, as in
-[plugins-and-libraries.md](plugins-and-libraries.md).
+skill is the plugin root itself. A skill that breaks either, or whose address a skill the plugin
+claimed earlier (SKL-1) already has, is skipped as in PLG-18. Overlapping skills of two plugins in
+one library are a conflict, as in [plugins-and-libraries.md](plugins-and-libraries.md).
 
 ## Addresses
 
@@ -64,16 +58,23 @@ or extension entry. Overlapping skills of two plugins in one library are a confl
 **SKL-9.** `<library>` is the library's name, so a plugin served by two libraries has its skills at
 two addresses. A skill's **address** is `<library>/<folder>/<name>`, without an empty folder.
 
-**SKL-10.** `<folder>` is the path of the skill directory's parent below the plugin root, with the
-deepest of `skills/`, `.github/skills/`, `.claude/skills/` and `.agents/skills/` that contains it
-taken off. It may be empty or several segments deep.
+**SKL-10.** `<folder>` is the name of the skill's plugin, and empty for the library's main plugin
+(SKL-59). It never comes from where the skill sits inside its plugin.
 
-| Skill directory | Address in library `grafana` |
-|---|---|
-| `skills/loki` | `grafana/loki` |
-| `skills/grafana-lgtm/loki` | `grafana/grafana-lgtm/loki` |
-| `docs/kits/loki` | `grafana/docs/kits/loki` |
-| the plugin root, named `loki` | `grafana/loki` |
+| Plugin | Skill directory | Address in library `grafana` |
+|---|---|---|
+| the main plugin | `skills/loki` | `grafana/loki` |
+| `grafana-lgtm` | `skills/grafana-lgtm/loki`, declared | `grafana/grafana-lgtm/loki` |
+| `k6` | `skills/k6-load` | `grafana/k6/k6-load` |
+
+**SKL-59.** A library's **main plugin** is decided once per generation from the library's resolved
+plugin list, never from what serves or from what a request's scope admits. It is the first of the
+library's plugins whose name is the library's name. Failing that, when the library's
+`marketplace.json` lists exactly one entry, skipped entries counted, it is that entry's plugin,
+whatever its path, unless that entry was skipped. Otherwise the library has none. The main plugin's
+**namespace** is `<library>`, and every other plugin's is `<library>/<plugin name>`: a skill's
+address is its plugin's namespace followed by its name, and a plugin in two libraries has a
+namespace in each. A scope never moves an address (SCP-26).
 
 **SKL-11.** A skill is identified by its full address, never by its name alone. Two skills of one
 name in different folders or libraries are both served.
@@ -81,15 +82,21 @@ name in different folders or libraries are both served.
 **SKL-12.** A path below a library resolves to the skill whose address is its longest prefix, so a
 file under a nested skill belongs to the nested skill.
 
-**SKL-13.** Before any other check, the path below the library has its `.` and `..` segments
-removed as in RFC 3986. A `..` with nothing before it is dropped, so no address leaves its library.
-This holds for `resources/read`, `read_resource` and `resources/directory/read` alike. Percent-escapes
-are not decoded, so an escaped `/` (`%2F`) is no separator and a URI holding one resolves to
-nothing. A URI that does not start with `skill://` resolves to nothing.
+**SKL-13.** Before any other check, the path below `skill://` has its `.` and `..` segments
+resolved as in RFC 3986, over the whole path: the library is a segment, not an authority. A `..`
+with nothing left to pop makes the address resolve to nothing, so no address climbs past the root.
+Scope applies to the resolved address. The plugin layer resolves the dots for `resources/read`
+(GW-4), and so for its `read_resource` tool, which reads through `resources/read` (DLV-6).
+`resources/directory/read` resolves them by kb's own rule instead: a `..` at the library is dropped,
+so the address never leaves the library. A miss is reported under the address as sent.
+Percent-escapes are not decoded, so an escaped `/` (`%2F`) is no separator and a URI holding one
+resolves to nothing. A URI that does not start with `skill://` resolves to nothing.
 
 ## The listing
 
-**SKL-14.** `resources/list` holds index rows only. For each library, in name order:
+**SKL-14.** `resources/list` holds index rows only, unless the request's `Listed` setting
+(`Kb-Listed`, `X-MCP-Listed` or `?listed=`, which kb defaults to none) names `skills`, when the
+plugin layer adds a row per served `SKILL.md` (DLV-8). For each library, in name order:
 
 | Row | Present when | Description |
 |---|---|---|
@@ -141,32 +148,39 @@ URI per line. With no library file in scope it reads as nothing.
 ## Reading a skill's files
 
 **SKL-21.** A path under a skill reads the regular file at that path in the skill's directory. A
-symlink is followed only while its target stays inside the skill directory. A directory, a hidden
-path and a missing file read as nothing. A file named `_index.md` or `_index.json` at any depth of a
+served skill holds no symlink and no hidden path (SKL-3). A directory and a missing file read as
+nothing. A file named `_index.md` or `_index.json` at any depth of a
 skill, and one named `_manifest` at its root, is not one of its files: the server answers that URI
 with an index or the manifest.
 
-**SKL-58.** A skill's files are served by the skills provider from bytes built per request scope and
-prefix (MD-55, MD-59): what a read of each would have returned, rewritten when the catalogue is
-built and never on read. The library's own provider is registered after it and answers only what it
-misses (indexes, `_files.md`, library files, the plugin-root fallbacks), so it never serves a skill's
+**SKL-58.** A skill's files, its `_manifest`, its extension entry and the folders inside it are
+served by kubed-mcp's plugin layer. kb adds each plugin it serves to one plugin set per generation,
+under its namespace in each library (SKL-59), and the plugin layer builds what a request reads per
+view and prefix (SCP-36). A file's text is rewritten when the build is made, never on read
+(SKL-60). kb's own provider is registered after the plugin layer and answers only what it misses
+(indexes, `_files.md`, library files, the plugin-root fallbacks), so it never serves a skill's
 file.
 
-**SKL-22.** Every file read through this address space is decoded as UTF-8 with invalid bytes
-replaced, has its line endings normalised to LF, and is returned as text.
+**SKL-22.** A skill's file is a **text file** when its extension or its media type (SKL-23) is a
+text one and its bytes are UTF-8. A text file has its line endings normalised to LF (SKL-60) and
+is returned as text. Any other file of a skill, one with no extension included, is returned as a
+blob of its bytes. Every other file read through this address space (an index, `_files.md`, a
+library file, a fallback) is decoded as UTF-8 with invalid bytes replaced, has its line endings
+normalised to LF, and is returned as text.
 
 **SKL-23.** A read's media type is `application/json` for a skill's `_manifest` and for an
-`_index.json`, else the type guessed from the extension, else `text/markdown`. `.md` is
-`text/markdown`. A library file named `_manifest` is not JSON. Every file is returned as text,
-whatever its type.
+`_index.json`. A skill's other files take the plugin layer's type for their extension (`.md` is
+`text/markdown`), else the type guessed from the extension, else `application/octet-stream`. Any
+other file takes the type guessed from its extension, else `text/markdown`, and is returned as
+text whatever its type. A library file named `_manifest` is not JSON.
 
-**SKL-24.** A skill's `_manifest` lists every file a read of the skill serves (SKL-21), sorted by
-path: the same files as its extension entry (SKL-46). Size and hash describe the UTF-8 bytes a read
-returns under the same request headers, after SKL-22, SKL-25, SKL-52, SKL-55 and the prefix, so they
-equal the entry's.
+**SKL-24.** A skill's `_manifest` names the skill by its `name` and lists every file a read of the
+skill serves (SKL-21), sorted by path: the same files as its extension entry (SKL-46). Size and
+hash describe the bytes a read returns under the same request headers, after kb's rewriter
+(SKL-60) and the prefix, so they equal the entry's.
 
 ```json
-{"skill": "grafana/grafana-lgtm/loki",
+{"skill": "loki",
  "files": [{"path": "SKILL.md", "size": 2310, "hash": "sha256:…"}]}
 ```
 
@@ -182,9 +196,7 @@ reads as `skill://drawio/drawio/references/xml.md`. The deepest such skill wins.
 ends at `/` or at a character that cannot continue it; a letter, a digit, `_`, `-`, `~`, `%`, `+`
 and `@` continue it, and so does a `.` followed by one of those or by another `.`. So
 `skills/drawio.md` and `skills/drawio-x/` are not in `skills/drawio`, and a sentence ending
-`skills/drawio.` is. When the plugin root is itself a skill's directory,
-`${CLAUDE_PLUGIN_ROOT}/<path>` outside every nested skill reads as `skill://<address>/<path>`. A
-bare `${CLAUDE_PLUGIN_ROOT}`, a path in a skipped skill and a path in another plugin's skill read
+`skills/drawio.` is. A bare `${CLAUDE_PLUGIN_ROOT}`, a path in a skipped skill and a path in another plugin's skill read
 as SKL-25 says. `./`, `//` and `..` after the placeholder are not normalised. Nothing is served at
 an address that was not served before.
 
@@ -216,6 +228,13 @@ the frontmatter block, and the frontmatter is served as written.
 - **Order.** The rewrite runs before SKL-25 and SKL-52, and the prefix (SKL-41) applies after
   both. Every other file is served without it, and `_manifest` describes the bytes served
   (SKL-24).
+
+**SKL-60.** kb rewrites what the plugin layer serves in one place, its one rewriter, which runs when
+a build is made (SKL-58). In a skill's own `SKILL.md` it applies SKL-55, then SKL-25 and SKL-52, for
+the request's scope. In an agent file it rewrites the body by AGT-17, then PRM-48, and leaves the
+frontmatter as written. Every text file of a skill (SKL-22) has its line endings normalised to LF.
+Everything else is served as written. The gateway prefix (SKL-41) is the plugin layer's to write,
+after kb's rewriter.
 
 **SKL-26.** A read returns only the file addressed. Nothing a file cites is fetched with it.
 
@@ -274,16 +293,22 @@ prefix (SKL-41) and without `skill://`.
 
 **SKL-37.** When a file read belongs to a `cache: live` source
 ([config-and-sources.md](config-and-sources.md)), the read first revalidates that one file against
-the server: library files and both fallbacks alike. A request that reads skills first revalidates
-every file of each live skill in its scope, and a file that moved rebuilds that request's catalogue,
-so a skill's files, its `_manifest` and its extension entry all describe the new bytes.
+the server: library files and both fallbacks alike. A request that reads skills or agents first
+revalidates every file of each live skill, and each agent file, of the plugins its scope admits. A
+file that moved re-reads that plugin and serves it again, every other plugin kept as it is served,
+and from the next request on a skill's files, its `_manifest`, its extension entry and the
+plugin's agents describe the new bytes: the request that re-reads still reads what it began with.
+A request that arrives while a refresh is publishing re-reads nothing.
 
 **SKL-38.** A revalidated file is trusted for 2 seconds. A revalidation that fails, including a
 request that takes over 1 second, serves the copy on disk, and that source is not revalidated for
 30 seconds.
 
-**SKL-39.** A live read changes only the bytes of files already harvested. Listing rows, index
-lines, descriptions, and files added or removed upstream follow the next refresh.
+**SKL-39.** A live read changes only the bytes of files already harvested. What the plugin layer
+serves follows a live re-read (SKL-37): a skill's files, its `_manifest`, its extension entry and
+the plugin's agents. kb's own listing rows, index lines and their descriptions, and files added or
+removed upstream, follow the next refresh, except that a skill a re-read leaves unserved drops out
+of them, and comes back when it serves again (SKL-45).
 
 ## Addresses behind a gateway
 
@@ -297,32 +322,36 @@ stay as they are).
 
 | Where | Prefixed |
 |---|---|
-| resource bodies, listing descriptions, read hints, an extension entry's `frontmatter`, the template's description | yes |
+| resource bodies, listing descriptions, read hints, an extension entry's `frontmatter`, an agent's card and its `io.kubed/agent` `frontmatter` (AGT-9), the template's description | yes |
 | tool results ([http-and-tools.md](http-and-tools.md)), instructions (INS-16), rendered prompts | yes |
 | a listing row's `uri` and `name`, an extension entry's `uri` and each file `uri`, the template's `uriTemplate`, an agent definition's `_meta…skills` values | never |
 
 **SKL-42.** An incoming address (`resources/read`, `read_resource`, `skills/get`,
 `resources/directory/read`) MAY be `skill://…` or `<prefix>skill://…` for the request's own prefix.
 Any other prefix resolves to nothing. The prefix is taken off before any provider is asked, so the
-skills provider sees the plain address; a read still answers with the URI the client sent.
+plugin layer sees the plain address; a read still answers with the URI the client sent.
 
 **SKL-43.** Neither a scope nor a prefix removes the library segment from an address.
 
 ## The Skills extension
 
-**SKL-44.** The server declares `io.modelcontextprotocol/skills` (value
-`{"directoryRead": true}`) on `server/discover` and on `initialize`, whether or not the client
-declared it (HTTP-27). The extension is FastMCP's, through kubed-mcp (MD-61), and adds nothing to
-`resources/list`.
+**SKL-44.** Once the server serves a plugin with a skill, it declares
+`io.modelcontextprotocol/skills` (value `{"directoryRead": true}`) on `server/discover` and on
+`initialize`, whether or not the client declared it (HTTP-27), and goes on declaring it for the
+life of the process. The extension is FastMCP's, through kubed-mcp's plugin layer (SKL-58), and
+adds nothing to `resources/list`. Until then (a deployment serving only prompts or only agents,
+or a cold start with every source down) `server/discover` does not declare it, and `skills/list`
+and `skills/get` answer `-32601` `Method not found`; legacy `initialize` declares it all the same.
 
-**SKL-45.** Every served skill passes FastMCP's checks (MD-56): strict YAML frontmatter that
-converts to JSON, a `name` matching its address's last segment, a `description` of 1 to 1024
-characters, relative paths, at most 512 files and 16 MiB. A skill that fails, or that sits inside
-another (SKL-7), is not served at all: none of its files reads, and no index, listing row, entry,
-hint or rewritten name points at it. The server logs why. A skill that fails only for one scope and
-prefix (a prefix taking its description past 1024 characters, or a live skill edited upstream into
-one that fails) is left out for that scope and prefix alone, and is then not served, listed,
-indexed, hinted at or named in a rewritten pointer, a prompt included, under it.
+**SKL-45.** Every served skill passes FastMCP's checks: strict YAML frontmatter that converts to
+JSON, a `name` matching its address's last segment, a `description` of 1 to 1024 characters,
+relative paths, no symlink, at most 512 files and 16 MiB. It holds no hidden path either (SKL-3). A
+skill that fails is not served at all: none of its files reads, and no index, listing row, entry,
+hint or rewritten name points at it. The server logs why, once. kb's catalogue is narrowed to what
+the plugin layer serves once per generation, and again after a live re-read (SKL-37). A skill that
+fails only in one view's build, such as under a prefix that takes its description past 1024
+characters, does not read under that view and prefix, and kb's indexes, hints and rewritten names
+under it still name it.
 
 **SKL-46.** An entry describes one conforming skill:
 
@@ -358,14 +387,16 @@ library, a folder, a skill's root or a folder inside a skill (SEP-2640): its URI
 and it is never listed. A subdirectory is a child with `mimeType` `inode/directory`; the indexes,
 `_files.md` and `_manifest` are beside a directory, not in it. A library's or folder's children are
 its folders and skills (description: the skill count, or the skill's description) and its library
-files and their folders, as the scope admits them (MD-57); a skill's are its folders and files. A
+files and their folders, as the scope admits them (SCP-22); a skill's are its folders and files. A
 file, an absent address and an out-of-scope one fail alike with `-32602` `Directory not found`.
 
 ## Folder indexes
 
 **SKL-56.** Beside every directory of SKL-51 an `_index.json` reads as the JSON array
 `resources/directory/read` returns for it, every page at once, with `mimeType`
-`application/json`. Like the directory, it is not found where the directory is.
+`application/json`. Like the directory, it is not found where the directory is. It is text a client
+reads, so with a prefix (SKL-41) every address in it, each `uri` included, carries the prefix, as
+the `_index.md` beside it does and the plugin layer's `_index.json` inside a skill does (N18).
 
 **SKL-57.** Inside a skill, an `_index.md` beside its root and each of its folders reads one
 `<uri>: <description>` line per child, a file's description being its first `# ` heading, else

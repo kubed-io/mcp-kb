@@ -21,7 +21,7 @@ from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.instructions import ScopedInstructions
 from kubed.mcp_kb.mcp.request import declared_on_initialize
 from kubed.mcp_kb.mcp.scope import EVERYTHING, Scope
-from tests.conftest import SKILLS_GLOBS, fake_plugin, make_config, server_of
+from tests.conftest import FLAT_FOLDERS, fake_plugin, make_config, server_of
 from tests.test_header_scope import server_url  # noqa: F401 - shared HTTP fixture
 
 RES_FOOTER = (
@@ -43,7 +43,7 @@ def _catalogue(tmp_path, libraries):
                 f"---\nname: {name}\ndescription: d\n---\n\nBody.\n"
             )
         skills += load_skills(
-            harvest.skill_dirs(root, SKILLS_GLOBS),
+            harvest.skill_dirs(root, FLAT_FOLDERS),
             library=text.name,
             plugin=fake_plugin(text.name, root),
             root=root,
@@ -268,8 +268,8 @@ async def test_a_library_with_no_skills_is_absent(tmp_path, mode):
     config = Config.model_validate(
         {
             "plugins": [
-                {"name": "s1", "source": f"file://{skilled}", "skills": ["one/SKILL.md"]},
-                {"name": "s2", "source": f"file://{skilled}", "skills": ["two/SKILL.md"]},
+                {"name": "s1", "source": f"file://{skilled}", "skills": ["./one"]},
+                {"name": "s2", "source": f"file://{skilled}", "skills": ["./two"]},
                 {
                     "name": "b",
                     "source": f"file://{bare}",

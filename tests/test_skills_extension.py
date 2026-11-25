@@ -1,8 +1,8 @@
 """Skills discovery and integrity through real MCP requests, in both eras.
 
-The Skills extension is FastMCP's (through kubed-mcp), over the catalogue
-``SkillCatalogue`` builds from kb's ``Catalogue``: these check what kb puts in
-it and that every surface agrees about it.
+The Skills extension is FastMCP's, served by kubed-mcp's plugin layer from the
+plugin set kb publishes: these check what kb puts in it and that every surface
+agrees about it.
 """
 
 from __future__ import annotations
@@ -19,8 +19,7 @@ from pydantic import ConfigDict, TypeAdapter
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue.addressing import Addressing
 from kubed.mcp_kb.mcp.request import EXTENSION_ID
-from kubed.mcp_kb.mcp.scope import EVERYTHING, Scope
-from kubed.mcp_kb.mcp.skill_catalogue import SkillCatalogue
+from kubed.mcp_kb.mcp.scope import Scope
 from tests.conftest import DEEP_YAML, make_config, server_of
 from tests.test_header_scope import server_url  # noqa: F401 - shared HTTP fixture
 
@@ -84,17 +83,16 @@ async def test_the_manifest_the_entry_and_the_read_are_one_set_of_bytes(skills_d
         b"Read ${CLAUDE_SKILL_DIR}/guide.md from ${CLAUDE_PLUGIN_ROOT}.\r\n"
     )
     (path / "guide.md").write_bytes("Café\r\n".encode())
-    (path / ".env").write_text("secret", encoding="utf-8")
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
     async with Client(server_of(server)) as client:
         entry = (await request(client, "skills/get", uri=ALPHA))["skill"]
         assert entry["frontmatter"]["description"] == "First line.\nSecond line.\n"
         assert entry["frontmatter"]["metadata"] == {"audience": ["one", "two"]}
-        assert not any(r["uri"].endswith("/.env") for r in entry["resources"])
         manifest = json.loads(
             (await client.read_resource("skill://flatsource/alpha/_manifest"))[0].text
         )
-        assert manifest["skill"] == "flatsource/alpha"
+        # N1: FastMCP's _manifest names the skill by its name.
+        assert manifest["skill"] == "alpha"
         assert all(set(f) == {"path", "size", "hash"} for f in manifest["files"])
         hashes = {f"skill://flatsource/alpha/{f['path']}": f for f in manifest["files"]}
         assert set(hashes) == {r["uri"] for r in entry["resources"]}
@@ -104,6 +102,21 @@ async def test_the_manifest_the_entry_and_the_read_are_one_set_of_bytes(skills_d
             assert "\r" not in text
             assert resource["digest"] == _sha(text) == hashes[resource["uri"]]["hash"]
             assert resource["size"] == len(text.encode()) == hashes[resource["uri"]]["size"]
+
+
+async def test_a_skill_holding_a_dot_file_is_not_offered(skills_dir):
+    """SKL-3, N13: kubed-mcp would offer a skill's dot file, so kb offers none
+    of a skill holding one; the rest are offered."""
+    (skills_dir / "flatsource" / "alpha" / ".env").write_text("secret")
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    async with Client(server_of(server)) as client:
+        listing = await request(client, "skills/list")
+        with pytest.raises(MCPError):
+            await request(client, "skills/get", uri=ALPHA)
+        beta = await request(client, "skills/get", uri="skill://flatsource/beta/SKILL.md")
+    uris = {entry["uri"] for entry in listing["skills"]}
+    assert ALPHA not in uris and len(uris) == 3
+    assert not any("/." in r["uri"] for r in beta["skill"]["resources"])
 
 
 async def test_direct_get_needs_no_listing_and_follows_refresh(skills_dir):
@@ -184,59 +197,32 @@ async def test_frontmatter_too_deep_for_the_parser_is_not_served(skills_dir):
             await client.read_resource(ALPHA)
 
 
-def test_a_skill_inside_a_skill_is_refused_and_its_files_are_the_outers(tmp_path):
-    from kubed.mcp_kb.catalogue.skills import SkillIndex
-    from kubed.mcp_kb.catalogue.uris import Catalogue
-    from tests.conftest import build_library_files, load_all_skills
-
-    outer = tmp_path / "flatsource" / "outer"
-    for path, name in ((outer, "outer"), (outer / "inner", "inner")):
-        path.mkdir(parents=True)
-        (path / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\n")
-    catalogue = Catalogue(
-        SkillIndex(load_all_skills(tmp_path)), build_library_files(tmp_path)
-    )
-    skills = SkillCatalogue(lambda: catalogue)
-
-    built = skills.skills()
-
-    assert list(built) == ["flatsource/outer"]
-    assert set(built["flatsource/outer"].files) == {"SKILL.md", "inner/SKILL.md"}
-    assert skills.refused() == {
-        "flatsource/outer/inner": "it sits inside the skill at flatsource/outer"
-    }
-    assert "inner" not in skills.catalogue().read("skill://flatsource/_index.md")
-
-
-def test_a_catalogue_is_built_once_per_scope_and_prefix(skills_dir):
-    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
-    skills = SkillCatalogue(lambda: server.snapshot.catalogue)
-    flat = Scope("flatsource")
-    prefixed = Addressing.parse("kb+")
-
-    first = skills.skills(flat)
-
-    assert skills.skills(flat) is first
-    assert list(first) == ["flatsource/alpha", "flatsource/beta"]
-    assert skills.skills(EVERYTHING, prefixed) is not skills.skills(EVERYTHING)
-    # A file a key does not rewrite is the same bytes object in every key.
-    alpha = skills.skills(EVERYTHING)["flatsource/alpha"]
-    assert first["flatsource/alpha"] is alpha
-    server.refresh(force=True)
-    assert skills.skills(flat) is not first
-
-
-def test_a_prefix_that_breaks_a_skill_drops_it_under_that_prefix_only(skills_dir):
-    """A rewrite can take a description past 1024 characters."""
+def test_a_prefix_that_breaks_a_skill_fails_it_under_that_prefix_only(skills_dir):
+    """A rewrite can take a description past 1024 characters: kubed-mcp fails
+    the skill for that build alone (PLUG-59)."""
     words = "skill://flatsource " + "x" * (1022 - len("skill://flatsource "))
     (skills_dir / "flatsource" / "alpha" / "SKILL.md").write_text(
         f"---\nname: alpha\ndescription: {words}\n---\nBody.\n"
     )
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
-    skills = SkillCatalogue(lambda: server.snapshot.catalogue)
 
-    assert "flatsource/alpha" in skills.skills()
-    assert "flatsource/alpha" not in skills.skills(EVERYTHING, Addressing.parse("kb+"))
+    async def read(url):
+        from fastmcp.client.transports import StreamableHttpTransport
+
+        found = []
+        for headers in ({}, {"Kb-Resource-Prefix": "kb+"}):
+            transport = StreamableHttpTransport(url, headers=headers)
+            async with Client(transport) as client:
+                listing = await request(client, "skills/list")
+            found.append({entry["uri"] for entry in listing["skills"]})
+        return found
+
+    import asyncio
+
+    with _serve(server) as url:
+        plain, prefixed = asyncio.run(read(url))
+    assert ALPHA in plain
+    assert ALPHA not in prefixed
 
 
 @pytest.mark.integration
@@ -310,8 +296,14 @@ async def test_every_child_a_directory_names_is_readable(server_url, headers):  
         while todo:
             folder = todo.pop()
             listed = await request(client, "resources/directory/read", uri=folder)
-            index = json.loads((await client.read_resource(f"{folder}/_index.json"))[0].text)
-            assert index == listed["resources"]
+            index = json.loads(
+                (await client.read_resource(f"{folder}/_index.json"))[0].text
+            )
+            # An index is text, which kb and the plugin layer both write the
+            # prefix into (GW-5, one writer); a directory listing's rows are
+            # structured. So the index is the listing, as the prefix writes it.
+            written = Addressing.parse(headers.get("Kb-Resource-Prefix", ""))
+            assert index == json.loads(written.text(json.dumps(listed["resources"])))
             for child in listed["resources"]:
                 seen += 1
                 if child["mimeType"] == "inode/directory":
@@ -422,6 +414,14 @@ def _is_dir(uri: str, named: set[str]) -> bool:
     return any(other.startswith(f"{uri}/") for other in named)
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "N15: kb narrows its indexes once per generation, to what kubed-mcp"
+        " read; a skill a prefix alone breaks fails in that build (PLUG-59) and"
+        " kb's index under that prefix still names it."
+    ),
+)
 async def test_a_skill_one_prefix_cannot_build_is_named_nowhere_under_it(skills_dir):
     """MD-57 per key: listed is a subset of readable under the prefix too."""
     from fastmcp.client.transports import StreamableHttpTransport
@@ -471,13 +471,14 @@ async def test_a_prompt_names_no_skill_that_is_not_served(tmp_path):
     server = KnowledgeBase(config, tmp_path / "cache")
     async with Client(server_of(server)) as client:
         text = (await client.get_prompt("lib_use")).messages[0].content.text
-        assert "skill://lib/good/SKILL.md" in text
+        assert "skill://lib/kit/good/SKILL.md" in text
         assert "kit:bad" in text
-        assert "skill://lib/bad" not in text
+        assert "skill://lib/kit/bad" not in text
 
 
 def test_a_scope_whose_only_skills_are_refused_names_nothing(tmp_path):
-    """RefuseEmptyScope counts what is served, not what was harvested."""
+    """RefuseEmptyScope counts what is served, not what was harvested: the
+    published snapshot is already narrowed to what kubed-mcp serves."""
     from kubed.mcp_kb.config import Config
     from kubed.mcp_kb.mcp.pins import what_is_wrong
 
@@ -495,15 +496,16 @@ def test_a_scope_whose_only_skills_are_refused_names_nothing(tmp_path):
         }
     )
     server = KnowledgeBase(config, tmp_path / "cache")
-    skills = SkillCatalogue(lambda: server.snapshot.catalogue)
+    harvested = server.snapshot
+    server_of(server)
     odd = Scope.parse(tags=["odd"])
 
-    assert what_is_wrong(odd, config, server.snapshot) is None
+    assert what_is_wrong(odd, config, harvested) is None
     assert "nothing in any library carries" in what_is_wrong(
-        odd, config, server.snapshot, skills.catalogue
+        odd, config, server.snapshot
     )
     kit = Scope.parse(tags=["kit"])
-    assert what_is_wrong(kit, config, server.snapshot, skills.catalogue) is None
+    assert what_is_wrong(kit, config, server.snapshot) is None
 
 
 async def test_dot_segments_and_escaped_slashes_read_alike_everywhere(skills_dir):

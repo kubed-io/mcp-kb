@@ -5,8 +5,9 @@ its headers, and whether a mirror is shown depends on what the client declared
 there -- so these run the app on a loopback port, as test_header_scope does.
 
 The catalogue is shaped to make the rules visible: ``observe`` holds two
-plugins, one in category ``observability`` tagged ``ops`` with skills and a
-prompt, one in category ``tooling`` tagged ``extra`` and ``ops`` with a skill;
+plugins, its own -- the main one -- in category ``observability`` tagged ``ops``
+with skills and a prompt, and ``observe-extra``, in a folder of its name, in
+category ``tooling`` tagged ``extra`` and ``ops`` with a skill;
 ``design`` (category ``design``, tagged ``ui``) has skills only; and ``notes``
 (tagged ``ops``) has a prompt and no skills at all.
 """
@@ -202,11 +203,11 @@ async def test_a_prompt_tool_mistake_is_an_error_result_that_says_what_to_do(
 
 async def test_a_library_is_the_whole_library(url):
     _, resources, prompts = await _seen(url, "?library=observe")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
     assert prompts == ["observe_debug"]
     assert await _skills(url, "?library=observe") == [
-        "skill://observe/alerts/SKILL.md",
         "skill://observe/loki/SKILL.md",
+        "skill://observe/observe-extra/alerts/SKILL.md",
         "skill://observe/tempo/SKILL.md",
     ]
 
@@ -219,16 +220,20 @@ async def test_a_library_of_prompts_alone_is_visible_by_name(url):
 
 async def test_tags_select_across_libraries(url):
     _, resources, prompts = await _seen(url, "?tag=ops")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
     assert prompts == ["notes_standup", "observe_debug"]
 
 
 async def test_a_repeated_tag_parameter_means_any_of_them(url):
     _, resources, _ = await _seen(url, "?tag=ui&tag=extra")
-    assert resources == ["design/_index.md", "observe/_index.md"]
+    assert resources == [
+        "design/_index.md",
+        "observe/_index.md",
+        "observe/observe-extra/_index.md",
+    ]
     assert await _skills(url, "?tag=ui&tag=extra") == [
         "skill://design/palette/SKILL.md",
-        "skill://observe/alerts/SKILL.md",
+        "skill://observe/observe-extra/alerts/SKILL.md",
     ]
 
 
@@ -236,9 +241,9 @@ async def test_a_comma_in_a_tag_means_all_of_them(url):
     """`?tag=extra,ops` admits only a plugin carrying both: `observe-extra`,
     not `observe` (ops alone) and not `notes` (ops alone)."""
     _, resources, prompts = await _seen(url, "?tag=extra,ops")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
     assert prompts == []
-    assert await _skills(url, "?tag=extra,ops") == ["skill://observe/alerts/SKILL.md"]
+    assert await _skills(url, "?tag=extra,ops") == ["skill://observe/observe-extra/alerts/SKILL.md"]
 
 
 async def test_a_category_selects_the_plugins_declaring_it(url):
@@ -258,10 +263,10 @@ async def test_a_repeated_category_parameter_means_any_of_them(url):
 
 async def test_tags_narrow_within_a_library(url):
     _, resources, prompts = await _seen(url, "?library=observe&tag=extra")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
     assert prompts == []
     assert await _skills(url, "?library=observe&tag=extra") == [
-        "skill://observe/alerts/SKILL.md"
+        "skill://observe/observe-extra/alerts/SKILL.md"
     ]
 
 
@@ -356,7 +361,7 @@ async def test_a_header_beats_the_url_parameter(url):
     _, resources, prompts = await _seen(
         url, "?library=design", {"Kb-Library": "observe"}
     )
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
     assert prompts == ["observe_debug"]  # design has no prompts
 
 

@@ -23,10 +23,10 @@ are directories too: ``CatalogueProvider.children`` lists one for
 ``resources/directory/read`` and ``_index.json``, from the same scoped
 ``Catalogue.directory``.
 
-A skill's own files are not this provider's. ``skill_catalogue.SkillCatalogue``
-serves them, registered before this one, and this provider answers only what it
-misses: the indexes, ``_files.md``, the library files and the plugin-root
-fallbacks (SKL-30, SKL-31), so it never shadows a skill file.
+A skill's own files are not this provider's. kubed-mcp's plugin layer serves
+them, from the plugin set ``skills.SkillServing`` publishes, and this provider
+answers only what it misses: the indexes, ``_files.md``, the library files and
+the plugin-root fallbacks (SKL-30, SKL-31), so it never shadows a skill file.
 
 ``resources/templates/list`` carries one fixed row, ``skill://{library}/{+path}``.
 It is how a client learns the space exists, and it is never matched: a read
@@ -134,7 +134,10 @@ class CatalogueProvider(Provider):
                     name=name,
                     description=f"What is in {parent}",
                     mime_type="application/json",
-                    text=json.dumps(children, indent=2),
+                    # Text a client reads, so it carries the prefix, as this
+                    # provider's _index.md and the plugin layer's own
+                    # _index.json do (GW-5): one writer.
+                    text=a.text(json.dumps(children, indent=2)),
                 )
         body = catalogue.read(canonical, requested_scope())
         if body is None:
@@ -206,6 +209,12 @@ class NameTheFileToRead(Middleware):
     The hint is answered from the caller's own scope, so it never confirms a
     directory the caller could not have listed: out of scope, the error is the
     same bare one a missing URI gets. The code is unchanged, -32602.
+
+    It runs outside every other middleware, kubed-mcp's included, so it sees the
+    URI the client sent and the error after kubed-mcp has named that URI in it,
+    and writes the prefix into its hint once (SKL-41). Inside kubed-mcp's
+    ``_TakeThePrefix`` it saw the plain address, and that middleware's rename of
+    a miss to the URI as sent prefixed a hint kb had prefixed already.
     """
 
     def __init__(self, catalogue: Callable[[], Catalogue]):
@@ -221,12 +230,18 @@ class NameTheFileToRead(Middleware):
                 requested_scope(),
                 requested_addressing(),
             )
-            hint = catalogue.hint(a.canonical(uri), scope)
-            if hint is None and isinstance(miss, FolderNotFound):
+            address = canonical(uri, a)
+            hint = catalogue.hint(address, scope)
+            if hint is not None:
+                # Naming the address as sent, dot segments and all, as kubed-mcp
+                # names a miss; the prefix is written below.
+                hint = hint.replace(address, a.canonical(uri).rstrip("/"))
+            elif isinstance(miss, FolderNotFound):
                 # A folder inside a skill, which kubed-mcp named: its index.
                 hint = miss.hint
             if hint is None:
                 raise
+            # Idempotent, so a hint naming the prefixed URI as sent stays as it is.
             hint = a.text(hint)
             raise MCPError(
                 code=INVALID_PARAMS,
@@ -293,11 +308,11 @@ class HideMirrorTools(Middleware):
     """Drop the mirroring tools from ``tools/list`` for clients that have the
     native feature each one mirrors.
 
-    Every tool this server has is a mirror: ``list_resources``/``read_resource``
-    stand in for MCP resources and ``list_prompts``/``get_prompt`` for MCP
-    prompts, for clients that cannot use those. Advertising both shapes to a
-    client that has the real one is noise -- two ways to ask one question, and
-    the model has to pick one.
+    Every tool this server has is a mirror: ``list_prompts``/``get_prompt``
+    stand in for MCP prompts, and kubed-mcp's ``list_resources``/
+    ``read_resource`` for MCP resources, which kubed-mcp hides itself (DLV-6).
+    Advertising both shapes to a client that has the real one is noise -- two
+    ways to ask one question, and the model has to pick one.
 
     Filtering the listing rather than registering conditionally is what keeps
     one server object correct for every client at once. The decision depends on
@@ -325,11 +340,14 @@ class HideMirrorTools(Middleware):
 def register(mcp: QuickMCP, catalogue: Callable[[], Catalogue]) -> None:
     """Publish the catalogue as ``skill://`` resources, read per request.
 
-    After the skills provider, so a skill's file is always its. The hints run
-    outside the address, so an error names the URI the client sent: kb's own
-    first, then kubed-mcp's for a folder inside a skill.
+    After the plugin layer's skills provider, so a skill's file is always its.
+    The hints run outside everything, kubed-mcp's prefix middleware included,
+    so an error names the URI the client sent and its hint carries the prefix
+    once: kb's own first, then kubed-mcp's for a folder inside a skill.
+    QuickMCP has no way to add a middleware outside its own, so it goes first in
+    the FastMCP server's list.
     """
     mcp.add_provider(CatalogueProvider(catalogue))
-    mcp.add_middleware(NameTheFileToRead(catalogue))
+    mcp.server.middleware.insert(0, NameTheFileToRead(catalogue))
     mcp.add_middleware(ReadTheAddress())
     mcp.add_middleware(NameTheIndex())

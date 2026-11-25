@@ -15,6 +15,8 @@ Across two plugins of one library the rule is the one in ``test_conflicts.py``:
 the later plugin fails in that library.
 """
 
+import logging
+
 import httpx
 import pytest
 from fastmcp import Client
@@ -40,14 +42,15 @@ def _skill(root, rel, name, description):
     )
 
 
-def _kb(tmp_path, build, globs):
+def _kb(tmp_path, build, globs, name="src"):
+    """One plugin ``name`` in library `lib`: its skills sit at `lib/<name>/…`."""
     root = tmp_path / "src"
     root.mkdir()
     build(root)
     config = Config.model_validate(
         {
-            "plugins": [{"name": "src", "source": f"file://{root}", **globs}],
-            "libraries": [{"name": "lib", "plugins": ["src"]}],
+            "plugins": [{"name": name, "source": f"file://{root}", **globs}],
+            "libraries": [{"name": "lib", "plugins": [name]}],
         }
     )
     return KnowledgeBase(config, tmp_path / "c")
@@ -69,8 +72,8 @@ async def _read(knowledge_base, uri):
             return None
 
 
-def _skipped(health):
-    return {row["path"]: row["reason"] for row in health["plugins"]["src"]["skipped"]}
+def _skipped(health, plugin="src"):
+    return {row["path"]: row["reason"] for row in health["plugins"][plugin]["skipped"]}
 
 
 # -- library files --------------------------------------------------------------
@@ -87,18 +90,24 @@ def _overlapping(root):
     _write(root, "shared/ok.md", "fine\n")
 
 
-OVERLAP_GLOBS = {"files": ["shared/**", "grafana-lgtm/**", "docs/**", "_index.md"]}
+OVERLAP_GLOBS = {
+    "skills": ["./skills/grafana-lgtm", "./skills/grafana-k6"],
+    "files": ["shared/**", "grafana-lgtm/**", "docs/**", "_index.md"],
+}
+# The plugin the overlapping tree is: its skills sit at lib/grafana-lgtm/<name>,
+# which is where the tree's grafana-lgtm/ files would be served.
+OVERLAP = "grafana-lgtm"
 
 
 async def test_a_library_file_inside_one_of_its_own_plugins_skills_is_skipped(tmp_path):
-    kb = _kb(tmp_path, _overlapping, OVERLAP_GLOBS)
+    kb = _kb(tmp_path, _overlapping, OVERLAP_GLOBS, OVERLAP)
     health = await _health(kb)
 
-    entry = health["plugins"]["src"]
+    entry = health["plugins"][OVERLAP]
     assert entry["status"] == "ok"
     assert entry["files"] == 1
     assert health["libraries"]["lib"]["files"] == 1
-    skipped = _skipped(health)
+    skipped = _skipped(health, OVERLAP)
     assert "grafana-lgtm/loki" in skipped["grafana-lgtm/loki/notes.md"]
     assert "grafana-lgtm/tempo" in skipped["grafana-lgtm/tempo/SKILL.md"]
 
@@ -113,10 +122,10 @@ async def test_a_library_file_inside_one_of_its_own_plugins_skills_is_skipped(tm
 
 
 async def test_a_library_file_named_like_an_index_is_skipped(tmp_path):
-    kb = _kb(tmp_path, _overlapping, OVERLAP_GLOBS)
+    kb = _kb(tmp_path, _overlapping, OVERLAP_GLOBS, OVERLAP)
     health = await _health(kb)
 
-    skipped = _skipped(health)
+    skipped = _skipped(health, OVERLAP)
     assert "_index.md" in skipped["_index.md"]
     assert "_files.md" in skipped["docs/_files.md"]
     assert "LIBRARY INDEX" not in await _read(kb, "skill://lib/_index.md")
@@ -143,40 +152,46 @@ def _misnamed(root):
     _skill(root, "skills/f/Upper", "Upper", "Upper.")
     _skill(root, "skills/f/mismatch", "other", "Mismatch.")
     _skill(root, "skills/f/idx", "_index.md", "Index.")
-    # One address reached from two skill roots: the first found serves.
-    _skill(root, ".claude/skills/dup", "dup", "First dup.")
-    _skill(root, "skills/dup", "dup", "Second dup.")
+    # One address reached from two skill folders: the first claimed serves, and
+    # skills/ is claimed before any declared folder.
+    _skill(root, "skills/dup", "dup", "First dup.")
+    _skill(root, ".claude/skills/dup", "dup", "Second dup.")
+
+
+MISNAMED_GLOBS = {"skills": ["./skills/f", "./.claude/skills"]}
 
 
 async def test_a_skill_that_cannot_be_one_address_segment_is_skipped(tmp_path):
-    kb = _kb(tmp_path, _misnamed, {})
+    kb = _kb(tmp_path, _misnamed, MISNAMED_GLOBS, "f")
     health = await _health(kb)
 
-    entry = health["plugins"]["src"]
+    entry = health["plugins"]["f"]
     assert entry["status"] == "ok"
     assert entry["skills"] == 2
-    skipped = _skipped(health)
+    skipped = _skipped(health, "f")
     for path in ("skills/f/dotdot", "skills/f/slash", "skills/f/Upper", "skills/f/idx"):
         assert "naming rule" in skipped[path], path
     assert "directory" in skipped["skills/f/mismatch"]
-    assert skipped["skills/dup"] == "dup is already served by .claude/skills/dup"
+    assert skipped[".claude/skills/dup"] == "dup is already served by skills/dup"
     assert set(skipped) == {
         "skills/f/dotdot",
         "skills/f/slash",
         "skills/f/Upper",
         "skills/f/mismatch",
         "skills/f/idx",
-        "skills/dup",
+        ".claude/skills/dup",
     }
 
+    # Every skill of the plugin `f` sits in its folder, the one directly in
+    # skills/ included.
     folder = await _read(kb, "skill://lib/f/_index.md")
-    assert folder.startswith("# lib/f — 1 skill\n")
+    assert folder.startswith("# lib/f — 2 skills\n")
     assert "skill://lib/f/good/SKILL.md" in folder
     assert ".." not in folder and "grafana-lgtm" not in folder
+    assert folder.count("skill://lib/f/dup/SKILL.md") == 1
     library = await _read(kb, "skill://lib/_index.md")
     assert library.startswith("# lib — 2 skills\n")
-    assert library.count("skill://lib/dup/SKILL.md") == 1
-    assert "First dup." in await _read(kb, "skill://lib/dup/SKILL.md")
+    assert "First dup." in await _read(kb, "skill://lib/f/dup/SKILL.md")
     for uri in (
         "skill://lib/f/other/SKILL.md",
         "skill://lib/f/mismatch/SKILL.md",
@@ -187,18 +202,25 @@ async def test_a_skill_that_cannot_be_one_address_segment_is_skipped(tmp_path):
         assert await _read(kb, uri) is None, uri
 
 
-async def test_a_plugin_that_is_one_skill_need_not_match_its_cache_directory(tmp_path):
-    """A git fetch's root is a directory named for a commit, not for the skill."""
+async def test_a_plugin_that_is_one_skill_is_not_served(tmp_path, caplog):
+    """A git fetch's root is a directory named for a commit, not for the skill.
+
+    kb harvests it, but kubed-mcp names a declared ``.`` skill after its root
+    folder, which FastMCP refuses for not matching its ``name``: the parity
+    guard takes it out of every index, and says so once.
+    """
     kb = _kb(
         tmp_path,
         lambda r: _skill(r, ".", "whole", "The whole plugin."),
-        {"skills": ["SKILL.md"]},
+        {"skills": ["."]},
     )
-    health = await _health(kb)
+    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.mcp.skills"):
+        health = await _health(kb)
 
     assert health["plugins"]["src"]["skills"] == 1
-    assert "skipped" not in health["plugins"]["src"]
-    assert "The whole plugin." in await _read(kb, "skill://lib/whole/SKILL.md")
+    assert health["libraries"]["lib"]["skills"] == 0
+    assert await _read(kb, "skill://lib/src/whole/SKILL.md") is None
+    assert [r for r in caplog.records if "lib/src/whole" in r.getMessage()]
 
 
 @pytest.mark.parametrize(

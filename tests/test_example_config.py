@@ -31,11 +31,13 @@ ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_CONFIG = ROOT / "examples" / "config.yaml"
 
 # One skill's real URI per library the shipped config declares, from the
-# BUILDERS fixtures below: grafana nests its skill a folder deeper than the
-# other three, which is exactly the case an address built by hand gets wrong.
+# BUILDERS fixtures below: grafana publishes several entries, so its skills sit
+# in a folder named for their plugin, a level deeper than the other three's,
+# whose one entry each is the library's main plugin -- exactly the case an
+# address built by hand gets wrong.
 SKILL_URI_PER_LIBRARY = {
     "n8n": "skill://n8n/s/SKILL.md",
-    "grafana": "skill://grafana/g/s/SKILL.md",
+    "grafana": "skill://grafana/grafana-lgtm/s/SKILL.md",
     "penpot": "skill://penpot/s/SKILL.md",
     "superpowers": "skill://superpowers/s/SKILL.md",
 }
@@ -90,27 +92,28 @@ def _n8n(root: Path) -> None:
 def _grafana(root: Path) -> None:
     """Several entries on one repository, each naming the skills it serves.
 
-    grafana/skills really does publish seven that way, and `skills/template` is
-    the one its catalog leaves out -- which is how an entry's own list keeps a
-    repository's scaffolding out of the catalogue without a glob written here.
+    grafana/skills really does publish seven that way, and `template/` at its
+    root is the one its catalog leaves out -- a folder no entry declares and
+    the scan of `skills/` never reaches, so the repository's scaffolding stays
+    out of the catalogue without anything written here.
     """
-    _skill(root, "skills", "g", "s")
-    _skill(root, "skills", "h", "t")
-    _skill(root, "skills", "template")
+    _skill(root, "skills", "grafana-lgtm", "s")
+    _skill(root, "skills", "grafana-cloud", "t")
+    _skill(root, "template")
     _catalog(
         root,
         "grafana",
         {
             "name": "grafana-lgtm",
             "source": "./",
-            "skills": ["./skills/g"],
+            "skills": ["./skills/grafana-lgtm"],
             "category": "observability",
             "tags": ["lgtm"],
         },
         {
             "name": "grafana-cloud",
             "source": "./",
-            "skills": ["./skills/h"],
+            "skills": ["./skills/grafana-cloud"],
             "category": "observability",
             "tags": ["cloud"],
         },
@@ -234,7 +237,7 @@ def test_a_marketplace_entry_brings_its_own_plugin_and_its_own_words(tmp_path):
 
 
 def test_an_entrys_skills_list_is_what_that_plugin_serves(tmp_path):
-    """`skills/template` is in the repository and in no entry, so it is served
+    """`template/` is in the repository and in no entry, so it is served
     by neither plugin -- and by nothing else in the library either."""
     knowledge_base = KnowledgeBase(_rewritten_config(tmp_path), tmp_path / "cache")
 

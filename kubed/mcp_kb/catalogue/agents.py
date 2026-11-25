@@ -40,8 +40,12 @@ class ParsedAgent:
     body: str
 
 
-def parse_agent(path: Path) -> ParsedAgent | str:
+def parse_agent(path: Path, stem: str | None = None) -> ParsedAgent | str:
     """The agent in ``path``, or the reason its content cannot be served.
+
+    ``stem`` is the name of an agent whose frontmatter names none, as
+    kubed-mcp names one (N10); without it a frontmatter ``name`` is required
+    (AGT-6).
 
     An unreadable file (``OSError``) is the caller's: it names no errno here,
     because that text can carry a path.
@@ -65,6 +69,8 @@ def parse_agent(path: Path) -> ParsedAgent | str:
     except (TypeError, ValueError, RecursionError):
         return "agent frontmatter has no JSON form"
     name = meta.get("name")
+    if name is None and stem is not None:
+        name = stem
     if not isinstance(name, str) or not name.strip():
         return "agent frontmatter has no name"
     if not usable_name(name):

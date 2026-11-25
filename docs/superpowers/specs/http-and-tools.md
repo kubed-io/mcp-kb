@@ -1,7 +1,7 @@
 # HTTP and tools
 
 How mcp-kb is reached: the MCP endpoint and the plain HTTP routes beside it, the protocol eras it
-answers, the four mirror tools for clients without resources or prompts, and the container it
+answers, the up to four mirror tools for clients without resources or prompts, and the container it
 ships in. What the catalogue holds, how a scope narrows it and what a prompt renders are other
 areas, and this file points at them.
 
@@ -117,8 +117,8 @@ clients, which open with `initialize` and may hold a session (`mcp-session-id`),
 for the caller, as in [scoping-and-instructions.md](scoping-and-instructions.md).
 
 **HTTP-27.** Both answers advertise the `io.modelcontextprotocol/skills` and
-`io.modelcontextprotocol/agents` extensions. Their methods are in [skills.md](skills.md) and
-[agents.md](agents.md).
+`io.modelcontextprotocol/agents` extensions: the first once a plugin with a skill is served
+(SKL-44), the second once one with a skill or an agent is (AGT-1). Their methods are in [skills.md](skills.md) and [agents.md](agents.md).
 
 **HTTP-28.** Asking for a missing prompt argument by elicitation happens only on a modern
 connection whose client declared form elicitation, as in [prompts.md](prompts.md).
@@ -172,31 +172,36 @@ written only when the level is `DEBUG`.
 
 ## The mirror tools
 
-**TOOL-1.** The server registers exactly four tools, whatever the catalogue holds. Each mirrors a
-native MCP feature:
+**TOOL-1.** The server has up to four tools, each mirroring a native MCP feature. The prompt pair
+is kb's and always registered. The resource pair is kubed-mcp's plugin layer's (DLV-6), registered
+once kb adds its first plugin to the plugin set, which needs a plugin with a skill or an agent;
+until then the server has only the prompt pair. It is switched by the request's resources setting
+(DLV-2).
 
 | Tool | Mirrors | Listed when the request says |
 |---|---|---|
-| `list_resources` | `resources/list` | `?resources=off` or `X-MCP-Resources: off` |
-| `read_resource` | `resources/read` | `?resources=off` or `X-MCP-Resources: off` |
-| `list_prompts` | `prompts/list` | `?prompts=off` or `X-MCP-Prompts: off` |
-| `get_prompt` | `prompts/get` | `?prompts=off` or `X-MCP-Prompts: off` |
+| `list_resources` | `resources/list` | `Kb-Resources: off`, `X-MCP-Resources: off` or `?resources=off` |
+| `read_resource` | `resources/read` | `Kb-Resources: off`, `X-MCP-Resources: off` or `?resources=off` |
+| `list_prompts` | `prompts/list` | `Kb-Prompts: off`, `X-MCP-Prompts: off` or `?prompts=off` |
+| `get_prompt` | `prompts/get` | `Kb-Prompts: off`, `X-MCP-Prompts: off` or `?prompts=off` |
 
 **TOOL-2.** A request that declares neither sees no tools in `tools/list`. Each pair is listed
 independently of the other.
 
 **TOOL-3.** `off`, `false`, `0`, `no` and `none` declare the feature absent, ignoring case and
-surrounding space. Any other value, or none, means the client has the feature.
+surrounding space. For prompts, any other value, or none, means the client has the feature. For
+resources, `on`, `true`, `1` and `yes` declare it present, any other value is passed over for the
+next source with a warning (DLV-2), and none means the client has the feature.
 
-**TOOL-4.** The header beats the query parameter. Only the first value of the winning one counts,
-and an empty value counts as not sent.
+**TOOL-4.** The `Kb-` header beats the `X-MCP-` one, which beats the query parameter (SCP-3). Only
+the first value of the winning one counts, and an empty value counts as not sent.
 
 **TOOL-5.** Hiding is a listing decision only: a mirror tool is callable whether or not it is
 listed.
 
 **TOOL-6.** Every mirror tool is annotated `readOnlyHint: true`, `destructiveHint: false`,
-`idempotentHint: true` and `openWorldHint: false`, with a title: "List skill resources", "Read a
-skill resource", "List prompts", "Get a prompt".
+`idempotentHint: true` and `openWorldHint: false`, with a title: "List resources", "Read a
+resource", "List prompts", "Get a prompt".
 
 **TOOL-7.** A mirror tool is held to the caller's scope exactly as the feature it mirrors is. A
 scope that names nothing refuses a tool call like any other request
@@ -204,26 +209,31 @@ scope that names nothing refuses a tool call like any other request
 
 ## `list_resources` and `read_resource`
 
-**TOOL-8.** `list_resources` takes no arguments and returns the rows `resources/list` returns for
-the same request, each with `uri`, `name`, `description` and `mimeType`.
+**TOOL-8.** `list_resources` takes no arguments and returns a JSON object whose `resources` is the
+rows `resources/list` returns for the same request, each as it is on the wire. Its result shape and both tools'
+descriptions are the plugin layer's (DLV-6): they teach neither kb's URI grammar nor its scope
+settings.
 
 **TOOL-9.** `list_resources` honours `?listing=full` (or `Kb-Listing: full`, `?skills=full`,
 `X-Skill-Listing: full`) exactly as `resources/list` does. Without it the listing is indexes, as in
 [skills.md](skills.md).
 
-**TOOL-10.** `read_resource` takes one argument, `uri`, and returns the text `resources/read`
-returns for that URI.
+**TOOL-10.** `read_resource` takes one argument, `uri`, and reads it through `resources/read`, so
+the same middleware, scope and addressing apply. Text comes back as text, a `text/*` or SVG blob
+that is UTF-8 as its text, an image blob as image content, and any other blob as a JSON description
+saying it is not returned as text (DLV-6).
 
 **TOOL-11.** Both tools apply the request's resource prefix to the addresses in their text, as
-`resources/read` does. Addressing is in [skills.md](skills.md).
+`resources/read` does, and `list_resources` writes it into each row's `uri` as well. Addressing is
+in [skills.md](skills.md).
 
-**TOOL-12.** A `read_resource` that finds nothing is an error result (`isError: true`) reading
-`No resource at '<uri>'. <hint>`. The hint names the file to read instead when the URI is a
-directory in the caller's scope, and otherwise says to call `list_resources()`.
+**TOOL-12.** A `read_resource` that finds nothing is an error result (`isError: true`) carrying the
+message `resources/read` fails with: `Resource not found: '<uri>'. <hint>` when the URI is a
+directory in the caller's scope (SKL-34), and `Resource not found: '<uri>'` otherwise.
 
 **TOOL-13.** An out-of-scope URI and an absent one give the same `read_resource` error.
 
-**TOOL-14.** A missed `read_resource` is logged at `DEBUG` only, with no traceback.
+**TOOL-14.** A missed `read_resource` is logged with no traceback.
 
 ## `list_prompts` and `get_prompt`
 

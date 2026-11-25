@@ -51,20 +51,22 @@ directory, or resolves outside the tree through a symlink, the plugin fails with
 
 ## What a plugin serves
 
-**PLG-9.** `skills`, `prompts` and `files` are glob patterns relative to the plugin root. Loading
-the config refuses an empty pattern, an absolute one, and one with a `..` segment.
+**PLG-9.** `prompts` and `files` are glob patterns relative to the plugin root. `skills` is a list
+of folders relative to the plugin root, each a skill or holding skills one level down (SKL-1), and
+never a glob: loading the config refuses an item holding `*`, `?` or `[` (CFG-14). Loading the
+config refuses an empty item of any of the three, an absolute one, and one with a `..` segment.
 
-| The key | Means |
-|---|---|
-| absent | the conventions, the manifest and the entry, merged per kind (PLG-17) |
-| a list | exactly these patterns, replacing the conventions |
-| `[]` | serve nothing of this kind |
+| The key | `prompts`, `files` | `skills` |
+|---|---|---|
+| absent | the conventions, the manifest and the entry, merged per kind (PLG-17) | `skills/`, then the manifest's and the entry's folders (PLG-17) |
+| a list | exactly these patterns, replacing the conventions | these folders as well, after the manifest's and the entry's (LIB-33) |
+| `[]` | serve nothing of this kind | serve no skill, and no agent either (LIB-33) |
 
 **PLG-10.** `files` has no convention. A plugin serves library files only when a `files` list
 names them.
 
-**PLG-11.** A pattern whose last component is `**` is read as `**/*`, so it matches files on every
-Python version.
+**PLG-11.** A `prompts` or `files` pattern whose last component is `**` is read as `**/*`, so it
+matches files on every Python version.
 
 **PLG-12.** A `dialect` other than `auto` reads every prompt file of the plugin in that dialect, and
 an object-map command is `claude` whatever the plugin's `dialect` says (PLG-21). With `auto`, a file
@@ -101,7 +103,7 @@ the first rule that applies:
 
 | Kind | Rule |
 |---|---|
-| skills | a declared plugin's own `skills:` is exactly what it serves (LIB-33); an entry at the marketplace root that lists `skills` serves the entry's and the manifest's, without the conventions (LIB-32); a manifest or an entry that lists `skills` adds to the conventions, the manifest's then the entry's (PLG-20, LIB-30); otherwise the conventions |
+| skills | a declared plugin's own `skills: []` serves none (LIB-33); otherwise `skills/`, then the folders the manifest lists (PLG-20), then the entry's (LIB-30), then a declared plugin's own `skills:` (LIB-33), the first claim winning (SKL-1) |
 | prompts | a declared plugin's own `prompts:` is exactly what it serves (LIB-33); a manifest or an entry that sets `commands` serves the manifest's then the entry's, without the conventions (PLG-21, LIB-30); otherwise the conventions |
 | agents | a plugin with neither a manifest nor an entry has none (AGT-4); a manifest or an entry that sets `agents` names the manifest's then the entry's (PLG-22, LIB-30); otherwise the `agents/` folder |
 
@@ -291,15 +293,19 @@ later plugin **conflicts** with the claims when:
 **LIB-29.** A conflicting plugin serves nothing in that library. The earlier plugin keeps serving,
 and the library's `conflicts` in `/health` maps the later plugin's id to
 `conflict: <uri or prompt name> is already served by plugin '<owner>'`. The same plugin serves
-normally in every other library. A failed plugin (PLG-19) claims nothing.
+normally in every other library. A failed plugin (PLG-19) claims nothing. A plugin that kubed-mcp's
+plugin layer refuses to add (SKL-58), such as one whose namespace lies inside another plugin's
+skill, is reported the same way, as `conflict: <reason>`, the reason naming no cache path and no
+credential. Its skills and agents then read as absent in that library, and the library's `skills`
+and `agents` counts leave them out; its prompts and its library files still serve.
 
 ## Reading a plugin the way Claude Code does
 
 These requirements make one `plugin.json` mean the same in kb as in Claude Code, for the kinds kb
 serves.
 
-**PLG-20.** A manifest `skills` list **adds** to the default skill scan, across all of kb's skill
-roots. `"."` and `"./"` name the plugin root.
+**PLG-20.** A manifest `skills` list **adds** folders to the scan of `skills/`, each read as
+SKL-1 reads a declared folder. `"."` and `"./"` name the plugin root.
 
 **PLG-21.** A manifest `commands` **replaces** the default prompt scan, across all of kb's prompt
 conventions. It may be a path, a list of paths, or an **object map**. In a map, the key is the
@@ -387,8 +393,7 @@ never connects to, starts or forwards a server.
 `hooks`, `outputStyles` or `themes` is a conflict: the plugin fails (PLG-19) with the error
 `conflicting manifests`. An entry with `strict: false` that names none of them is ordinary.
 
-**LIB-32.** An entry whose `source` is the marketplace root and that lists `skills` serves those
-and its manifest's `skills`, and the default skill scan is off for it.
-
-**LIB-33.** A declared plugin's own `skills:` and `prompts:` override its manifest and the
-conventions completely, per kind.
+**LIB-33.** A declared plugin's own `skills:` folders **add** to `skills/` and to its manifest's
+folders, after them, as an entry's do. `skills: []` serves no skill: the plugin is never added to
+the plugin layer, so none of its agents is served either. Its own `prompts:` overrides its manifest
+and the conventions completely.

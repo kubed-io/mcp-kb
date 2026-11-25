@@ -98,11 +98,15 @@ async def test_get_returns_the_definition(tmp_path, mode):
         got = _ours(await request(client, "agents/get", name="drawio_diagrammer"))
         again = _ours(await request(client, "agents/get", name="drawio_diagrammer"))
     assert got == again
+    # N5: kubed-mcp's own key beside kb's, which is today's.
+    theirs = got["_meta"].pop("io.kubed/agent")
+    assert theirs["frontmatter"]["name"] == "diagrammer"
     assert got == {
         **ENVELOPE,
         "agent": "drawio_diagrammer",
+        # N10: kubed-mcp trims the body.
         "instructions": (
-            "Read skill://drawio/drawio/SKILL.md in ${CLAUDE_PROJECT_DIR}.\n"
+            "Read skill://drawio/drawio/SKILL.md in ${CLAUDE_PROJECT_DIR}."
         ),
         "modelRoutingHint": {"role": "medium", "vision": False},
         "tools": [],
@@ -326,8 +330,9 @@ async def test_a_prefix_reaches_instructions_only(url):
         got = await request(client, "agents/get", name="drawio_diagrammer")
         listing = await request(client, "agents/list")
 
+    # N10: kubed-mcp trims the body.
     assert got["instructions"] == (
-        "Read kb+skill://drawio/drawio/SKILL.md in ${CLAUDE_PROJECT_DIR}.\n"
+        "Read kb+skill://drawio/drawio/SKILL.md in ${CLAUDE_PROJECT_DIR}."
     )
     meta = got["_meta"]["io.kubed.mcp-kb/agent"]
     assert meta["frontmatter"] == {

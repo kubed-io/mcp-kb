@@ -339,7 +339,14 @@ def _live_tools() -> list:
             }
         )
         app = create_app(KnowledgeBase(config, tmp / "cache"))
-        found = asyncio.run(app.server.list_tools(run_middleware=False))
+
+        async def tools():
+            # kubed-mcp's resource pair (DLV-6), which it lists only to a
+            # client that turned resources off, then kb's own.
+            found = [await app.get_tool(name) for name in tools_module.RESOURCE_TOOLS]
+            return found + await app.server.list_tools(run_middleware=False)
+
+        found = asyncio.run(tools())
         return [tool.to_mcp_tool() for tool in found]
 
 
@@ -353,14 +360,14 @@ def _reveals() -> dict[str, tuple[str, str, str]]:
     resources = (
         "Resource mirror",
         request_module.RESOURCES_PARAM,
-        request_module.RESOURCES_HEADER,
+        request_module.RESOURCES_KB_HEADER,
     )
     prompts = (
         "Prompt mirror",
         request_module.PROMPTS_PARAM,
-        request_module.PROMPTS_HEADER,
+        request_module.PROMPTS_KB_HEADER,
     )
-    pairs = dict.fromkeys(sorted(tools_module.MIRROR_TOOLS), resources)
+    pairs = dict.fromkeys(sorted(tools_module.RESOURCE_TOOLS), resources)
     pairs.update(dict.fromkeys(sorted(prompts_module.PROMPT_TOOLS), prompts))
     return pairs
 
