@@ -22,95 +22,76 @@ target is the MCP prompt itself (§C1.34).
 
 The exposed name is ``<library>_<name>``, and the name below the library is
 decided where the prompt was found (PLG-25, ``prompt_name``): the folders below
-a commands directory and the file stem, an object map's key, or the stem
+a commands directory and the file stem, or the stem
 alone. Prompt names are one flat namespace per server, and two libraries
 shipping a ``debug.md`` must not collide the way two skills named ``testing``
 otherwise would.
 
-A ``PromptSource`` is what is loaded: a file and the name it was found under,
-or -- for a manifest's object-map command -- a body written inline in the
-manifest, which is fetched text like any file and never run.
+Nothing here reads a file. The plugin layer reads each prompt file kb's
+harvest selected and hands its text to kb's command reader, which parses it
+with ``parse_prompt`` in the dialect ``dialect_of`` decides (PRM-18). Qualified
+names and ``${CLAUDE_PLUGIN_ROOT}`` are rendered into the body when a build is
+made; ``FilePrompt.render`` fills in the dialect's own placeholders and nothing
+else (PRM-47).
 
 ``FilePrompt`` here is a plain dataclass -- the catalogue's own parsed form,
-with no pydantic and no FastMCP base class -- so ``catalogue/snapshot.py`` and
-``catalogue/index.py`` can hold and serialise it without importing FastMCP at
-all. ``kubed/mcp_kb/mcp/prompts.py`` is where a ``FilePrompt`` becomes
-something FastMCP can serve.
+with no pydantic and no FastMCP base class -- so ``catalogue/snapshot.py`` can
+hold it without importing FastMCP at all. ``kubed/mcp_kb/mcp/prompts.py`` is
+where a ``FilePrompt`` becomes something FastMCP can serve.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 import frontmatter
 import yaml
 
-from .. import placeholders
 from ..harvest import COMMAND_DIRS
-from ..names import QualifiedNames
 from . import claude, copilot, detect, mcpkb
 from .mcpkb import PLACEHOLDER
 from .shape import Argument, Parsed
 
 log = logging.getLogger(__name__)
 
+# What a malformed prompt's text raises; a file's read adds OSError to it.
+READ_ERRORS = (ValueError, TypeError, yaml.YAMLError)
+
 DIALECTS = {module.NAME: module for module in (mcpkb, claude, copilot)}
 
 __all__ = [
     "DIALECTS",
     "PLACEHOLDER",
+    "READ_ERRORS",
     "Argument",
     "FilePrompt",
     "MissingArguments",
     "Parsed",
-    "PromptSource",
-    "load_prompt",
-    "load_prompts",
+    "dialect_of",
+    "parse_prompt",
     "prompt_name",
     "stem",
 ]
-
-
-@dataclass(frozen=True)
-class PromptSource:
-    """One prompt to load: where it is, and what it is called below its library.
-
-    ``path`` is the file; for an inline body (``content``, PLG-21) it is the
-    manifest the body came from, which is what ``/health`` names it by and is
-    never read for it. ``description`` and ``argument_hint`` are a manifest's
-    word on the prompt, and replace the body's own frontmatter keys.
-    """
-
-    path: Path
-    name: str
-    content: str | None = None
-    description: str | None = None
-    argument_hint: str | None = None
 
 
 @dataclass
 class FilePrompt:
     """One prompt file, rendered by substituting its placeholders.
 
-    ``path`` is where it was read from. It is carried on the prompt rather than
-    only known to the harvester so a rebuild can record it in the index and
-    re-parse exactly the files a plugin yielded last time.
+    ``path`` is where its text was read from, which ``detect`` reads the suffix
+    of; the text itself is ``template``, the body as the build rendered it.
 
     ``plugin``, ``category`` and ``tags`` are the plugin's: what a scope matches
     a prompt on, since a prompt has no library of its own beyond the one that
     named it.
 
-    ``live`` says the file is revalidated against its server as it is rendered,
-    so the *body* is re-read from disk instead of taken from ``template``. The
-    arguments are not re-read: they are what the harvest recorded, so declaring
-    a new one still needs a refresh.
-
-    ``dialect`` is which module renders it, decided once at load: the body's
-    placeholders mean different things in each, so it travels with the prompt
-    rather than being sniffed again per render.
+    ``dialect`` is which module renders it, decided when the plugin is read:
+    the body's placeholders mean different things in each, so it travels with
+    the prompt rather than being sniffed again per render, and a build's
+    re-read reads in it too.
     """
 
     path: Path
@@ -124,39 +105,10 @@ class FilePrompt:
     tags: set[str] = field(default_factory=set)
     category: str | None = None
     library_categories: frozenset[str] = frozenset()
-    live: bool = False
     defaults: dict[str, str] = field(default_factory=dict)
     dialect: str = mcpkb.NAME
 
-    def body(self) -> str:
-        """The template to render: off disk for a live prompt, memory otherwise.
-
-        A file that has become unreadable or lost its frontmatter falls back to
-        the body last harvested -- the same rule the rest of live mode follows,
-        that a server in trouble degrades to the copy already known good.
-
-        ``yaml.YAMLError`` is in that list because it is the likeliest of them:
-        a file saved mid-edit has a frontmatter block that does not parse, and
-        that is not a ``ValueError``. Serving the last good template is the
-        promise above; raising out of ``render`` would make ``prompts/get`` an
-        internal error until somebody finished typing.
-        """
-        if not self.live:
-            return self.template
-        try:
-            return _split(self.path.read_text(encoding="utf-8"))[1]
-        except (OSError, ValueError, yaml.YAMLError) as exc:
-            log.warning("re-reading prompt %s: %s", self.path, exc)
-            return self.template
-
-    def render(
-        self,
-        arguments: dict[str, object] | None = None,
-        *,
-        plugin_root: str | None = None,
-        skills: Mapping[str, str] | None = None,
-        names: QualifiedNames | None = None,
-    ) -> str:
+    def render(self, arguments: dict[str, object] | None = None) -> str:
         """Fill in the placeholders, raising ``MissingArguments`` on a missing one.
 
         ``values`` is built from ``self.arguments`` rather than from what was
@@ -164,18 +116,10 @@ class FilePrompt:
         declared them: Claude's `$1` is the first declared name, and that order
         is knowable nowhere else.
 
-        Given ``plugin_root``, the placeholders naming this server's own
-        material are resolved after the dialect's own (§C1.37); every other
-        `${…}` is the client's and stays as written. ``skills`` maps this
-        plugin's skill directories to their addresses, so a path through the
-        root into one renders as that skill's address. Rendered literally, as
-        ``skill://<library>/skills/x/…``, it would read as nothing: a skill's
-        files are served only at the skill's own address. Without
-        ``plugin_root`` the map does nothing.
-
-        Given ``names``, the plugin-qualified skill names in the body are
-        rewritten to their addresses. That happens to the template, before
-        the dialect runs, so an argument's value is never rewritten.
+        The dialect's placeholders are all that is filled in here. Qualified
+        names and ``${CLAUDE_PLUGIN_ROOT}`` were rendered into ``template``
+        when the build was made, so an argument's value is never rewritten,
+        whatever it holds (PRM-47).
 
         Plain and synchronous: the FastMCP-facing wrapper is what turns this
         into the async ``render`` a ``Prompt`` subclass must provide, and what
@@ -198,15 +142,7 @@ class FilePrompt:
             arg.name: given.get(arg.name, self.defaults.get(arg.name, ""))
             for arg in self.arguments
         }
-        template = self.body()
-        if names is not None:
-            template = names.rewrite(template)
-        text = DIALECTS[self.dialect].substitute(template, values)
-        if plugin_root is not None:
-            text = placeholders.substitute(
-                text, plugin_root=plugin_root, skills=skills
-            )
-        return text
+        return DIALECTS[self.dialect].substitute(self.template, values)
 
 
 class MissingArguments(ValueError):
@@ -226,7 +162,7 @@ TOO_DEEP = "frontmatter is nested too deeply to read"
 
 
 class _NoFrontmatter(ValueError):
-    """No frontmatter block at all: a file's failure, an inline body's choice."""
+    """No frontmatter block at all: a file's failure."""
 
 
 def _split(text: str) -> tuple[dict, str]:
@@ -311,69 +247,89 @@ def prompt_name(path: Path, root: Path, command_dirs: Sequence[str]) -> str:
     return "_".join((*parts[depth:-1], stem(path)))
 
 
-def _source(source: Path | PromptSource) -> PromptSource:
-    """A bare path is a file named by its stem, as every caller before PLG-25."""
-    if isinstance(source, PromptSource):
-        return source
-    return PromptSource(path=source, name=stem(source))
-
-
-def _inline(content: str) -> tuple[dict, str]:
-    """An inline body's frontmatter and body: unlike a file's, the block is optional.
-
-    Only an absent block is forgiven. One that does not parse raises, as a
-    file's does, and the command is skipped.
-    """
-    try:
-        return _split(content)
-    except _NoFrontmatter:
-        return {}, content
-
-
-def load_prompt(
-    source: Path | PromptSource,
-    library: str,
+def parse_prompt(
+    text: str,
+    path: Path,
     *,
+    name: str,
+    library: str,
     plugin: str = "",
     tags: Sequence[str] = (),
     category: str | None = None,
     library_categories: frozenset[str] = frozenset(),
-    live: bool = False,
     dialect: str = detect.AUTO,
 ) -> FilePrompt:
-    """Parse one prompt, raising ValueError on anything malformed.
+    """Parse one prompt from its ``text``, which is never read from ``path``.
 
-    ``source`` is a ``PromptSource``, or a bare file path named by its stem.
-    ``library`` is the library this prompt joins; ``plugin``, ``tags`` and
-    ``category`` are the plugin's, carried as given -- nothing is added to
-    them. ``dialect`` is what the config says the file is written in, and
-    ``"auto"`` -- the usual answer -- leaves it to ``detect``.
-
-    An inline body is never live, whatever ``live`` says: there is no file of
-    its own to revalidate, and re-reading the manifest would serve JSON.
+    ``name`` is the full served name, ``<library>_<name below it>``. ``path``
+    only says where the text came from, and ``detect`` reads its suffix.
+    Raises one of ``READ_ERRORS`` for a malformed one.
     """
-    source = _source(source)
-    path = source.path
-    if source.content is None:
-        meta, body = _split(path.read_text(encoding="utf-8"))
-    else:
-        meta, body = _inline(source.content)
-        live = False
-    # The manifest's later word on the prompt, put where the dialect reads it,
-    # so its hint becomes the free-text argument's description the same way
-    # the file's own would (PLG-21).
-    if source.description is not None:
-        meta = {**meta, "description": source.description}
-    if source.argument_hint is not None:
-        meta = {**meta, "argument-hint": source.argument_hint}
+    meta, body = _split(text)
+    return _build(
+        meta,
+        body,
+        path,
+        name=name,
+        library=library,
+        plugin=plugin,
+        tags=tags,
+        category=category,
+        library_categories=library_categories,
+        dialect=dialect,
+    )
 
-    name = detect.dialect_for(path, meta, body, dialect)
-    if name is None:
+
+def dialect_of(rel: str, *, configured: str, claude: Collection[str]) -> str:
+    """The dialect a harvested file is read in: the plugin's, else how it was found.
+
+    ``rel`` is the file's path below its plugin root, in posix form (PRM-14,
+    rules 2 to 5). ``configured`` is the plugin's ``dialect``; ``claude`` holds
+    the paths a ``commands`` declaration matched. ``"auto"`` leaves the rest to
+    ``detect``.
+
+    A file a publisher called a command is Claude's wherever it put it:
+    penpot declares seven under ``prompts/``, and left to the body a
+    description-only one would read as this server's own dialect. A config's
+    own ``prompts:`` glob is not a command declaration and puts nothing in
+    ``claude``.
+
+    A ``.prompt.md`` is the exception to the last two: a filename that names its
+    own dialect beats the directory it sits in, so ``detect`` reads it as
+    Copilot's.
+    """
+    if configured != detect.AUTO:
+        return configured
+    if rel.endswith(detect.COPILOT_SUFFIX):
+        return detect.AUTO
+    if any(rel.startswith(f"{d}/") for d in COMMAND_DIRS):
+        return "claude"
+    if rel in claude:
+        return "claude"
+    return detect.AUTO
+
+
+def _build(
+    meta: dict,
+    body: str,
+    path: Path,
+    *,
+    name: str,
+    library: str,
+    plugin: str,
+    tags: Sequence[str],
+    category: str | None,
+    library_categories: frozenset[str],
+    dialect: str,
+) -> FilePrompt:
+    """A ``FilePrompt`` from split text: the dialect decided, then read."""
+    chosen = detect.dialect_for(path, meta, body, dialect)
+    if chosen is None:
         raise ValueError(f"not a prompt: has `{detect.not_a_prompt(meta)}`")
-    if name not in DIALECTS:
-        raise ValueError(f"unknown dialect '{name}'")
+    if chosen not in DIALECTS:
+        raise ValueError(f"unknown dialect '{chosen}'")
 
-    parsed = DIALECTS[name].parse(meta, body)
+    parsed = DIALECTS[chosen].parse(meta, body)
     if parsed.dropped:
         log.debug(
             "prompt %s: ignoring %s (no meaning over MCP)",
@@ -383,8 +339,7 @@ def load_prompt(
 
     return FilePrompt(
         path=path,
-        live=live,
-        name=f"{library}_{source.name}",
+        name=name,
         description=parsed.description,
         title=parsed.title,
         arguments=parsed.arguments,
@@ -395,50 +350,6 @@ def load_prompt(
         library_categories=library_categories,
         template=body,
         defaults=parsed.defaults,
-        dialect=name,
+        dialect=chosen,
     )
 
-
-def load_prompts(
-    sources: Sequence[Path | PromptSource],
-    *,
-    library: str,
-    plugin: str = "",
-    tags: Sequence[str] = (),
-    category: str | None = None,
-    library_categories: frozenset[str] = frozenset(),
-    live: bool = False,
-    dialect: str = detect.AUTO,
-    skipped: list[tuple[Path, str]] | None = None,
-) -> list[FilePrompt]:
-    """Every prompt ``harvest`` already found for one plugin, joined to a library.
-
-    ``library`` is the library the prompts join. They are loaded in the order
-    given, which is the caller's to decide: it is the order a name clash is
-    settled in. A broken one is skipped rather than raised: a bad prompt must
-    not take the skills down with it. Given ``skipped``, each one is added to
-    it as ``(path, reason)`` for the caller to report once, in ``/health`` and
-    the log; without it, it is logged here.
-    """
-    prompts: list[FilePrompt] = []
-    for source in map(_source, sources):
-        path = source.path
-        try:
-            prompts.append(
-                load_prompt(
-                    source,
-                    library,
-                    plugin=plugin,
-                    tags=tags,
-                    category=category,
-                    library_categories=library_categories,
-                    live=live,
-                    dialect=dialect,
-                )
-            )
-        except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
-            if skipped is None:
-                log.warning("skipping prompt %s: %s", path, exc)
-            else:
-                skipped.append((path, str(exc)))
-    return prompts

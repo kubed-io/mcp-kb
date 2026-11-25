@@ -5,26 +5,33 @@ kubed-io/skills in the parts that matter -- and is imported by the tests that
 serve it.
 """
 
+import asyncio
+import importlib
 import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue.agents import (
-    Agent,
-    AgentRoster,
     ParsedAgent,
     parse_agent,
     routing_hint,
 )
-from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex
 from kubed.mcp_kb.catalogue.snapshot import build_snapshot
-from kubed.mcp_kb.catalogue.uris import Catalogue
+from kubed.mcp_kb.catalogue.uris import AGENT_META
 from kubed.mcp_kb.config import Config
-from kubed.mcp_kb.mcp.scope import Scope
+from tests.conftest import (
+    ext_request,
+    http_client,
+    read_served,
+    run_client,
+    serve_http,
+    server_of,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -413,19 +420,30 @@ def _entries(tree: AgentsTree, before=(), after=()) -> None:
     _write(market, ".claude-plugin/marketplace.json", json.dumps(catalog))
 
 
+def _served(knowledge_base: KnowledgeBase) -> dict[str, dict]:
+    """Every agent the served app gives an unscoped caller: name -> agents/get."""
+
+    async def read(client) -> dict[str, dict]:
+        cards = (await ext_request(client, "agents/list"))["agents"]
+        return {
+            card["name"]: await ext_request(client, "agents/get", name=card["name"])
+            for card in cards
+        }
+
+    return run_client(knowledge_base, read)
+
+
 def _names(knowledge_base: KnowledgeBase, library: str) -> list[str]:
-    cards = knowledge_base.catalogue.agent_cards(Scope.parse(library=library))
-    return [card["name"] for card in cards]
+    """The served agents of ``library``: every one's name starts ``<library>_``."""
+    return sorted(n for n in _served(knowledge_base) if n.startswith(f"{library}_"))
 
 
-def _owners(knowledge_base: KnowledgeBase) -> dict[str, str]:
-    """Each served agent's name in ``drawio``, mapped to its plugin."""
-    catalogue = knowledge_base.catalogue
+def _owners(knowledge_base: KnowledgeBase, library: str = "drawio") -> dict[str, str]:
+    """Each served agent's name in ``library``, mapped to its plugin."""
     return {
-        name: catalogue.agent_definition(name)["_meta"]["io.kubed.mcp-kb/agent"][
-            "plugin"
-        ]
-        for name in _names(knowledge_base, "drawio")
+        name: got["_meta"][AGENT_META]["plugin"]
+        for name, got in _served(knowledge_base).items()
+        if name.startswith(f"{library}_")
     }
 
 
@@ -488,13 +506,7 @@ def _mix(tree: AgentsTree) -> Config:
 def test_a_clash_on_the_renamed_name_is_unserved(tmp_path):
     knowledge_base = KnowledgeBase(_mix(agents_tree(tmp_path)), tmp_path / "cache")
 
-    catalogue = knowledge_base.catalogue
-    owners = {
-        name: catalogue.agent_definition(name)["_meta"]["io.kubed.mcp-kb/agent"][
-            "plugin"
-        ]
-        for name in _names(knowledge_base, "mix")
-    }
+    owners = _owners(knowledge_base, "mix")
     assert owners["mix_diagrammer"] == "drawio@drawio"
     assert owners["mix_diagrammer@extra"] == "extra@drawio"
     library = knowledge_base.status["libraries"]["mix"]
@@ -582,15 +594,21 @@ def test_a_prepended_plugin_takes_the_short_name(tmp_path):
 
 def test_a_conflicting_plugin_serves_no_agents(tmp_path):
     tree = agents_tree(tmp_path)
-    skill = "---\nname: drawio\ndescription: Again.\n---\nAgain.\n"
+    # A skill of `copy` sits in its own folder (SKL-59), so what it collides on
+    # is a prompt name an earlier plugin of the library already serves.
+    command = "---\ndescription: Draw.\n---\nDraw.\n"
     _entries(
         tree,
+        before=[("first", {"commands/draw.md": command})],
         after=[
-            ("copy", {"skills/drawio/SKILL.md": skill, "agents/c.md": _agent("clone")})
+            ("copy", {"commands/draw.md": command, "agents/c.md": _agent("clone")})
         ],
     )
 
     knowledge_base = tree.knowledge_base(tmp_path / "cache")
+    # The prompt clash is the plugin layer's refusal, made as the set is
+    # published (LIB-29).
+    server_of(knowledge_base)
 
     library = knowledge_base.status["libraries"]["drawio"]
     assert "copy@drawio" in library["conflicts"]
@@ -613,25 +631,42 @@ def test_counts(tmp_path):
 
 
 def test_cards_and_definition_under_scope(tmp_path):
-    catalogue = agents_tree(tmp_path).knowledge_base(tmp_path / "cache").catalogue
+    """AGT-15: a scope admits an agent as it admits its plugin."""
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
 
-    assert catalogue.agent_cards(Scope.parse(tags="diagrams")) == [
+    async def read(url):
+        async with http_client(url + "?tag=diagrams") as client:
+            diagrams = (await ext_request(client, "agents/list"))["agents"]
+        async with http_client(url + "?category=other") as client:
+            other = (await ext_request(client, "agents/list"))["agents"]
+        async with http_client(url + "?tag=extra") as client:
+            with pytest.raises(MCPError) as hidden:
+                await ext_request(client, "agents/get", name="drawio_diagrammer")
+            with pytest.raises(MCPError) as absent:
+                await ext_request(client, "agents/get", name="nobody")
+        return diagrams, other, hidden.value, absent.value
+
+    with serve_http(knowledge_base) as url:
+        diagrams, other, hidden, absent = asyncio.run(read(url))
+
+    assert diagrams == [
         {
             "name": "drawio_diagrammer",
             "description": "Draws diagrams.",
             "capabilities": [],
         }
     ]
-    other = catalogue.agent_cards(Scope.parse(categories="other"))
     assert [c["name"] for c in other] == [
         "drawio_db_migrator",
         "drawio_diagrammer@extra",
         "drawio_twin",
     ]
-    extra = Scope.parse(tags="extra")
-    assert catalogue.agent_definition("drawio_diagrammer", extra) is None
-    assert catalogue.agent_definition("nobody") is None
-    assert [c["name"] for c in catalogue.agent_cards()] == [
+    assert (hidden.code, hidden.message, hidden.data) == (
+        absent.code,
+        absent.message,
+        absent.data,
+    )
+    assert sorted(_served(knowledge_base)) == [
         "drawio_db_migrator",
         "drawio_diagrammer",
         "drawio_diagrammer@extra",
@@ -640,38 +675,43 @@ def test_cards_and_definition_under_scope(tmp_path):
     ]
 
 
+KB_META = {
+    "plugin": "drawio@drawio",
+    "library": "drawio",
+    "path": "agents/diagrammer.md",
+    "frontmatter": {
+        "name": "diagrammer",
+        "description": "Draws diagrams.",
+        "model": "sonnet",
+        "color": "cyan",
+    },
+    "servers": ["drawio"],
+    "skills": {},
+}
+
+
 def test_the_definition(tmp_path):
-    catalogue = agents_tree(tmp_path).knowledge_base(tmp_path / "cache").catalogue
+    """AGT-9 as kubed-mcp serves it: ``instructions`` is trimmed (N10), and
+    ``_meta`` carries kubed-mcp's key beside kb's (N5)."""
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
 
-    definition = catalogue.agent_definition("drawio_diagrammer")
+    definition = _served(knowledge_base)["drawio_diagrammer"]
 
-    assert definition == {
-        "agent": "drawio_diagrammer",
-        "instructions": (
-            "Read skill://drawio/drawio/SKILL.md in ${CLAUDE_PROJECT_DIR}.\n"
-        ),
-        "modelRoutingHint": {"role": "medium", "vision": False},
-        "tools": [],
-        "_meta": {
-            "io.kubed.mcp-kb/agent": {
-                "plugin": "drawio@drawio",
-                "library": "drawio",
-                "path": "agents/diagrammer.md",
-                "frontmatter": {
-                    "name": "diagrammer",
-                    "description": "Draws diagrams.",
-                    "model": "sonnet",
-                    "color": "cyan",
-                },
-                "servers": ["drawio"],
-                "skills": {},
-            }
-        },
-    }
+    assert definition["agent"] == "drawio_diagrammer"
+    assert definition["instructions"] == (
+        "Read skill://drawio/drawio/SKILL.md in ${CLAUDE_PROJECT_DIR}."
+    )
+    assert definition["modelRoutingHint"] == {"role": "medium", "vision": False}
+    assert definition["tools"] == []
+    assert definition["_meta"][AGENT_META] == KB_META
+    assert definition["_meta"]["io.kubed/agent"]["frontmatter"] == KB_META[
+        "frontmatter"
+    ]
 
 
 def test_a_blank_body_and_no_model_leave_their_fields_out(tmp_path):
     root = tmp_path / "kit"
+    # Agents alone, no skill: a plugin serving only agents is added too.
     _write(root, "agents/quiet.md", "---\nname: quiet\ndescription: d\n---\n\n  \n")
     _write(root, ".claude-plugin/plugin.json", json.dumps({"name": "kit"}))
     config = Config.model_validate(
@@ -681,16 +721,16 @@ def test_a_blank_body_and_no_model_leave_their_fields_out(tmp_path):
         }
     )
 
-    catalogue = KnowledgeBase(config, tmp_path / "cache").catalogue
+    definition = _served(KnowledgeBase(config, tmp_path / "cache"))["kit_quiet"]
 
-    definition = catalogue.agent_definition("kit_quiet")
-    assert set(definition) == {"agent", "tools", "_meta"}
-    assert definition["_meta"]["io.kubed.mcp-kb/agent"]["servers"] == []
+    assert "instructions" not in definition
+    assert "modelRoutingHint" not in definition
+    assert definition["_meta"][AGENT_META]["servers"] == []
 
 
 def test_a_row_that_no_longer_parses_is_reported_and_keeps_its_claim(tmp_path):
     """A cold start serves the rows the index recorded; a file that broke since
-    is reported under its plugin, and the names around it do not move."""
+    is reported under its plugin, and kb's roster keeps its claim."""
     knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
     drawio = tmp_path / "market/plugins/drawio/agents/diagrammer.md"
     drawio.write_text("---\nname: diagrammer\n---\nNo description now.\n")
@@ -710,11 +750,27 @@ def test_a_row_that_no_longer_parses_is_reported_and_keeps_its_claim(tmp_path):
         "path": "agents/diagrammer.md",
         "reason": "agent frontmatter has no description",
     } in plugin["skipped"]
-    names = [c["name"] for c in snapshot.catalogue.agent_cards()]
+    names = [a.name for a in snapshot.catalogue.agents.visible()]
     assert "drawio_diagrammer" not in names
     assert "drawio_diagrammer@extra" in names
     assert snapshot.status["libraries"]["drawio"]["agents"] == 3
     assert str(tmp_path / "cache") not in json.dumps(snapshot.status)
+
+
+def test_a_broken_agent_frees_its_name_on_a_cold_start(tmp_path):
+    """N11: kubed-mcp reads each file when its plugin is added, so an agent that
+    no longer parses claims nothing, and the next one takes the short name."""
+    tree = agents_tree(tmp_path)
+    tree.knowledge_base(tmp_path / "cache")
+    drawio = tmp_path / "market/plugins/drawio/agents/diagrammer.md"
+    drawio.write_text("---\nname: diagrammer\n---\nNo description now.\n")
+
+    knowledge_base = tree.knowledge_base(tmp_path / "cache")
+
+    owners = _owners(knowledge_base)
+    assert owners["drawio_diagrammer"] == "extra@drawio"
+    assert "drawio_diagrammer@extra" not in owners
+    assert "renamed" not in knowledge_base.status["libraries"]["drawio"]
 
 
 def test_renames_and_unserved_agents_are_logged_once(tmp_path, caplog):
@@ -731,59 +787,220 @@ def test_renames_and_unserved_agents_are_logged_once(tmp_path, caplog):
     assert "mix_diagrammer@extra" not in caplog.text
 
 
-def test_a_live_agent_is_reread(tmp_path, caplog):
-    """An agent of a live fetch is revalidated, then parsed again (AGT-16).
+# -- served by kubed-mcp (D11) -------------------------------------------------
 
-    The stub stands in for the revalidator: what it writes is what a server
-    that moved would have brought down.
-    """
-    root = tmp_path / "kit"
-    _write(root, "agents/a.md", _agent("a"))
-    path = root / "agents/a.md"
-    upstream: list[str] = []
-    asked: list[Path] = []
 
-    def revalidate(target: Path) -> None:
-        asked.append(target)
-        if upstream:
-            target.write_text(upstream.pop(0))
+def test_agent_names_are_kbs(tmp_path):
+    """Review Focus 5: kubed-mcp's names across the set are kb's per library."""
+    knowledge_base = KnowledgeBase(_mix(agents_tree(tmp_path)), tmp_path / "cache")
+    roster = sorted(a.name for a in knowledge_base.catalogue.agents.visible())
 
-    def agent(name: str, live: bool) -> Agent:
-        return Agent(
-            name=name,
-            library="kit",
-            plugin="kit",
-            root=root,
-            path=path,
-            parsed=parse_agent(path),
-            servers=(),
-            category=None,
-            tags=frozenset(),
-            live=live,
+    assert sorted(_served(knowledge_base)) == roster
+    assert "mix_diagrammer@extra" in roster
+    assert "drawio_diagrammer@extra" in roster
+    libraries = knowledge_base.status["libraries"]
+    assert libraries["drawio"]["renamed"] == {
+        "drawio_diagrammer@extra": (
+            "drawio_diagrammer is already served by plugin 'drawio@drawio'"
         )
+    }
+    assert libraries["mix"]["renamed"] == {
+        "mix_diagrammer@extra": (
+            "mix_diagrammer is already served by plugin 'drawio@drawio'"
+        )
+    }
+    assert libraries["mix"]["unserved"] == [
+        {
+            "plugin": "extra@other",
+            "path": "agents/diagrammer.md",
+            "reason": "mix_diagrammer@extra is already served by plugin 'extra@drawio'",
+        }
+    ]
 
-    catalogue = Catalogue(
-        SkillIndex([]),
-        LibraryFiles(),
-        revalidate,
-        agents=AgentRoster([agent("kit_a", True), agent("kit_still", False)]),
+
+def _kit_agent(tmp_path: Path, agent: str, **files: str) -> KnowledgeBase:
+    root = tmp_path / "kit"
+    _write(root, ".claude-plugin/plugin.json", json.dumps({"name": "kit"}))
+    _write(root, "skills/draw/SKILL.md", "---\nname: draw\ndescription: d\n---\nd\n")
+    _write(root, "agents/a.md", agent)
+    for rel, text in files.items():
+        _write(root, rel, text)
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "kit", "source": f"file://{root}", "tags": ["k"]}],
+            "libraries": [{"name": "kit", "plugins": ["kit"]}],
+        }
+    )
+    return KnowledgeBase(config, tmp_path / "cache")
+
+
+def test_agent_instructions_are_rendered_by_kb(tmp_path):
+    """AGT-17 then PRM-48 on the body; the frontmatter reads as written."""
+    head = "---\nname: a\ndescription: See ${CLAUDE_PLUGIN_ROOT}.\n---\n"
+    body = (
+        "Use kit:draw, read ${CLAUDE_PLUGIN_ROOT}/skills/draw/x.md"
+        " in ${CLAUDE_SKILL_DIR}.\n"
+    )
+    knowledge_base = _kit_agent(tmp_path, head + body)
+
+    got = _served(knowledge_base)["kit_a"]
+
+    assert got["instructions"] == (
+        "Use skill://kit/draw/SKILL.md, read skill://kit/draw/x.md"
+        " in ${CLAUDE_SKILL_DIR}."
+    )
+    assert got["_meta"][AGENT_META]["frontmatter"]["description"] == (
+        "See ${CLAUDE_PLUGIN_ROOT}."
+    )
+    assert got["_meta"]["io.kubed/agent"]["frontmatter"]["description"] == (
+        "See ${CLAUDE_PLUGIN_ROOT}."
     )
 
-    upstream.append(_agent("a").replace("Body.", "The edited body."))
-    assert catalogue.agent_definition("kit_a")["instructions"] == "The edited body.\n"
-    assert asked == [path]
 
-    upstream.append("---\nname: [unclosed\n---\nHalf saved.\n")
-    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.catalogue.uris"):
-        definition = catalogue.agent_definition("kit_a")
-    assert definition["instructions"] == "Body.\n"
-    assert "kit_a" in caplog.text
-    assert str(tmp_path) not in caplog.text
+def test_agent_meta_keeps_kbs_key(tmp_path):
+    """kb's ``io.kubed.mcp-kb/agent`` is today's value but for ``skills`` (N9),
+    with kubed-mcp's ``io.kubed/agent`` beside it (N5)."""
+    agent = "---\nname: a\ndescription: d\nskills: [draw, kit:draw]\n---\nBody.\n"
+    knowledge_base = _kit_agent(tmp_path, agent)
 
-    asked.clear()
-    catalogue.agent_cards()
-    catalogue.agent_definition("kit_still")
-    assert asked == []
+    meta = _served(knowledge_base)["kit_a"]["_meta"]
+
+    assert meta[AGENT_META] == {
+        "plugin": "kit",
+        "library": "kit",
+        "path": "agents/a.md",
+        "frontmatter": {
+            "name": "a",
+            "description": "d",
+            "skills": ["draw", "kit:draw"],
+        },
+        "servers": [],
+        "skills": {
+            "draw": "skill://kit/draw/SKILL.md",
+            "kit:draw": "skill://kit/draw/SKILL.md",
+        },
+    }
+    assert "io.kubed/agent" in meta
+
+
+def test_agent_meta_names_no_skill_of_another_plugin(tmp_path):
+    """SCP-24, N9: ``skills`` resolves against the agent's own plugin, so no
+    scope learns of another plugin's skill through it."""
+    other = tmp_path / "other"
+    _write(other, "skills/x/SKILL.md", "---\nname: x\ndescription: x\n---\nx\n")
+    root = tmp_path / "kit"
+    _write(root, ".claude-plugin/plugin.json", json.dumps({"name": "kit"}))
+    _write(root, "skills/draw/SKILL.md", "---\nname: draw\ndescription: d\n---\nd\n")
+    _write(
+        root,
+        "agents/a.md",
+        "---\nname: a\ndescription: d\nskills: [other:x, draw]\n---\nUse other:x.\n",
+    )
+    config = Config.model_validate(
+        {
+            "plugins": [
+                {"name": "kit", "source": f"file://{root}", "tags": ["k"]},
+                {"name": "other", "source": f"file://{other}", "tags": ["o"]},
+            ],
+            "libraries": [{"name": "kit", "plugins": ["kit", "other"]}],
+        }
+    )
+    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
+
+    async def read(url):
+        got = {}
+        for query in ("", "?tag=k", "?library=kit"):
+            async with http_client(url + query) as client:
+                got[query] = await ext_request(client, "agents/get", name="kit_a")
+        return got
+
+    with serve_http(knowledge_base) as url:
+        got = asyncio.run(read(url))
+
+    for query, definition in got.items():
+        skills = definition["_meta"][AGENT_META]["skills"]
+        assert "other:x" not in skills, query
+        assert skills == {"draw": "skill://kit/draw/SKILL.md"}, query
+    # The body's names stay the rewriter's, which runs per view.
+    assert got[""]["instructions"] == "Use skill://kit/other/x/SKILL.md."
+    assert got["?tag=k"]["instructions"] == "Use other:x."
+
+
+def test_a_bare_plugin_serves_no_agent(tmp_path):
+    """AGT-4: no plugin.json and no marketplace entry, so no agents."""
+    root = tmp_path / "bare"
+    _write(root, "skills/b/SKILL.md", "---\nname: b\ndescription: b\n---\nb\n")
+    _write(root, "agents/x.md", _agent("x"))
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "bare", "source": f"file://{root}"}],
+            "libraries": [{"name": "bare", "plugins": ["bare"]}],
+        }
+    )
+    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
+
+    assert _served(knowledge_base) == {}
+    assert read_served(knowledge_base, "skill://bare/b/SKILL.md")
+
+
+def test_an_out_of_scope_agent_is_absent(tmp_path):
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+
+    async def read(url):
+        failures = []
+        async with http_client(url + "?library=lone") as client:
+            for name in ("drawio_diagrammer", "nobody"):
+                with pytest.raises(MCPError) as error:
+                    await ext_request(client, "agents/get", name=name)
+                failures.append((error.value.code, error.value.message, error.value.data))
+        return failures
+
+    with serve_http(knowledge_base) as url:
+        hidden, absent = asyncio.run(read(url))
+
+    assert hidden == absent
+    assert absent[1] == "Agent not found"
+
+
+def test_an_out_of_scope_agents_file_reads_as_absent(tmp_path):
+    """N7: an agent's file reads at ``agents://``, under the connection's scope,
+    and out of scope it fails as an absent one does."""
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+    uri = "agents://drawio/diagrammer.md"
+    nope = "agents://drawio/nope.md"
+
+    async def read(url):
+        async with http_client(url) as client:
+            body = (await client.read_resource(uri))[0].text
+        failures = []
+        async with http_client(url + "?library=lone") as client:
+            for each in (uri, nope):
+                with pytest.raises(MCPError) as error:
+                    await client.read_resource(each)
+                failures.append(
+                    (error.value.code, error.value.message.replace(each, "<uri>"))
+                )
+        return body, failures
+
+    with serve_http(knowledge_base) as url:
+        body, (hidden, absent) = asyncio.run(read(url))
+
+    assert "Draws diagrams." in body
+    assert hidden == absent
+
+
+def test_kb_has_no_agents_extension(tmp_path):
+    with pytest.raises(ImportError):
+        importlib.import_module("kubed.mcp_kb.mcp.agents")
+    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+    server = server_of(knowledge_base)
+    answering = [
+        extension
+        for extension in server._extensions.values()
+        if any(m.method == "agents/list" for m in extension.methods())
+    ]
+    assert len(answering) == 1
+    assert type(answering[0]).__module__.startswith("kubed.mcp.")
 
 
 def _read(tmp_path: Path, uri: str) -> str | None:

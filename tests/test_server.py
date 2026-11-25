@@ -143,21 +143,23 @@ async def test_the_mirrors_are_four_tools_whatever_the_catalogue_holds(skills_di
     # Skip the middleware, which is the thing that hides these. What is
     # registered is what an ?resources=off client is shown; what a resource
     # client sees is covered over real HTTP in test_header_scope.
-    registered = await server_of(server).list_tools(run_middleware=False)
-    assert sorted(t.name for t in registered) == [
-        "get_prompt",
-        "list_prompts",
-        "list_resources",
-        "read_resource",
-    ]
+    # The resource pair is kubed-mcp's (N4), listed only to a client that
+    # turned resources off, and always callable by name.
+    mcp = server_of(server)
+    registered = await mcp.list_tools(run_middleware=False)
+    assert sorted(t.name for t in registered) == ["get_prompt", "list_prompts"]
+    for name in ("list_resources", "read_resource"):
+        assert await mcp.get_tool(name) is not None
 
 
 @pytest.mark.unit
 async def test_the_mirror_tools_are_advertised_as_read_only(skills_dir):
     """Unannotated, MCP's defaults advertise a tool as destructive."""
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
-    registered = await server_of(server).list_tools(run_middleware=False)
-    assert registered
+    mcp = server_of(server)
+    registered = await mcp.list_tools(run_middleware=False)
+    registered += [await mcp.get_tool(n) for n in ("list_resources", "read_resource")]
+    assert len(registered) == 4
     for tool in registered:
         hints = tool.to_mcp_tool().annotations
         assert hints is not None, f"{tool.name} has no annotations"
@@ -165,7 +167,7 @@ async def test_the_mirror_tools_are_advertised_as_read_only(skills_dir):
         assert hints.destructive_hint is False
         assert hints.idempotent_hint is True
         assert hints.open_world_hint is False
-        assert hints.title
+        assert hints.title or tool.title
 
 
 @pytest.mark.unit
@@ -174,9 +176,10 @@ async def test_the_mirror_returns_the_same_rows_as_the_resource_listing(skills_d
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
     async with Client(server_of(server)) as client:
         resources = {str(r.uri) for r in await client.list_resources()}
-        rows = json.loads(await call(client, "list_resources"))
+        # N4: kubed-mcp's list_resources answers {"resources": rows}.
+        rows = json.loads(await call(client, "list_resources"))["resources"]
     assert {row["uri"] for row in rows} == resources
-    assert set(rows[0]) == {"uri", "name", "description", "mimeType"}
+    assert {"uri", "name", "description", "mimeType"} <= set(rows[0])
 
 
 @pytest.mark.unit
@@ -194,6 +197,7 @@ async def test_read_resource_explains_an_unknown_uri(skills_dir, caplog):
     """An error result, so a caller branching on isError sees a miss -- with
     what to do next in its message, and no traceback in the server's log."""
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
+    server_of(server)  # publishing logs what the plugin layer notes; not a call
     caplog.clear()
     with caplog.at_level(logging.INFO):
         async with Client(server_of(server)) as client:
@@ -202,8 +206,12 @@ async def test_read_resource_explains_an_unknown_uri(skills_dir, caplog):
             )
     assert result.is_error
     out = result.content[0].text
-    assert "No resource" in out and "list_resources" in out
-    assert not [r for r in caplog.records if r.levelno >= logging.INFO]
+    # N4: kubed-mcp's tool words a miss as resources/read does.
+    assert out == "Resource not found: 'skill://nope/nope'"
+    # N4: kubed-mcp logs a caller's miss at INFO, where kb's tool used DEBUG;
+    # never a warning, nor a traceback.
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert not [r for r in caplog.records if r.exc_info]
 
 
 @pytest.mark.unit
@@ -216,7 +224,7 @@ async def test_the_mirror_honours_the_hard_library_scope(skills_dir):
         out = await call(
             client, "read_resource", uri="skill://deepsource/plugin-a/gamma/SKILL.md"
         )
-    assert "No resource" in out
+    assert "Resource not found" in out
 
 
 async def test_a_configmap_mount_is_served_under_the_names_it_was_mounted_as(tmp_path):
@@ -264,16 +272,22 @@ async def test_a_configmap_mount_is_served_under_the_names_it_was_mounted_as(tmp
 
 @pytest.mark.unit
 async def test_a_hidden_file_in_a_skill_is_not_readable_by_guessing(tmp_path):
-    """The manifest leaves hidden files out, so a read must too.
+    """A caller never gets a hidden file by typing its name, through the
+    resource or the mirror.
 
-    A `.env` beside a SKILL.md is exactly the file a manifest hides and a caller
-    should never get by typing its name — through the resource or the mirror.
+    A `.env` beside a SKILL.md is exactly that file. kubed-mcp would serve it
+    with the skill, so kb serves none of the skill holding it (N13); the skill
+    beside it serves.
     """
     skill = tmp_path / "src" / "skills" / "x"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: x\ndescription: x\n---\nbody\n")
     (skill / ".env").write_text("SECRET=hunter2\n")
     (skill / "notes.md").write_text("visible\n")
+    clean = tmp_path / "src" / "skills" / "y"
+    clean.mkdir(parents=True)
+    (clean / "SKILL.md").write_text("---\nname: y\ndescription: y\n---\nbody\n")
+    (clean / "notes.md").write_text("visible\n")
     config = Config.model_validate(
         {
             "plugins": [{"name": "lib", "source": f"file://{tmp_path / 'src'}"}],
@@ -283,9 +297,10 @@ async def test_a_hidden_file_in_a_skill_is_not_readable_by_guessing(tmp_path):
     server = KnowledgeBase(config, tmp_path / "cache")
 
     async with Client(server_of(server)) as client:
-        visible = (await client.read_resource("skill://lib/x/notes.md"))[0].text
-        with pytest.raises(Exception, match=r"[Uu]nknown|not found"):
-            await client.read_resource("skill://lib/x/.env")
+        visible = (await client.read_resource("skill://lib/y/notes.md"))[0].text
+        for uri in ("skill://lib/x/.env", "skill://lib/x/notes.md"):
+            with pytest.raises(Exception, match=r"[Uu]nknown|not found"):
+                await client.read_resource(uri)
         mirrored = await call(client, "read_resource", uri="skill://lib/x/.env")
 
     assert visible == "visible\n"

@@ -31,22 +31,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Discover and load verified skills in MCP Skills clients through `skills/list` and `skills/get`.
 - Skill links work behind a multiplexing gateway: set `Kb-Resource-Prefix` (or `?prefix=`), e.g. `kb+`, and kb writes it in front of every address in text.
 - A library can list `categories`, and `Kb-Category` (`?category=`) selects every library listing one.
-- A plugin's `commands` may be an object map, and commands in subfolders are served as `<library>_<folder>_<name>`.
-- **Discover the agents your plugins ship** through the experimental `agents/list` and `agents/get`, scoped like everything else.
+- Commands in subfolders of a plugin's `commands` are served as `<library>_<folder>_<name>`.
+- **Discover the agents your plugins ship** through the experimental `agents/list` and `agents/get`, scoped like everything else, with kubed-mcp's `io.kubed/agent` in `_meta` and each agent's file at `agents://<library>/…`.
 - A client can tell kb serves `skill://` addresses from `resources/templates/list`.
 - A `<plugin>:<skill>` name in a skill, prompt or agent reads as the skill's `skill://` address.
 - Browse a library, a folder or a skill's own folders with `resources/directory/read`, or read the `_index.json` beside each.
 
 ### Changed
 
-- Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Listing` and `Kb-Resource-Prefix`; the old `X-` names are still accepted.
+- Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Listing`, `Kb-Resource-Prefix`, `Kb-Resources` and `Kb-Prompts`; the old `X-` names are still accepted.
 - **BREAKING:** A pin set under an old `X-` name (a gateway route header, a credential) no longer holds against a client-sent `Kb-` header, which now beats it; move such pins to the `Kb-` names.
 - **BREAKING:** Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
 - A plugin's `plugin.json` reads as Claude Code reads it: its `skills` add to the usual skill folders, and a marketplace entry's lists append to it.
+- **BREAKING:** Skills are found as Claude Code finds them: each folder in `skills/`, then the folders `plugin.json`, the marketplace entry and the config declare; a config's `skills:` lists folders, and a glob there fails the config; `.claude/skills/`, `.github/skills/`, `.agents/skills/` and deeper folders are no longer searched.
+- **BREAKING:** A library's plugins other than its main one serve their skills under `skill://<library>/<plugin>/` (a plugin `tidy` in library `superpowers` now serves at `skill://superpowers/tidy/…`).
 - Marketplace entries marked `strict: false` now load, unless they conflict with the plugin's own `plugin.json`.
 - The issue and pull request agents run from kubed-io/actions' shared workflows.
-- **BREAKING:** A skill that fails the Agent Skills checks (strict frontmatter, at most 512 files and 16 MiB), or that sits inside another skill, is no longer served at all; the log says why.
-- A skill's `_manifest` gives the size and hash of the bytes a read returns, the same as its `skills/get` entry.
+- **BREAKING:** A skill that fails the Agent Skills checks (strict frontmatter, at most 512 files and 16 MiB), or holds a hidden file or a symlink (as a ConfigMap mounted as a skill's own folder does; mount it with `items` paths), is no longer served at all; the log says why.
+- **BREAKING:** A skill's `_manifest` names the skill by its `name`, not its address, and gives the size and hash of the bytes a read returns, the same as its `skills/get` entry.
+- **BREAKING:** A skill's file that is not UTF-8 text, or has no or an unrecognised extension (such as `scripts/run`), reads as a blob, and `read_resource` no longer returns its text.
+- `list_resources` and `read_resource` are kubed-mcp's, and return the rows and contents `resources/list` and `resources/read` do.
+- `list_resources`, `read_resource` and the Agents extension exist only once a plugin with a skill, an agent or a prompt file is served, and the Skills extension once one with a skill is.
+- An edit to a live skill, agent or prompt is served from the request after the one that notices it.
+- A library can no longer be named `mcp-kb`, the server's own name.
 - `skills/get` of a skill that is not served answers `Unknown skill URI: <uri>`.
 - Plugin sources (git, WebDAV, `file://`) load through kubed-mcp plugin loaders.
 

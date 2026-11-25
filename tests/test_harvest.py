@@ -1,17 +1,20 @@
-"""Turning a plugin's globs into skill dirs, prompt files and library files."""
+"""Finding a plugin's skill folders, prompt files and library files."""
 
+import json
 from pathlib import Path
 
 import pytest
 
 from kubed.mcp_kb.catalogue.harvest import (
-    folder_of,
     library_files,
     patterns,
     prompt_files,
     skill_dirs,
 )
-from kubed.mcp_kb.plugins import Globs
+from kubed.mcp_kb.config import Config, LibraryConfig
+from kubed.mcp_kb.plugins import Globs, fetch_for
+from kubed.mcp_kb.plugins.address import parse_address
+from kubed.mcp_kb.plugins.marketplace import MARKETPLACE_FILES, read_marketplace
 
 
 @pytest.fixture
@@ -20,7 +23,6 @@ def tree(tmp_path: Path) -> Path:
         "skills/grafana-lgtm/loki/SKILL.md": "---\nname: loki\ndescription: d\n---\n",
         "skills/flat/SKILL.md": "---\nname: flat\ndescription: d\n---\n",
         "template/SKILL.md": "---\nname: template\ndescription: d\n---\n",
-        ".github/skills/gh/SKILL.md": "---\nname: gh\ndescription: d\n---\n",
         ".github/prompts/review.prompt.md": "---\ndescription: r\n---\nbody\n",
         "prompts/grafana/debug-logs.md": "---\ndescription: p\n---\nbody\n",
         "shared/tokens.md": "shared\n",
@@ -33,28 +35,215 @@ def tree(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def rel(root: Path, paths) -> set[str]:
-    return {Path(p).relative_to(root).as_posix() for p in paths}
+def rel(root: Path, paths) -> list[str]:
+    return [Path(p).relative_to(root).as_posix() for p in paths]
 
 
-def test_conventions_find_nested_skills_and_never_a_root_template(tree):
-    assert rel(tree, skill_dirs(tree, Globs())) == {
-        "skills/grafana-lgtm/loki",
-        "skills/flat",
-        ".github/skills/gh",
+def _skill(root: Path, where: str) -> None:
+    path = root / where
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "SKILL.md").write_text(f"---\nname: {path.name}\ndescription: d\n---\n")
+
+
+# -- the rule: skills/<name>/, plus what is declared ---------------------------
+
+
+@pytest.mark.unit
+def test_a_skill_is_a_direct_child_of_skills(tmp_path):
+    _skill(tmp_path, "skills/a")
+    _skill(tmp_path, "skills/g/b")
+    _skill(tmp_path, ".claude/skills/c")
+    (tmp_path / "SKILL.md").write_text("---\nname: root\ndescription: d\n---\n")
+
+    assert rel(tmp_path, skill_dirs(tmp_path)) == ["skills/a"]
+
+
+@pytest.mark.unit
+def test_a_declared_folder_is_a_skill_or_holds_skills(tmp_path):
+    _skill(tmp_path, "skills/g/b")
+    _skill(tmp_path, "skills/g/c")
+    _skill(tmp_path, "skills/g/b/deep")
+
+    assert rel(tmp_path, skill_dirs(tmp_path, ["./skills/g/b"])) == ["skills/g/b"]
+    assert rel(tmp_path, skill_dirs(tmp_path, ["./skills/g"])) == [
+        "skills/g/b",
+        "skills/g/c",
+    ]
+    assert skill_dirs(tmp_path, ["./missing"]) == []
+
+
+@pytest.mark.unit
+def test_the_first_claim_wins(tmp_path):
+    _skill(tmp_path, "skills/a")
+    _skill(tmp_path, "skills/z")
+    _skill(tmp_path, "extra/b")
+
+    found = skill_dirs(tmp_path, ["./extra", "./skills/a", "./skills"])
+
+    assert rel(tmp_path, found) == ["skills/a", "skills/z", "extra/b"]
+
+
+@pytest.mark.unit
+def test_dot_folders_are_skipped(tmp_path):
+    _skill(tmp_path, "skills/.hidden")
+    _skill(tmp_path, "skills/shown")
+    _skill(tmp_path, "extra/.hidden")
+
+    assert rel(tmp_path, skill_dirs(tmp_path, ["./extra"])) == ["skills/shown"]
+
+
+@pytest.mark.unit
+def test_a_declared_folder_under_a_dot_directory_is_read(tmp_path):
+    """As kubed-mcp reads it: only a dot *child* is skipped, never a declaration."""
+    _skill(tmp_path, ".hid/skills/h")
+    _skill(tmp_path, "skills/.x")
+
+    assert rel(tmp_path, skill_dirs(tmp_path, ["./.hid/skills"])) == [".hid/skills/h"]
+    assert rel(tmp_path, skill_dirs(tmp_path, ["./skills/.x"])) == ["skills/.x"]
+
+
+@pytest.mark.unit
+def test_a_skills_folder_holding_a_skill_md_is_one_skill(tmp_path):
+    """``skills/`` is read like any declared folder: a skill itself, or its parent."""
+    _skill(tmp_path, "skills")
+    _skill(tmp_path, "skills/a")
+
+    assert rel(tmp_path, skill_dirs(tmp_path)) == ["skills"]
+
+
+@pytest.mark.unit
+def test_a_child_folder_that_is_a_symlink_is_not_a_skill(tmp_path):
+    """``os.walk`` does not descend into a linked folder, so kubed-mcp skips it."""
+    _skill(tmp_path, "real/target")
+    _skill(tmp_path, "skills/plain")
+    (tmp_path / "skills" / "linked").symlink_to(tmp_path / "real" / "target")
+
+    assert rel(tmp_path, skill_dirs(tmp_path)) == ["skills/plain"]
+
+
+@pytest.mark.unit
+def test_a_symlinked_folder_read_is_followed_as_a_configmap_mounts_it(tmp_path):
+    """``skills -> ..data/skills``: the folder read is ``os.walk``'s top, followed."""
+    data = tmp_path / "..2026_09_16_13_15_49.612400444"
+    _skill(data, "skills/cm")
+    (tmp_path / "..data").symlink_to(data)
+    (tmp_path / "skills").symlink_to(tmp_path / "..data" / "skills")
+
+    assert rel(tmp_path, skill_dirs(tmp_path)) == ["skills/cm"]
+
+
+@pytest.mark.unit
+def test_grafana_entries_serve_their_declared_skills(tmp_path):
+    """A root entry naming one skill serves that one, and none beside it.
+
+    grafana/skills keeps every skill a folder below ``skills/``, so the scan of
+    ``skills/`` finds nothing of its own and each entry is what it declares.
+    """
+    from kubed.mcp_kb.catalogue.snapshot import build_plugin, with_manifest
+
+    _skill(tmp_path, "skills/grafana-lgtm/loki")
+    _skill(tmp_path, "skills/grafana-lgtm/tempo")
+    _skill(tmp_path, "template")
+    catalog = {
+        "name": "grafana-skills",
+        "plugins": [
+            {
+                "name": "grafana-lgtm",
+                "source": "./",
+                "skills": ["./skills/grafana-lgtm/loki"],
+            }
+        ],
     }
+    where = tmp_path / MARKETPLACE_FILES[0]
+    where.parent.mkdir(parents=True, exist_ok=True)
+    where.write_text(json.dumps(catalog))
+    config = Config.model_validate(
+        {"sources": [{"name": "github", "url": "git+https://github.com"}]}
+    )
+    address = parse_address("github://grafana/skills?ref=abc")
+    [plugin] = read_marketplace(
+        tmp_path,
+        library=LibraryConfig(name="grafana", source="github://grafana/skills"),
+        fetch=fetch_for(config, address),
+        address=address,
+        config=config,
+    ).plugins
+
+    completed, globs = with_manifest(plugin, tmp_path)
+    record = build_plugin(completed, tmp_path, globs=globs)
+
+    assert record.status == "ok"
+    assert [row.name for row in record.skills] == ["loki"]
 
 
-def test_a_dot_directory_is_skipped_unless_it_is_a_convention(tree):
-    found = rel(tree, skill_dirs(tree, Globs(skills=["**/SKILL.md"])))
-    assert ".github/skills/gh" in found
-    assert ".git" not in found
+@pytest.mark.unit
+def test_no_declared_skills_at_all_serves_none(tmp_path):
+    """``Globs.skills == ()`` is a plugin's ``skills: []``: the scan is off too."""
+    from kubed.mcp_kb.catalogue.snapshot import build_plugin
+    from tests.conftest import fake_plugin
+
+    _skill(tmp_path, "skills/a")
+
+    record = build_plugin(fake_plugin("p", tmp_path), tmp_path, globs=Globs(skills=()))
+
+    assert record.skills == ()
 
 
-def test_setting_a_kind_replaces_its_defaults(tree):
-    assert rel(tree, skill_dirs(tree, Globs(skills=["template/SKILL.md"]))) == {
-        "template"
-    }
+# -- containment ---------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_a_skill_folder_linked_out_of_the_root_is_not_a_skill(tmp_path):
+    outside = tmp_path / "elsewhere" / "secret"
+    outside.mkdir(parents=True)
+    (outside / "SKILL.md").write_text("---\nname: secret\n---\nno")
+    root = tmp_path / "src"
+    (root / "skills").mkdir(parents=True)
+    (root / "skills" / "linked").symlink_to(outside)
+
+    assert skill_dirs(root) == []
+    assert skill_dirs(root, ["./skills/linked"]) == []
+
+
+@pytest.mark.unit
+def test_a_symlink_loop_fails_that_link_not_the_harvest(tmp_path, monkeypatch):
+    """Before 3.13 `resolve()` raises RuntimeError on a loop, not OSError.
+
+    Forced here so the test means the same thing on every interpreter.
+    """
+    root = tmp_path / "src"
+    good = root / "skills" / "good"
+    good.mkdir(parents=True)
+    (good / "SKILL.md").write_text("---\nname: good\n---\nbody")
+    (root / "skills" / "loop").symlink_to(root / "skills" / "loop")
+
+    real = Path.resolve
+
+    def resolve(self, strict=False):
+        if self.name == "loop":
+            raise RuntimeError(f"Symlink loop from {self}")
+        return real(self, strict)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+
+    assert [p.name for p in skill_dirs(root)] == ["good"]
+
+
+@pytest.mark.unit
+def test_a_skill_md_symlinked_out_of_the_root_does_not_register(tmp_path):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("---\nname: leak\n---\nno")
+    root = tmp_path / "src"
+    leak = root / "skills" / "leak"
+    leak.mkdir(parents=True)
+    (leak / "SKILL.md").symlink_to(outside / "SKILL.md")
+
+    assert skill_dirs(root) == []
+    assert skill_dirs(root, ["./skills/leak"]) == []
+
+
+# -- prompts and library files -------------------------------------------------
 
 
 def test_an_empty_list_turns_a_kind_off(tree):
@@ -62,27 +251,28 @@ def test_an_empty_list_turns_a_kind_off(tree):
 
 
 def test_conventions_find_both_prompt_layouts(tree):
-    assert rel(tree, prompt_files(tree, Globs())) == {
+    assert set(rel(tree, prompt_files(tree, Globs()))) == {
         ".github/prompts/review.prompt.md",
         "prompts/grafana/debug-logs.md",
     }
 
 
 def test_files_are_served_only_when_asked_for(tree):
-    dirs = skill_dirs(tree, Globs())
+    dirs = skill_dirs(tree)
     assert library_files(tree, Globs(), dirs) == []
     assert library_files(tree, Globs(files=["shared/**"]), dirs) == ["shared/tokens.md"]
 
 
 def test_a_file_inside_a_skill_is_never_a_library_file(tree):
     # library_files only excludes files inside a skill dir (per its docstring); a
-    # broad "**/*.md" also legitimately matches the fixture's prompt files,
-    # which live outside every skill dir returned by skill_dirs().
-    dirs = skill_dirs(tree, Globs())
+    # broad "**/*.md" also legitimately matches the fixture's prompt files, and
+    # a SKILL.md that is no skill (too deep, or at a folder never scanned).
+    dirs = skill_dirs(tree)
     assert library_files(tree, Globs(files=["**/*.md"]), dirs) == [
         ".github/prompts/review.prompt.md",
         "prompts/grafana/debug-logs.md",
         "shared/tokens.md",
+        "skills/grafana-lgtm/loki/SKILL.md",
         "template/SKILL.md",
     ]
 
@@ -93,16 +283,6 @@ def test_a_glob_cannot_escape_the_plugin_root(tree, tmp_path):
     # harvest.files()'s own defence-in-depth guard directly.
     (tmp_path.parent / "outside.md").write_text("no\n")
     assert library_files(tree, Globs(files=("../**",)), []) == []
-
-
-def test_the_folder_is_the_path_below_the_deepest_skill_root(tree):
-    assert folder_of(tree / "skills/grafana-lgtm/loki", tree) == "grafana-lgtm"
-    assert folder_of(tree / "skills/flat", tree) == ""
-    assert folder_of(tree / ".github/skills/gh", tree) == ""
-    assert folder_of(tree / "template", tree) == ""
-    assert folder_of(tree / "skills/a/b/deep", tree) == "a/b"
-    assert folder_of(tree / "docs/skills-extra/x", tree) == "docs/skills-extra"
-    assert folder_of(tree, tree) == ""
 
 
 @pytest.mark.unit
@@ -138,9 +318,6 @@ def test_a_trailing_globstar_is_normalised_before_it_reaches_glob():
     assert patterns("files", Globs(files=["shared/**"])) == ("shared/**/*",)
     assert patterns("files", Globs(files=["shared/**/*"])) == ("shared/**/*",)
     assert patterns("files", Globs(files=["shared/*"])) == ("shared/*",)
-    assert patterns("skills", Globs(skills=["skills/*/SKILL.md"])) == (
-        "skills/*/SKILL.md",
-    )
 
 
 @pytest.mark.unit
@@ -159,7 +336,7 @@ def test_a_configmap_style_symlink_farm_is_harvested(tmp_path):
     (root / "..data").symlink_to(data)
     (root / "debug-logs.md").symlink_to(root / "..data" / "debug-logs.md")
 
-    found = prompt_files(root, Globs(skills=[], prompts=["*.md"]))
+    found = prompt_files(root, Globs(skills=(), prompts=["*.md"]))
 
     assert [p.name for p in found] == ["debug-logs.md"]
     assert found[0].read_text().endswith("body")
@@ -175,7 +352,7 @@ def test_a_symlink_out_of_the_root_is_still_refused(tmp_path):
     root.mkdir()
     (root / "secret.md").symlink_to(outside / "secret.md")
 
-    assert prompt_files(root, Globs(skills=[], prompts=["*.md"])) == []
+    assert prompt_files(root, Globs(skills=(), prompts=["*.md"])) == []
 
 
 @pytest.mark.unit
@@ -189,117 +366,3 @@ def test_only_a_whole_trailing_component_is_a_globstar():
     assert patterns("files", Globs(files=["a/logs**"])) == ("a/logs**",)
     assert patterns("files", Globs(files=["**"])) == ("**/*",)
     assert patterns("files", Globs(files=["a/**"])) == ("a/**/*",)
-
-
-@pytest.mark.unit
-def test_a_skills_glob_may_name_the_directory(tmp_path):
-    """`skills/*` and `skills/*/SKILL.md` select the same skills.
-
-    A folder holding a SKILL.md *is* the skill, so naming the folder is the
-    spelling most people reach for — and it used to match nothing, silently.
-    """
-    root = tmp_path / "src"
-    for name in ("alpha", "beta"):
-        d = root / "skills" / name
-        d.mkdir(parents=True)
-        (d / "SKILL.md").write_text(f"---\nname: {name}\n---\nbody")
-
-    by_dir = skill_dirs(root, Globs(skills=["skills/*"]))
-    by_file = skill_dirs(root, Globs(skills=["skills/*/SKILL.md"]))
-
-    assert by_dir == by_file
-    assert [p.name for p in by_dir] == ["alpha", "beta"]
-
-
-@pytest.mark.unit
-def test_a_composite_folder_registers_every_skill_beneath_it(tmp_path):
-    """Naming a folder of folders registers the set, not nothing.
-
-    This is how a library with folders reads: `skills/grafana-lgtm` is not itself a
-    skill, it holds them, and pointing at it should mean all of them.
-    """
-    root = tmp_path / "src"
-    for folder, name in (("lgtm", "loki"), ("lgtm", "tempo"), ("sdk", "plugins")):
-        d = root / "skills" / folder / name
-        d.mkdir(parents=True)
-        (d / "SKILL.md").write_text(f"---\nname: {name}\n---\nbody")
-
-    assert [p.name for p in skill_dirs(root, Globs(skills=["skills/lgtm"]))] == [
-        "loki",
-        "tempo",
-    ]
-    # sorted by path, so the lgtm pair precedes sdk/plugins
-    assert [p.name for p in skill_dirs(root, Globs(skills=["skills"]))] == [
-        "loki",
-        "tempo",
-        "plugins",
-    ]
-
-
-@pytest.mark.unit
-def test_a_directory_glob_does_not_reach_outside_the_root(tmp_path):
-    """The directory spelling must not become a way around containment."""
-    outside = tmp_path / "elsewhere" / "secret"
-    outside.mkdir(parents=True)
-    (outside / "SKILL.md").write_text("---\nname: secret\n---\nno")
-    root = tmp_path / "src"
-    (root / "skills").mkdir(parents=True)
-    (root / "skills" / "linked").symlink_to(outside)
-
-    assert skill_dirs(root, Globs(skills=["skills/*"])) == []
-
-
-@pytest.mark.unit
-def test_a_symlink_loop_fails_that_link_not_the_harvest(tmp_path, monkeypatch):
-    """Before 3.13 `resolve()` raises RuntimeError on a loop, not OSError.
-
-    Forced here so the test means the same thing on every interpreter.
-    """
-    root = tmp_path / "src"
-    good = root / "skills" / "good"
-    good.mkdir(parents=True)
-    (good / "SKILL.md").write_text("---\nname: good\n---\nbody")
-    (root / "skills" / "loop").symlink_to(root / "skills" / "loop")
-
-    real = Path.resolve
-
-    def resolve(self, strict=False):
-        if self.name == "loop":
-            raise RuntimeError(f"Symlink loop from {self}")
-        return real(self, strict)
-
-    monkeypatch.setattr(Path, "resolve", resolve)
-
-    assert [p.name for p in skill_dirs(root, Globs(skills=["skills/*"]))] == ["good"]
-
-
-@pytest.mark.unit
-def test_a_skill_md_symlinked_out_of_the_root_does_not_register(tmp_path):
-    """A directory glob must contain its SKILL.md hits the way a file glob does."""
-    outside = tmp_path / "elsewhere"
-    outside.mkdir()
-    (outside / "SKILL.md").write_text("---\nname: leak\n---\nno")
-    root = tmp_path / "src"
-    leak = root / "skills" / "leak"
-    leak.mkdir(parents=True)
-    (leak / "SKILL.md").symlink_to(outside / "SKILL.md")
-
-    assert skill_dirs(root, Globs(skills=["skills"])) == []
-
-
-@pytest.mark.unit
-def test_a_link_back_to_an_ancestor_does_not_loop_a_directory_glob(tmp_path):
-    """A directory glob walks with `rglob`, which does not follow directory links.
-
-    Checked on 3.11.16, 3.12.14 and 3.13.5: a link back up the tree yields the one
-    real skill and ends. Pinned here because CI runs the old end of the range on
-    every pull request, and a switch to a link-following walk would hang instead.
-    """
-    skills = tmp_path / "src" / "skills"
-    (skills / "a").mkdir(parents=True)
-    (skills / "a" / "SKILL.md").write_text("---\nname: a\n---\nbody")
-    (skills / "a" / "up").symlink_to(skills)
-
-    found = skill_dirs(tmp_path / "src", Globs(skills=["skills"]))
-
-    assert [p.name for p in found] == ["a"]

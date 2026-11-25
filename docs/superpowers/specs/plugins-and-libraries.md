@@ -51,23 +51,24 @@ directory, or resolves outside the tree through a symlink, the plugin fails with
 
 ## What a plugin serves
 
-**PLG-9.** `skills`, `prompts` and `files` are glob patterns relative to the plugin root. Loading
-the config refuses an empty pattern, an absolute one, and one with a `..` segment.
+**PLG-9.** `prompts` and `files` are glob patterns relative to the plugin root. `skills` is a list
+of folders relative to the plugin root, each a skill or holding skills one level down (SKL-1), and
+never a glob: loading the config refuses an item holding `*`, `?` or `[` (CFG-14). Loading the
+config refuses an empty item of any of the three, an absolute one, and one with a `..` segment.
 
-| The key | Means |
-|---|---|
-| absent | the conventions, the manifest and the entry, merged per kind (PLG-17) |
-| a list | exactly these patterns, replacing the conventions |
-| `[]` | serve nothing of this kind |
+| The key | `prompts`, `files` | `skills` |
+|---|---|---|
+| absent | the conventions, the manifest and the entry, merged per kind (PLG-17) | `skills/`, then the manifest's and the entry's folders (PLG-17) |
+| a list | exactly these patterns, replacing the conventions | these folders as well, after the manifest's and the entry's (LIB-33) |
+| `[]` | serve nothing of this kind | serve no skill, and no agent or prompt either (LIB-33) |
 
 **PLG-10.** `files` has no convention. A plugin serves library files only when a `files` list
 names them.
 
-**PLG-11.** A pattern whose last component is `**` is read as `**/*`, so it matches files on every
-Python version.
+**PLG-11.** A `prompts` or `files` pattern whose last component is `**` is read as `**/*`, so it
+matches files on every Python version.
 
-**PLG-12.** A `dialect` other than `auto` reads every prompt file of the plugin in that dialect, and
-an object-map command is `claude` whatever the plugin's `dialect` says (PLG-21). With `auto`, a file
+**PLG-12.** A `dialect` other than `auto` reads every prompt file of the plugin in that dialect. With `auto`, a file
 ending `.prompt.md` is left to detection; a file under `commands/` or `.claude/commands/` (relative
 to the plugin root), or one matched by a `commands` declaration from a manifest or a marketplace
 entry, is read as `claude`; every other file is left to detection. A config's own `prompts:` list is
@@ -83,7 +84,7 @@ under its root. A manifest that is a symlink resolving outside the root is not r
 
 **PLG-15.** A manifest that is not readable JSON, or not a JSON object, fails the plugin.
 `keywords`, `skills` and `agents` each take one string or a list of strings, and `commands` takes
-one string, a list of strings or an object map (PLG-21); any other type fails the plugin, naming
+one string, a list of strings or an object map, which PLG-21 serves as nothing; any other type fails the plugin, naming
 the field. A non-string `description` or `version` is ignored.
 
 **PLG-16.** A component path (`skills`, `commands`, `agents`, `mcpServers`) loses a leading `./`,
@@ -101,7 +102,7 @@ the first rule that applies:
 
 | Kind | Rule |
 |---|---|
-| skills | a declared plugin's own `skills:` is exactly what it serves (LIB-33); an entry at the marketplace root that lists `skills` serves the entry's and the manifest's, without the conventions (LIB-32); a manifest or an entry that lists `skills` adds to the conventions, the manifest's then the entry's (PLG-20, LIB-30); otherwise the conventions |
+| skills | a declared plugin's own `skills: []` serves none (LIB-33); otherwise `skills/`, then the folders the manifest lists (PLG-20), then the entry's (LIB-30), then a declared plugin's own `skills:` (LIB-33), the first claim winning (SKL-1) |
 | prompts | a declared plugin's own `prompts:` is exactly what it serves (LIB-33); a manifest or an entry that sets `commands` serves the manifest's then the entry's, without the conventions (PLG-21, LIB-30); otherwise the conventions |
 | agents | a plugin with neither a manifest nor an entry has none (AGT-4); a manifest or an entry that sets `agents` names the manifest's then the entry's (PLG-22, LIB-30); otherwise the `agents/` folder |
 
@@ -121,8 +122,9 @@ plugin serves.
 | a skill | an earlier skill of the plugin has its address |
 | a library file | its name is `_index.md`, `_index.json` or `_files.md` |
 | a library file | its address is a served skill's, lies inside one, or contains one |
-| a prompt | the name its path builds is not a usable name (PLG-25) |
-| a prompt | an earlier prompt of the plugin has its name (PLG-25) |
+| a prompt | the name its path builds is not a usable name (PLG-25); the plugin layer's row |
+| a prompt | an earlier prompt of the plugin has its name (PLG-25); the plugin layer's row |
+| a prompt | kb's command reader cannot parse it (PRM-4) |
 | an agent | the name its folders and frontmatter `name` build is not a usable name (AGT-5) |
 
 **PLG-19.** A plugin **fails** when its fetch has no servable tree, its root is refused (PLG-8), its
@@ -136,7 +138,7 @@ errors. A failed plugin serves nothing in any library and carries `status: faile
 
 | Key | Type | Default |
 |---|---|---|
-| `name` | string, same pattern as a plugin name, unique among libraries | required |
+| `name` | string, same pattern as a plugin name, unique among libraries, and not `mcp-kb` (the server's own name, whose prompts the plugin layer would not prefix) | required |
 | `description` | string | `""` |
 | `notes` | string | `""` |
 | `listSkills` | boolean | `true` |
@@ -286,34 +288,32 @@ later plugin **conflicts** with the claims when:
 - one of its skill URIs is, lies inside, or contains a claimed skill URI or library file URI;
 - one of its library file URIs (`skill://<library>/<path>`) is, lies inside, or contains a claimed
   library file URI or skill URI;
-- one of its prompt names is a claimed prompt name.
+- one of its prompt names is a claimed prompt name. That one is the plugin layer's refusal
+  (LIB-29), not kb's claim.
 
 **LIB-29.** A conflicting plugin serves nothing in that library. The earlier plugin keeps serving,
 and the library's `conflicts` in `/health` maps the later plugin's id to
 `conflict: <uri or prompt name> is already served by plugin '<owner>'`. The same plugin serves
-normally in every other library. A failed plugin (PLG-19) claims nothing.
+normally in every other library. A failed plugin (PLG-19) claims nothing. A plugin that kubed-mcp's
+plugin layer refuses to add (SKL-58), such as one whose namespace lies inside another plugin's
+skill, is reported the same way, as `conflict: <reason>`, the reason naming no cache path and no
+credential. A prompt name a plugin earlier in the library serves is one such refusal:
+`conflict: prompt <name> is already served by plugin <owner>`. Its skills, agents and prompts then
+read as absent in that library, and the library's `skills`, `agents` and `prompts` counts leave
+them out; its library files still serve.
 
 ## Reading a plugin the way Claude Code does
 
 These requirements make one `plugin.json` mean the same in kb as in Claude Code, for the kinds kb
 serves.
 
-**PLG-20.** A manifest `skills` list **adds** to the default skill scan, across all of kb's skill
-roots. `"."` and `"./"` name the plugin root.
+**PLG-20.** A manifest `skills` list **adds** folders to the scan of `skills/`, each read as
+SKL-1 reads a declared folder. `"."` and `"./"` name the plugin root.
 
 **PLG-21.** A manifest `commands` **replaces** the default prompt scan, across all of kb's prompt
-conventions. It may be a path, a list of paths, or an **object map**. In a map, the key is the
-prompt's name, `source` names a file or `content` holds an inline body (exactly one of the two),
-and `description` and `argumentHint`, when set, are the prompt's description and its free-text
-argument's hint, ahead of any the body's own frontmatter gives. `model` and `allowedTools` are
-dropped like the other client-only keys. A map item that is not an object, that has both or
-neither of `source` and `content`, whose `source` is not a path inside the plugin, or whose
-`content` is not text, is dropped with a note (PLG-26), and the rest of the map serves. So is one
-whose key is not a usable name: empty, or holding whitespace, a control or other invisible
-character, `/` or `@`, noted `commands entry <key> is not a usable name` with the key quoted
-escaped. A `source`
-that is not a file in the plugin is skipped with `not a file in the plugin`. An inline command's
-path in `/health` is the manifest's. Every map command is read in the `claude` dialect.
+conventions. It may be a path or a list of paths. An **object map** serves nothing: it still
+replaces the conventions, as any declared `commands` does, and the plugin notes
+`commands object map is not served` (PLG-26).
 A path in a `commands` list, from a manifest or an entry, is a path and not a glob, as in Claude
 Code: `./cmds/[draft].md` is that file and never `cmds/d.md`, `./stars/*.md` names no file, and
 `./v[1]` is that folder and not `v1/`. A listed file is served in a dot folder too
@@ -331,8 +331,8 @@ Code reads both; this is a known difference. Every file a `commands` list select
 folder is read only for what the key names. When no path the key declares names the folder, a
 path inside it or the plugin root, the plugin notes
 `Default <folder>/ folder is ignored because the manifest sets "<key>"`, whether the manifest or
-the entry set it. As in Claude Code, `"agents": ["./agents/reviewer.md"]`, `"commands": "./commands/"`,
-a `commands` map item whose `source` is in `commands/`, and `"commands": "./"` earn no note.
+the entry set it. As in Claude Code, `"agents": ["./agents/reviewer.md"]`, `"commands": "./commands/"`
+and `"commands": "./"` earn no note.
 
 **PLG-24.** A component path that doesn't start with `./` is still served, and the plugin notes it.
 This is a deliberate deviation: `claude plugin validate` refuses such a path, and kb serves rather
@@ -343,24 +343,26 @@ than validates.
 | Found | Name |
 |---|---|
 | under `commands/` or `.claude/commands/`, or under a directory a `commands` declaration names | each folder between that directory and the file, then the file stem, joined with `_`: `commands/db/migrate.md` is `<library>_db_migrate` |
-| as a key of a `commands` object map | the key |
 | anywhere else | the file stem (PRM-42) |
 
 The `commands/` convention reads its subfolders (`commands/**/*.md`), and so does a directory
-named in a `commands` list. Files come in path order, then the map's commands. A name built from a
-path, the folders and the stem together, MUST be a usable name, as a map key is (PLG-21): a file
+named in a `commands` list. Files come in path order. A name built from a
+path, the folders and the stem together, MUST be a usable name: no whitespace, control or other
+invisible character, `/` or `@`. A file
 whose name is not, `commands/my db/x.md` or `prompts/a b.md`, is skipped with
-`prompt name <name> is not a usable name`, the name quoted escaped, and never claims the name. A
-later prompt of the plugin with an earlier one's name is skipped with
-`prompt <name> is already served by <path>`.
+`prompt name <name> is not a usable name`, the full name `<library>_<name>` quoted escaped, and
+never claims the name. A later prompt of the plugin with an earlier one's name is skipped with
+`prompt <name> is already served by <path>`, quoting the full name. kubed-mcp's plugin layer reads
+the files and claims the names: kb hands it its selection as the entry's `commands`, each file
+under a command directory through that directory and every other file as itself, in path order.
 
 **PLG-26.** A plugin's `notes` in `/health` lists what its manifest, its entry and its `.mcp.json`
 got wrong without failing it:
 
 - a component path dropped for leaving the plugin root (PLG-16), and one served without `./`
   (PLG-24);
-- an object-map item dropped (PLG-21), for its key as for its value, an `agents` item dropped
-  (PLG-22), and an `agents` item that names no file in the plugin,
+- a `commands` object map, `commands object map is not served` (PLG-21), an `agents` item
+  dropped (PLG-22), and an `agents` item that names no file in the plugin,
   `agents entry '<path>' is not in the plugin` (AGT-5);
 - a listed `commands` file that names no file in the plugin,
   `commands entry '<path>' is not in the plugin` (PLG-21);
@@ -387,8 +389,7 @@ never connects to, starts or forwards a server.
 `hooks`, `outputStyles` or `themes` is a conflict: the plugin fails (PLG-19) with the error
 `conflicting manifests`. An entry with `strict: false` that names none of them is ordinary.
 
-**LIB-32.** An entry whose `source` is the marketplace root and that lists `skills` serves those
-and its manifest's `skills`, and the default skill scan is off for it.
-
-**LIB-33.** A declared plugin's own `skills:` and `prompts:` override its manifest and the
-conventions completely, per kind.
+**LIB-33.** A declared plugin's own `skills:` folders **add** to `skills/` and to its manifest's
+folders, after them, as an entry's do. `skills: []` serves no skill: the plugin is never added to
+the plugin layer, so none of its agents and none of its prompts is served either, and kb logs that
+once. Its own `prompts:` overrides its manifest and the conventions completely.

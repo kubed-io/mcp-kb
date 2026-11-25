@@ -1,8 +1,10 @@
 """The on-disk index: what each fetch and each plugin yielded, without re-harvesting.
 
-Cold start reads this file and reconstructs every ``Skill`` and ``FilePrompt``
-straight from it, with no filesystem walk and no frontmatter parse -- that is
-the whole point of writing one. A row is therefore self-contained: absolute
+Cold start reads this file and reconstructs every ``Skill`` straight from it,
+with no filesystem walk and no frontmatter parse -- that is the whole point of
+writing one. A prompt is recorded as the path of its file and nothing more: the
+plugin layer reads and parses it, through kb's command reader, as the plugin
+is added. A row is therefore self-contained: absolute
 paths as strings, and no reference back to a live object.
 
 Two kinds of record, because two things are expensive: a ``FetchRecord`` is
@@ -39,24 +41,23 @@ from typing import Literal
 
 from ..config import Config
 from ..plugins import Globs
-from ..plugins.manifest import CommandEntry
-from .prompts import PromptSource
 from .skills import Skill
 
-INDEX_VERSION = 7
+INDEX_VERSION = 10
 
 
 @dataclass(frozen=True)
 class SkillRow:
     """A harvested skill, flattened to JSON-safe fields.
 
-    No library, plugin, category or tags: those are the library's and the
-    plugin's, put back on by ``to_skill`` when a snapshot assigns the plugin
-    to a library.
+    No library, folder, plugin, category or tags: those are the library's and
+    the plugin's, put back on by ``to_skill`` when a snapshot assigns the plugin
+    to a library. The folder is the library's decision too -- empty for its
+    main plugin, the plugin's name otherwise -- so one plugin in two libraries
+    is one row served at two addresses.
     """
 
     name: str
-    folder: str
     description: str
     path: str
 
@@ -64,7 +65,6 @@ class SkillRow:
     def from_skill(cls, skill: Skill) -> SkillRow:
         return cls(
             name=skill.name,
-            folder=skill.folder,
             description=skill.description,
             path=str(skill.path),
         )
@@ -73,6 +73,7 @@ class SkillRow:
         self,
         *,
         library: str,
+        folder: str,
         plugin: str,
         root: Path,
         category: str | None,
@@ -83,7 +84,7 @@ class SkillRow:
         return Skill(
             name=self.name,
             library=library,
-            folder=self.folder,
+            folder=folder,
             description=self.description,
             path=Path(self.path),
             plugin=plugin,
@@ -92,50 +93,6 @@ class SkillRow:
             tags=tags,
             library_categories=library_categories,
             live=live,
-        )
-
-
-@dataclass(frozen=True)
-class PromptRow:
-    """A harvested prompt: where it is, its dialect, and what it is called.
-
-    The dialect is recorded because deciding it may have been the config's
-    doing (``dialect:`` on the plugin), the harvest's (a ``commands/`` tree)
-    or the file's own; the snapshot re-parses the file in the dialect the
-    row records, so every rebuild and restart reads it the same way. The
-    name is recorded for the same reason: it was decided by where the file
-    was found (PLG-25), which the path alone no longer says.
-
-    ``content``, ``description`` and ``argument_hint`` are an object-map
-    command's (PLG-21). An inline body has no file to re-parse, so it rides in
-    the row, and ``path`` is the manifest it came from.
-    """
-
-    path: str
-    dialect: str
-    name: str
-    content: str | None = None
-    description: str | None = None
-    argument_hint: str | None = None
-
-    @classmethod
-    def from_source(cls, source: PromptSource, dialect: str) -> PromptRow:
-        return cls(
-            path=str(source.path),
-            dialect=dialect,
-            name=source.name,
-            content=source.content,
-            description=source.description,
-            argument_hint=source.argument_hint,
-        )
-
-    def to_source(self) -> PromptSource:
-        return PromptSource(
-            path=Path(self.path),
-            name=self.name,
-            content=self.content,
-            description=self.description,
-            argument_hint=self.argument_hint,
         )
 
 
@@ -192,10 +149,13 @@ class PluginRecord:
     error: str | None
     built: str
     skills: tuple[SkillRow, ...]
-    prompts: tuple[PromptRow, ...]
+    # The prompt files the harvest selected, root-relative and in path order.
+    # Nothing is parsed here: the plugin layer reads them, through kb's command
+    # reader, when the plugin is added (PRM-18).
+    prompts: tuple[str, ...]
     files: tuple[str, ...]
     skill_dirs: tuple[str, ...]
-    # What the harvest found and could not load -- a prompt file that does not
+    # What the harvest found and could not load -- an agent file that does not
     # parse -- as ``{"path", "reason"}`` rows. Kept on the record because the
     # harvest is the only pass that sees such a file: its rows never name it.
     skipped: tuple[dict[str, str], ...] = ()
@@ -203,6 +163,9 @@ class PluginRecord:
     agents: tuple[AgentRow, ...] = ()
     agent_paths: tuple[str, ...] = ()
     globs: Globs | None = None
+    # Those of ``prompts`` a ``commands`` declaration selects, which are read in
+    # Claude's dialect wherever they sit (PRM-14).
+    claude_prompts: tuple[str, ...] = ()
 
 
 def _fetch_record_from_dict(raw: dict) -> FetchRecord:
@@ -225,13 +188,14 @@ def _plugin_record_from_dict(raw: dict) -> PluginRecord:
         error=raw["error"],
         built=raw["built"],
         skills=tuple(SkillRow(**s) for s in raw["skills"]),
-        prompts=tuple(PromptRow(**p) for p in raw["prompts"]),
+        prompts=_paths(raw["prompts"]),
         files=tuple(raw["files"]),
         skill_dirs=tuple(raw["skill_dirs"]),
         skipped=tuple(_skipped_row(row) for row in raw["skipped"]),
         agents=tuple(AgentRow(**a) for a in raw["agents"]),
         agent_paths=tuple(raw["agent_paths"]),
         globs=_globs_from_dict(raw["globs"]),
+        claude_prompts=_paths(raw["claude_prompts"]),
     )
 
 
@@ -257,8 +221,14 @@ def _globs_from_dict(raw: dict | None) -> Globs | None:
         agents=kind("agents"),
         command_dirs=tuple(raw["command_dirs"]),
         command_files=tuple(raw["command_files"]),
-        command_map=tuple(CommandEntry(**entry) for entry in raw["command_map"]),
     )
+
+
+def _paths(raw: object) -> tuple[str, ...]:
+    """A list of root-relative paths, refused when it is anything else."""
+    if not isinstance(raw, list) or not all(isinstance(p, str) for p in raw):
+        raise ValueError(f"not a list of paths: {raw!r}")
+    return tuple(raw)
 
 
 def _skipped_row(row: object) -> dict[str, str]:

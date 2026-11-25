@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
@@ -49,6 +50,9 @@ from pydantic import (
 
 if TYPE_CHECKING:  # the one direction that would be a cycle at runtime
     from .plugins.address import Address
+
+SERVER_NAME = "mcp-kb"
+"""The MCP server's own name, which ``create_app`` hands to ``QuickMCP``."""
 
 NAME = r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$"
 
@@ -252,14 +256,20 @@ class Selector(Strict):
         return _groups(self.tags)
 
 
+# What makes a string a glob to ``Path.glob``: refused in a skills folder.
+GLOB_CHARS = frozenset("*?[")
+
+
 class PluginConfig(Strict):
     """A folder of skills and prompts: a path under a source, plus its metadata.
 
     The metadata fields are Claude's marketplace-entry fields, so a plugin
     declared here and one read out of a ``marketplace.json`` carry the same
-    shape and a selector cannot tell them apart. The glob lists are this
-    server's own: omitted, a kind is the conventions and the plugin's own
-    ``plugin.json`` and entry, merged per kind as Claude Code merges them.
+    shape and a selector cannot tell them apart. ``prompts`` and ``files``
+    are this server's own glob lists: omitted, a kind is the conventions and
+    the plugin's own ``plugin.json`` and entry, merged per kind as Claude Code
+    merges them. ``skills`` lists folders, added to ``skills/`` as Claude
+    Code adds a manifest's.
     """
 
     name: str = Field(pattern=NAME)
@@ -269,7 +279,14 @@ class PluginConfig(Strict):
     keywords: list[str] = Field(default_factory=list)
     version: str | None = None
     source: str
-    skills: list[str] | None = None
+    skills: list[str] | None = Field(
+        default=None,
+        description=(
+            "Folders, not globs: each is a skill, or holds skills one level down,"
+            " and adds to the skills/ folder every plugin is read from. [] serves"
+            " no skill."
+        ),
+    )
     prompts: list[str] | None = None
     files: list[str] | None = None
     dialect: Literal["auto", "mcp-kb", "claude", "copilot"] = "auto"
@@ -296,6 +313,17 @@ class PluginConfig(Strict):
                 msg = f"pattern {pattern!r} must be a relative path without '..'"
                 raise ValueError(msg)
         return patterns
+
+    @field_validator("skills")
+    @classmethod
+    def _folders(cls, folders: list[str] | None) -> list[str] | None:
+        # A skills item is a folder, as Claude Code and kubed-mcp read one: a
+        # glob is a config written for the old reading, and served nothing now.
+        for folder in folders or []:
+            if any(c in folder for c in GLOB_CHARS):
+                msg = f"skills item {folder!r} is a folder, not a glob"
+                raise ValueError(msg)
+        return folders
 
     @property
     def address(self) -> Address:
@@ -328,6 +356,17 @@ class LibraryConfig(Strict):
     )
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @field_validator("name")
+    @classmethod
+    def _not_the_servers_name(cls, name: str) -> str:
+        if name == SERVER_NAME:
+            msg = (
+                f"library name {name!r} is the server's own name, whose prompts "
+                "the plugin layer would not prefix"
+            )
+            raise ValueError(msg)
+        return name
 
     @field_validator("categories")
     @classmethod
@@ -465,6 +504,29 @@ class Config(Strict):
             s.refresh_seconds for s in self.sources if s.refresh_seconds is not None
         ]
         return min(seconds) if seconds else None
+
+    @property
+    def delivery(self) -> Delivery:
+        """The defaults kubed-mcp's request inputs fall back to (DLV-4).
+
+        ``listed`` is none, so ``resources/list`` stays kb's index rows (SKL-14)
+        and never gains a row per ``SKILL.md`` until #86 replaces
+        ``Kb-Listing``. ``resources`` and ``via`` are unset, so the built-in
+        defaults answer. Not a config field: an operator has nothing to set.
+        """
+        return DELIVERY
+
+
+@dataclass(frozen=True)
+class Delivery:
+    """The shape of kubed-mcp's ``Delivery`` protocol: None is its default."""
+
+    resources: str | None = None
+    listed: tuple[str, ...] = ()
+    via: str | None = None
+
+
+DELIVERY = Delivery()
 
 
 def _unique(kind: str, names: list[str]) -> None:

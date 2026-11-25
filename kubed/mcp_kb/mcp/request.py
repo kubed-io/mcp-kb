@@ -16,7 +16,6 @@ from __future__ import annotations
 from kubed.mcp.protocol import client_supports_extension
 from kubed.mcp.request import request_values
 
-from ..catalogue.addressing import Addressing
 from .scope import Scope
 
 # The client capability a host declares when it builds its own skill list.
@@ -39,18 +38,17 @@ TAG_HEADER = "kb-tag"
 TAG_ALIAS = "x-skill-tags"
 TAG_PARAM_ALIAS = "tags"
 
-# What a gateway puts in front of kb's resource addresses, e.g. ``kb+``.
-PREFIX_PARAM = "prefix"
-PREFIX_HEADER = "kb-resource-prefix"
-PREFIX_ALIAS = "x-mcp-resource-prefix"
-
 # How a client declares it cannot use MCP prompts, and so wants them as tools.
+# kb's own header first, as kubed-mcp reads its ``Kb-`` inputs (DLV-16).
 PROMPTS_PARAM = "prompts"
 PROMPTS_HEADER = "x-mcp-prompts"
+PROMPTS_KB_HEADER = "kb-prompts"
 
-# How a client declares it cannot read resources.
+# How a client declares it cannot read resources: what kubed-mcp lists its
+# resource mirror by (DLV-6), and what the instructions are worded for.
 RESOURCES_PARAM = "resources"
 RESOURCES_HEADER = "x-mcp-resources"
+RESOURCES_KB_HEADER = "kb-resources"
 _OFF = ("off", "false", "0", "no", "none")
 
 # How a skill-syncing client asks for every skill in the listing. Off by default
@@ -111,16 +109,12 @@ def requested_scope() -> Scope:
     )
 
 
-def requested_addressing() -> Addressing:
-    """The gateway prefix this request wants in front of addresses in text."""
-    prefix = _read(PREFIX_HEADER, PREFIX_PARAM, PREFIX_ALIAS)
-    # A query string decodes "+" to a space, and a valid prefix has no space.
-    return Addressing.parse(prefix[0].replace(" ", "+") if prefix else "")
+def _declared_on(header: str, param: str, kb_header: str) -> bool:
+    """True unless the client said ``off`` for this capability.
 
-
-def _declared_on(header: str, param: str) -> bool:
-    """True unless the client said ``off`` for this capability."""
-    declared = _read(header, param)
+    ``Kb-<Name>`` wins over ``X-MCP-<Name>``, then the query parameter.
+    """
+    declared = _read(kb_header, param, header)
     return not declared or declared[0].strip().lower() not in _OFF
 
 
@@ -131,7 +125,7 @@ def client_uses_prompts() -> bool:
     capability -- so, like resources, a client that cannot says so:
     ``?prompts=off`` or ``X-MCP-Prompts: off``.
     """
-    return _declared_on(PROMPTS_HEADER, PROMPTS_PARAM)
+    return _declared_on(PROMPTS_HEADER, PROMPTS_PARAM, PROMPTS_KB_HEADER)
 
 
 def client_reads_resources() -> bool:
@@ -141,7 +135,7 @@ def client_reads_resources() -> bool:
     client that is not says so, with ``?resources=off`` on the MCP URL or an
     ``X-MCP-Resources: off`` header.
     """
-    return _declared_on(RESOURCES_HEADER, RESOURCES_PARAM)
+    return _declared_on(RESOURCES_HEADER, RESOURCES_PARAM, RESOURCES_KB_HEADER)
 
 
 def full_listing() -> bool:

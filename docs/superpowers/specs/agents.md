@@ -3,7 +3,9 @@
 kb serves the subagent definitions that plugins ship, through the draft MCP Agent Discovery
 Extension (`io.modelcontextprotocol/agents`, agents-wg proposal 0000 at `137d88b`, targeting MCP
 `2026-07-28`). It serves definitions only. The host builds and runs the agent. Agents are never
-served as resources, prompts or tools.
+served as prompts or tools, and as a resource only by AGT-18. The extension is kubed-mcp's plugin
+layer's: it serves the agents of the plugins kb adds to its plugin set (SKL-58), named, read and
+rewritten as this file says.
 
 **The extension is experimental, and kb follows the draft named above.** The README names the
 draft and marks the extension experimental. The rule behind every choice here is Claude Code's: a
@@ -11,9 +13,13 @@ plugin's agents mean in kb what they mean there.
 
 ## Negotiation
 
-**AGT-1.** kb declares `io.modelcontextprotocol/agents` with `{"listChanged": false}` on both
-`server/discover` and legacy `initialize`, beside
-`io.modelcontextprotocol/skills` (HTTP-27). kb sends no `notifications/agents/list_changed`.
+**AGT-1.** Once the server serves a plugin with a skill, an agent or a prompt file, it declares
+`io.modelcontextprotocol/agents` with `{"listChanged": false}` on both `server/discover` and
+legacy `initialize`, beside `io.modelcontextprotocol/skills` as SKL-44 declares it (HTTP-27), and
+goes on declaring it for the life of the process. A plugin with only prompt files brings it too,
+with no agent to list. Until then (a cold start with every source down, or a config whose plugins
+have none of the three) neither answer declares it, and `agents/list` and `agents/get` answer
+`-32601` `Method not found`. The server sends no `notifications/agents/list_changed`.
 
 **AGT-2.** `agents/list` and `agents/get` answer any caller, whether or not it
 declared the extension, as the Skills extension does (SKL-44). Declaring it, or not, changes
@@ -29,7 +35,8 @@ the operator's word (LIB-33).
 ## Which files are agents
 
 **AGT-4.** Agents come only from Claude-format plugins: a plugin with a `plugin.json`
-or a marketplace entry. A plugin declared bare in the config has no agents.
+or a marketplace entry. A plugin declared bare in the config has no agents: kb hands it to the
+plugin layer with an empty `agents` list, so nothing in its `agents/` folder is served.
 
 **AGT-5.** A plugin's agents are the `*.md` files under its `agents/` folder,
 subfolders included, unless its `plugin.json` or its marketplace entry lists `agents`. Then the
@@ -46,12 +53,16 @@ the name.
 
 **AGT-6.** An agent file is YAML frontmatter and a Markdown body. Its frontmatter MUST parse into
 a non-empty mapping with string keys, convert to JSON, and carry `name` and `description` as
-non-empty strings. The `name` MUST be a usable name, as a `commands` map key is (PLG-21): no
+non-empty strings. The `name` MUST be a usable name, as a name PLG-25 builds is: no
 whitespace, control or other invisible character, `/` or `@`, so no file can take the
 `<name>@<plugin name>` a rename gives (AGT-8); one that is not is skipped with
 `agent frontmatter name is not a usable name`. A file that breaks any of these, that cannot be read, or that is not UTF-8 is
 skipped and listed with its reason under its plugin's `skipped` in `/health`; it never fails the
-plugin. Two files of one plugin that take the same name (AGT-7): the first in path order is served
+plugin. The plugin layer reads each file again as its plugin is added, and differs in three ways.
+A file whose frontmatter has no `name` is served under its file's stem, though `/health` still
+lists it under `skipped` with `agent frontmatter has no name`. A `description` of whitespace alone,
+a `:` in a name, or frontmatter that is not representable as JSON is not served, and the server
+logs it once. Two files of one plugin that take the same name (AGT-7): the first in path order is served
 and the rest are skipped, each with `agent <name> is already served by <path>`.
 
 ## The roster: `agents/list`
@@ -61,7 +72,7 @@ for every agent in the caller's scope (AGT-15), in name order:
 
 | Card field | Value |
 |---|---|
-| `name` | Found by the default scan: `<library>_<subfolder>_…_<frontmatter name>`, one `_` segment for each folder between `agents/` and the file. Listed in a manifest or an entry: `<library>_<frontmatter name>`. Renamed by AGT-8 when it clashes |
+| `name` | The plugin layer's name, which is kb's. Found by the default scan: `<library>_<subfolder>_…_<frontmatter name>`, one `_` segment for each folder between `agents/` and the file. Listed in a manifest or an entry: `<library>_<frontmatter name>`. Renamed by AGT-8 when it clashes |
 | `description` | The frontmatter `description`, whitespace collapsed |
 | `capabilities` | The frontmatter `capabilities` when it is a list of strings, else `[]` |
 
@@ -69,7 +80,9 @@ It does not paginate: one page holds every card, and any `cursor` fails with `-3
 `Invalid agents cursor`, as SKL-48 does.
 
 **AGT-8.** An agent name is unique within a library, so within anything one client
-sees. A library walks its plugins in order (LIB-4) and each served agent claims its name:
+sees. The plugin layer claims names across the set in the order kb adds plugins: library by
+library in config order, and each library's plugins in order (LIB-4). Every name starts with its
+library's, so only one library's agents meet, and each served agent claims its name:
 
 - The first plugin to claim `<name>` keeps it.
 - A later plugin's agent with that name is served as `<name>@<plugin name>`, and the library's
@@ -80,8 +93,8 @@ sees. A library walks its plugins in order (LIB-4) and each served agent claims 
   the library's `unserved` in `/health` lists it with its plugin, path and reason.
 - A plugin that LIB-28 fails in a library serves no agents there either.
 - An agent whose recorded file no longer parses when a snapshot is built, as on a cold start from
-  `index.json`, still claims its name in that snapshot, serves nothing, and is listed under its
-  plugin's `skipped`.
+  `index.json`, serves nothing and is listed under its plugin's `skipped`. It claims no name, so a
+  later plugin's agent of that name is served under the name itself.
 
 The names are decided in library order alone, as Claude Code decides which agent loads first. kb
 stores no owner anywhere: the promise is that **a plugin added after a library's existing plugins
@@ -97,10 +110,14 @@ exists elsewhere in the library.
 | Field | Value |
 |---|---|
 | `agent` | The name |
-| `instructions` | The body, rendered as a prompt body is: qualified skill names by AGT-17, `${CLAUDE_PLUGIN_ROOT}` by PRM-48 and PRM-61, every client-only placeholder left as written (PRM-50, `${CLAUDE_SKILL_DIR}` included), then the gateway prefix (SKL-41). Omitted when the body is blank |
-| `modelRoutingHint` | From `model`, by family: `opus` → `{"role": "large", "vision": false}`, `sonnet` → `medium`, `haiku` → `small`, whether `model` is an alias or a full id (`claude-opus-5-5`). The value is lowercased and split into words, a word being a run of letters, and the family is the first word by position that is one of the three (`opus-then-sonnet` is `large`). Omitted for `inherit`, a missing or non-string `model`, or a value naming none of the three |
+| `instructions` | The body, rendered by kb's rewriter (SKL-60) as a prompt body is: qualified skill names by AGT-17, `${CLAUDE_PLUGIN_ROOT}` by PRM-48 and PRM-61, every client-only placeholder left as written (PRM-50, `${CLAUDE_SKILL_DIR}` included), then the gateway prefix (SKL-41), with leading and trailing whitespace trimmed. Omitted when the body is blank |
+| `modelRoutingHint` | From `model`, by family: `opus` → `{"role": "large", "vision": false}`, `sonnet` → `medium`, `haiku` → `small`, whether `model` is an alias or a full id (`claude-opus-5-5`). The value is lowercased and split into words, a word being a run of letters and digits, and the family is the first word by position that is one of the three (`opus-then-sonnet` is `large`, and `opus4` names none). Omitted for `inherit`, a missing or non-string `model`, or a value naming none of the three |
 | `tools` | `[]` |
-| `_meta["io.kubed.mcp-kb/agent"]` | `plugin` (its id), `library`, `path` (the file, relative to its plugin root), `frontmatter` (verbatim, as JSON), `servers`: the names of the MCP servers the plugin declares (PLG-27), and `skills` (AGT-17) |
+| `_meta["io.kubed.mcp-kb/agent"]` | kb's key: `plugin` (its id), `library`, `path` (the file, relative to its plugin root), `frontmatter` (verbatim, as JSON), `servers`: the names of the MCP servers the plugin declares (PLG-27), and `skills` (AGT-17) |
+| `_meta["io.kubed/agent"]` | The plugin layer's key: `frontmatter`, and `skills`, the `SKILL.md` URI of each of the agent's own plugin's skills its frontmatter `skills` names |
+
+The gateway prefix is written over the whole agent file, so the card's `description` and
+`io.kubed/agent`'s `frontmatter` carry it too, and kb's `_meta` key does not.
 
 **AGT-10.** `tools` is always empty. The extension allows only tools from kb's own
 `tools/list`, and an agent's tools belong to other servers. `_meta` carries what a host or a
@@ -108,23 +125,35 @@ gateway needs to find them. `invalid_agent_definition` therefore never arises.
 
 **AGT-11.** kb never connects to, starts or forwards the MCP servers a plugin declares.
 
-**AGT-16.** An agent of a live fetch is re-read on `agents/get`, as a prompt is
-(PRM-60): its file is revalidated, then parsed again. When that read fails, or the file no longer
-parses, `agents/get` answers from the copy parsed when the snapshot was built, and kb logs a
-warning. A re-read keeps the name the snapshot serves the agent under, even when the edit changes
-its frontmatter `name`, until the next refresh. `agents/list` answers from the snapshot.
+**AGT-16.** An agent of a live fetch is revalidated by every request that reads skills or agents
+under a scope admitting its plugin (SKL-37). A file that moved re-reads its plugin, and from the
+next request on `agents/list` and `agents/get` both serve the new read: the request that found the
+edit still reads what it began with. An edit of the frontmatter `name` serves the agent under the
+new name without a refresh, and a later plugin's agent it now clashes with is renamed by AGT-8. An
+edit that no longer parses takes the agent away until it parses again.
 
-**AGT-17.** `instructions` rewrites qualified skill names (SKL-54) as SKL-55 says.
-The agent's plugin is the own plugin and its library is the library, and the rewrite runs before
-PRM-48. `_meta["io.kubed.mcp-kb/agent"]` adds `skills`, an object that maps entries of the
-frontmatter `skills` to the `SKILL.md` addresses they resolve to.
+**AGT-17.** `instructions` rewrites qualified skill names (SKL-54) as SKL-55 says, for the
+request's scope. The agent's plugin is the own plugin and its library is the library, and the
+rewrite runs before PRM-48. `_meta["io.kubed.mcp-kb/agent"]` adds `skills`, an object that maps
+entries of the frontmatter `skills` to the `SKILL.md` addresses they resolve to. It is decided once
+per generation, whatever the caller's scope, from the agent's own plugin alone, which every scope
+that sees the agent also sees.
 
 - **Entries.** The frontmatter `skills` is a list, whose string items are the entries, or one
   string, split on `,`. Each entry is trimmed, and is the map's key as written.
-- **Resolution.** A qualified name resolves by SKL-55. A bare `<skill>` resolves to the one
-  in-scope skill of that name in the agent's own plugin.
+- **Resolution.** A qualified name resolves by SKL-55 with the agent's own plugin as its only
+  candidate, so a name of another plugin's skill never resolves. A bare `<skill>` resolves to the
+  one served skill of that name in the agent's own plugin.
 - **The rest.** An entry that does not resolve is left out, and `skills` is `{}` when none do.
   `frontmatter` stays verbatim, and the addresses are never prefixed (SKL-41).
+
+**AGT-18.** An agent's file also reads as a resource at
+`agents://<namespace>/<path>`: its plugin's namespace in the library (SKL-59), and the file's path
+below `agents/`. A file from a listed folder sits below that folder, and a listed file outside both
+below the plugin root. A renamed agent (AGT-8) reads at `agents://<namespace>/<name>@<plugin>.md`. It is in no listing unless
+the request's `Listed` setting names `agents` (DLV-8). It is held to the request's scope as
+`agents/get` is, and out of scope it fails as an absent address does. It reads as the plugin layer
+builds the file, after kb's rewriter and the prefix.
 
 ## Caching and errors
 
