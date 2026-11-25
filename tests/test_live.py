@@ -29,6 +29,7 @@ from fastmcp import Client
 from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
+from kubed.mcp_kb.catalogue.uris import AGENT_META
 from kubed.mcp_kb.config import BasicAuth, Config, EnvRef
 from kubed.mcp_kb.plugins import Fetch
 from kubed.mcp_kb.sources import live
@@ -166,17 +167,27 @@ def _skill_site(serving, view_key=None):
 
 
 def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
-    webdav, tmp_path
+    webdav, tmp_path, monkeypatch
 ):
     """A refresh publishing from another thread while a build is in flight: the
     build's rewriter reads the state its request's view pinned, not the new one;
-    a build no view pinned reads what is published now (N13)."""
+    a build no view pinned reads what is published now (N13).
+
+    The refresh lands inside an ``agents/get``, after its view pinned: that
+    request answers from its own generation, kb's ``_meta`` key included, and
+    the next one from the new generation (AGT-17)."""
     import contextvars
     from concurrent.futures import ThreadPoolExecutor
     from dataclasses import replace
 
     command = "---\ndescription: Cite.\n---\nUse notes:x.\n"
     webdav.write("prompts/cite.md", command)
+    webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
+    webdav.write(
+        "agents/a.md",
+        "---\nname: a\ndescription: Cites.\nskills: [x, y]\n---\n"
+        "Use notes:x and notes:y.\n",
+    )
     knowledge_base = _knowledge_base(webdav, tmp_path)
     serving = serving_of(knowledge_base)
     text = (webdav.root / "skills/x/SKILL.md").read_text()
@@ -189,9 +200,33 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
     )
     plugin = site.plugin
 
+    # x renamed y: x's folder now holds a hidden file, so x no longer serves.
     webdav.write("skills/x/.draft.md", "draft\n")
-    with ThreadPoolExecutor(1) as pool:
-        assert pool.submit(knowledge_base.refresh, force=True).result() == [KEY]
+    webdav.skill("y", "renamed")
+    reread = serving._reread_live
+    refreshed: list[list[str]] = []
+
+    def refresh_inside_the_view(scope):
+        # The plugin layer has taken its state, and kb's view its published
+        # one: a refresh publishing from another thread now lands after the pin.
+        reread(scope)
+        if not refreshed:
+            with ThreadPoolExecutor(1) as pool:
+                done = pool.submit(knowledge_base.refresh, force=True)
+                refreshed.append(done.result())
+
+    monkeypatch.setattr(serving, "_reread_live", refresh_inside_the_view)
+
+    async def get_twice(client):
+        first = await ext_request(client, "agents/get", name="notes_a")
+        return first, await ext_request(client, "agents/get", name="notes_a")
+
+    first, then = run_client(knowledge_base, get_twice)
+    assert refreshed == [[KEY]]
+    assert first["instructions"] == "Use skill://notes/x/SKILL.md and notes:y."
+    assert first["_meta"][AGENT_META]["skills"] == {"x": "skill://notes/x/SKILL.md"}
+    assert then["instructions"] == "Use notes:x and skill://notes/y/SKILL.md."
+    assert then["_meta"][AGENT_META]["skills"] == {"y": "skill://notes/y/SKILL.md"}
     assert SKILL.removeprefix("skill://") in serving._published.hidden
 
     assert "first" in pinned.run(serving.rewrite, site, text)
@@ -848,10 +883,11 @@ async def test_an_out_of_scope_live_skill_is_not_revalidated(webdav, tmp_path):
     assert not [p for p in paths if p.startswith(f"/{FOLDER}/skills/")]
 
 
-def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock):
+def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock, caplog):
     """N6 for an agent: the request after the re-adding one serves the edit, on
     ``agents/get`` and ``agents/list`` both; an edit that no longer parses
-    takes the agent away, and the next good one brings it back."""
+    keeps the plugin's last good build, said once (AGT-16), and the next good
+    one is served."""
     webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
     webdav.write(
         "agents/helper.md", AGENT.format(description="Helps.", body="Help first.")
@@ -893,20 +929,104 @@ def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock):
         ), key
     assert listed[name]["description"] == "Helps, edited upstream."
 
-    # An unquoted `[a] [b]` is no YAML at all.
-    first, got, listed = edit(
+    first, got, listed = edit(  # an unquoted `[a] [b]` is no YAML at all
         "---\nname: helper\ndescription: [a] [b]\n---\n\nHalfway through a save.\n"
     )
-    assert first is not None, "N6: the re-adding request"
-    assert got is None
-    assert name not in listed
+    assert first["instructions"] == "Help, edited."
+    assert got["instructions"] == "Help, edited.", "AGT-16: the last good build"
+    assert listed[name]["description"] == "Helps, edited upstream."
+    assert "was not read again" in caplog.text and "agents/helper.md" in caplog.text
 
     first, got, listed = edit(
         AGENT.format(description="Helps again.", body="Help, saved properly.")
     )
-    assert first is None, "N6: the re-adding request"
+    assert first["instructions"] == "Help, edited.", "N6: the re-adding request"
     assert got["instructions"] == "Help, saved properly."
     assert listed[name]["description"] == "Helps again."
+
+
+def test_a_live_agent_saved_with_an_unusable_name_keeps_its_name(
+    webdav, tmp_path, clock, caplog
+):
+    """AGT-16: an edit to a name the plugin layer refuses keeps the plugin's last
+    good build, the agent under its name and with its body, said once and with
+    no cache path in it."""
+    webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
+    webdav.write(
+        "agents/helper.md", AGENT.format(description="Helps.", body="Help first.")
+    )
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+
+    async def names(client):
+        listed = (await ext_request(client, "agents/list"))["agents"]
+        return {card["name"] for card in listed}
+
+    assert run_client(knowledge_base, names) == {"notes_helper"}
+
+    webdav.write(
+        "agents/helper.md",
+        '---\nname: "a b"\ndescription: Helps, renamed.\n---\n\nRenamed.\n',
+    )
+    clock(2.5)
+
+    async def go(client):
+        first = await names(client)
+        then = await names(client)
+        got = await ext_request(client, "agents/get", name="notes_helper")
+        return first, then, got
+
+    first, then, got = run_client(knowledge_base, go)
+    assert first == {"notes_helper"}, "N6: the re-adding request"
+    assert then == {"notes_helper"}, "AGT-16: the agent keeps its name"
+    assert got["instructions"] == "Help first."
+    assert got["_meta"]["io.kubed.mcp-kb/agent"]["frontmatter"]["name"] == "helper"
+    kbs = [r.getMessage() for r in caplog.records if r.name.startswith("kubed.mcp_kb")]
+    warned = [message for message in kbs if "agents/helper.md" in message]
+    assert len(warned) == 1, warned
+    assert "was not read again" in warned[0]
+    assert "is not a usable name" in warned[0]
+    assert not [message for message in kbs if str(tmp_path) in message]
+
+
+def test_a_live_edit_taking_a_twins_name_serves_the_first_in_path_order(
+    webdav, tmp_path, clock
+):
+    """AGT-16's carve-out: an edit that gives an agent the name another file of
+    its plugin serves still reads, so no build is kept. From the next request
+    the first file in path order is served under that name and the other is
+    skipped (AGT-6), as a refresh of the same tree serves them."""
+    webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
+    webdav.write(
+        "agents/alpha.md", "---\nname: alpha\ndescription: A.\n---\n\nAlpha's.\n"
+    )
+    webdav.write(
+        "agents/helper.md", AGENT.format(description="Helps.", body="Helper's.")
+    )
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+
+    async def names(client):
+        listed = (await ext_request(client, "agents/list"))["agents"]
+        return {card["name"] for card in listed}
+
+    assert run_client(knowledge_base, names) == {"notes_alpha", "notes_helper"}
+
+    webdav.write(
+        "agents/alpha.md",
+        "---\nname: helper\ndescription: A, renamed.\n---\n\nAlpha's, renamed.\n",
+    )
+    clock(2.5)
+
+    async def go(client):
+        first = await names(client)
+        then = await names(client)
+        got = await ext_request(client, "agents/get", name="notes_helper")
+        return first, then, got
+
+    first, then, got = run_client(knowledge_base, go)
+    assert first == {"notes_alpha", "notes_helper"}, "N6: the re-adding request"
+    assert then == {"notes_helper"}, "AGT-6: one name, the first file in path order"
+    assert got["instructions"] == "Alpha's, renamed."
+    assert knowledge_base.generation == 0, "no refresh did it"
 
 
 def test_a_live_watch_stamps_the_agents_the_manifest_lists(webdav, tmp_path, clock):
@@ -1175,18 +1295,18 @@ def test_a_kept_plugins_agents_are_not_read_again(webdav, tmp_path, monkeypatch)
     knowledge_base = _two_libraries(webdav, tmp_path)
     serving_of(knowledge_base)
     read = []
-    original = serving_module._read_agent
+    original = serving_module._frontmatter
 
-    def counted(library, categories, plugin, root, path):
-        read.append((library, path))
-        return original(library, categories, plugin, root, path)
+    def counted(root, path):
+        read.append(path)
+        return original(root, path)
 
-    monkeypatch.setattr(serving_module, "_read_agent", counted)
+    monkeypatch.setattr(serving_module, "_frontmatter", counted)
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
     read_served(knowledge_base, URI)
     assert "edited in nextcloud" in read_served(knowledge_base, URI)
 
-    assert ("other", "agents/z.md") not in read
+    assert "agents/z.md" not in read
 
     async def get(client):
         return await ext_request(client, "agents/get", name="other_helper")
@@ -1194,6 +1314,67 @@ def test_a_kept_plugins_agents_are_not_read_again(webdav, tmp_path, monkeypatch)
     got = run_client(knowledge_base, get)
     assert got["instructions"] == "Zed."
     assert got["_meta"]["io.kubed.mcp-kb/agent"]["frontmatter"]["description"] == "Z."
+
+
+def test_a_kept_local_plugins_agents_are_not_read_again(webdav, tmp_path, caplog):
+    """A re-read keeps every plugin that is not live as its last add read it,
+    agents included: a ``file://`` agent edited in place serves what the layer
+    read, kb's ``frontmatter`` agreeing with the layer's, and one saved halfway
+    through stays listed, with no ``agent_meta`` failure (AGT-16)."""
+    webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
+    local = tmp_path / "kit"
+    (local / ".claude-plugin").mkdir(parents=True)
+    (local / ".claude-plugin/plugin.json").write_text(json.dumps({"name": "kit"}))
+    (local / "agents").mkdir()
+    agent = local / "agents/aide.md"
+    agent.write_text("---\nname: aide\ndescription: Aids.\n---\n\nKit's.\n")
+    knowledge_base = _live_config(
+        webdav,
+        tmp_path,
+        [
+            {"name": "notes", "source": KEY},
+            {"name": "kit", "source": f"file://{local}"},
+        ],
+        [
+            {"name": "notes", "plugins": ["notes"]},
+            {"name": "kit", "plugins": ["kit"]},
+        ],
+    )
+    name = "kit_aide"
+
+    async def go(client):
+        got = await ext_request(client, "agents/get", name=name)
+        listed = (await ext_request(client, "agents/list"))["agents"]
+        return got, {card["name"]: card for card in listed}
+
+    assert run_client(knowledge_base, go)[0]["instructions"] == "Kit's."
+
+    def reread(text: str, edit: str):
+        agent.write_text(text)
+        webdav.skill("x", edit)
+        read_served(knowledge_base, URI)
+        assert edit in read_served(knowledge_base, URI), "the live plugin re-read"
+        return run_client(knowledge_base, go)
+
+    with caplog.at_level("WARNING"):
+        got, listed = reread(
+            "---\nname: aide\ndescription: Aids, edited in place.\n---\n\nKit's, longer.\n",
+            "edited in nextcloud, and rather longer than before",
+        )
+        layer = got["_meta"]["io.kubed/agent"]["frontmatter"]
+        assert got["_meta"]["io.kubed.mcp-kb/agent"]["frontmatter"] == layer
+        assert layer["description"] == "Aids."
+        assert listed[name]["description"] == "Aids."
+
+        got, listed = reread(
+            "---\nname: aide\n---\n\nSaved halfway through.\n",
+            "edited in nextcloud a second time, and longer again than that",
+        )
+    assert name in listed, "AGT-16: a kept plugin's agent stays served"
+    assert got["_meta"]["io.kubed.mcp-kb/agent"]["frontmatter"]["description"] == (
+        "Aids."
+    )
+    assert "agent_meta failed" not in caplog.text
 
 
 def test_a_live_rename_renames_a_later_clashing_agent(webdav, tmp_path):

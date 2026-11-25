@@ -373,14 +373,32 @@ async def test_the_resource_tools_are_kubed_mcps(tmp_path):
     assert "def read_resource" not in source
 
 
-async def test_a_refresh_serves_the_new_set(tmp_path):
+async def test_a_refresh_serves_the_new_set(tmp_path, caplog):
     knowledge_base = kit(tmp_path)
     root = tmp_path / "lib"
     (root / "skills/kit/SKILL.md").write_text(MAIN + "\nEdited.\n")
     (root / "skills/other/SKILL.md").unlink()
     (root / "agents/helper.md").unlink()
+    # Harvested, then gone before the set is published: the layer never reads it.
+    note = (
+        "agent file agents/helper.md of plugin kit@lib is not served:"
+        " the plugin layer did not read it"
+    )
+
+    def notes() -> int:
+        return [
+            r.getMessage()
+            for r in caplog.records
+            if r.name == "kubed.mcp_kb.mcp.skills"
+        ].count(note)
+
+    with caplog.at_level(logging.WARNING):
+        server_of(knowledge_base)
+    assert notes() == 1
     async with Client(server_of(knowledge_base)) as client:
         knowledge_base.refresh(force=True)
+        knowledge_base.refresh(force=True)
+        assert notes() == 1
         assert "Edited." in await _text(client, "skill://lib/kit/SKILL.md")
         with pytest.raises(MCPError):
             await client.read_resource("skill://lib/other/SKILL.md")
@@ -621,8 +639,8 @@ async def test_a_refusal_quoting_the_tree_names_kbs_address(
 
 
 async def test_an_agent_kb_did_not_read_is_kbs_too(tmp_path):
-    """N10: kubed-mcp serves a nameless agent under its stem. kb reads it as
-    its roster does, with the stem as its name: counted, and with kb's key."""
+    """N10: kubed-mcp serves a nameless agent under its stem: kb found its
+    file, so it is counted and carries kb's key."""
     knowledge_base = kit(
         tmp_path, **{"agents/nameless.md": "---\ndescription: No name.\n---\nHi\n"}
     )
@@ -631,7 +649,7 @@ async def test_an_agent_kb_did_not_read_is_kbs_too(tmp_path):
         got = await ext_request(client, "agents/get", name="lib_nameless")
     assert got["_meta"]["io.kubed.mcp-kb/agent"]["path"] == "agents/nameless.md"
     assert got["_meta"]["io.kubed.mcp-kb/agent"]["plugin"] == "kit@lib"
-    assert "lib_nameless" in [a.name for a in knowledge_base.catalogue.agents.visible()]
+    assert "lib_nameless" in [a.name for a in knowledge_base.snapshot.agents]
     assert knowledge_base.status["libraries"]["lib"]["agents"] == 2
 
 

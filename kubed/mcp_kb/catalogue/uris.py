@@ -57,13 +57,12 @@ from __future__ import annotations
 
 import logging
 import mimetypes
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from ..mcp.scope import EVERYTHING, Scope
 from . import placeholders
-from .agents import Agent, AgentRoster
 from .harvest import hidden, readable
 from .names import QualifiedNames, split_frontmatter
 from .skills import LibraryFiles, Skill, SkillIndex
@@ -227,14 +226,6 @@ def _children(skills: list[Skill], folder: str) -> dict[str, int]:
     return dict(sorted(found.items()))
 
 
-def agent_path(agent: Agent) -> str:
-    """An agent's file as its plugin names it: relative to the plugin root."""
-    for base in (agent.root, agent.root.resolve()):
-        if agent.path.is_relative_to(base):
-            return agent.path.relative_to(base).as_posix()
-    return agent.path.name
-
-
 def mime_for(path: str) -> str:
     """The media type of a path, defaulting to markdown rather than octets.
 
@@ -287,10 +278,8 @@ class Catalogue:
         resources: LibraryFiles,
         revalidate: Callable[[Path], None] | None = None,
         libraries: Sequence[LibraryText] = (),
-        agents: AgentRoster | None = None,
     ):
         self._libraries = list(libraries)
-        self._agents = agents if agents is not None else AgentRoster()
         self._index = index
         self._resources = resources
         self._revalidate = revalidate
@@ -299,11 +288,6 @@ class Catalogue:
         # changes under a generation, so each is read once however many ask.
         self._files: dict[Path, dict[str, Path]] = {}
         self._texts: dict[Path, str] = {}
-
-    @property
-    def agents(self) -> AgentRoster:
-        """The agents this catalogue holds; ``len()`` counts those served."""
-        return self._agents
 
     # -- listing ------------------------------------------------------------
 
@@ -410,24 +394,20 @@ class Catalogue:
 
     # -- what a scope may see -----------------------------------------------
 
-    def without(
-        self, addresses: Sequence[str], agents: AgentRoster | None = None
-    ) -> Catalogue:
-        """The same catalogue less the skills at ``addresses``, and with
-        ``agents`` in place of its roster when given.
+    def without(self, addresses: Sequence[str]) -> Catalogue:
+        """The same catalogue less the skills at ``addresses``.
 
         For a server that refuses to serve some skills: everything that lists,
         hints at or rewrites a pointer to one is answered from what is left,
         so nothing names a skill the server will not read.
         """
-        if not addresses and agents is None:
+        if not addresses:
             return self
         narrowed = Catalogue(
             self._index.without(addresses),
             self._resources,
             self._revalidate,
             self._libraries,
-            self._agents if agents is None else agents,
         )
         # The same trees, so what one has read the other need not read again.
         narrowed._files = self._files
@@ -583,42 +563,34 @@ class Catalogue:
             skills=self.plugin_skill_dirs(library, plugin, scope),
         )
 
-    def agent(self, library: str, plugin: str, path: str) -> Agent | None:
-        """The agent of ``plugin`` in ``library`` whose file is ``path``."""
-        for agent in self._agents.visible():
-            if (
-                agent.library == library
-                and agent.plugin == plugin
-                and agent_path(agent) == path
-            ):
-                return agent
-        return None
-
     def agent_meta(
-        self, library: str, plugin: str, path: str, read: Agent | None = None
-    ) -> dict | None:
-        """kb's ``io.kubed.mcp-kb/agent`` value for one agent (AGT-9), or None.
+        self,
+        library: str,
+        plugin: str,
+        path: str,
+        frontmatter: Mapping[str, object],
+        servers: Sequence[str],
+    ) -> dict:
+        """kb's ``io.kubed.mcp-kb/agent`` value for one agent (AGT-9).
 
-        ``skills`` maps each ``skills:`` entry of the file to the ``SKILL.md``
-        address it resolves to among the agent's own plugin's skills alone
-        (N9): this is computed once per generation and never sees a scope, and
-        every scope that admits the agent admits its plugin, so it never names
-        a skill a caller cannot see (SCP-24). ``read`` is the agent as read
-        since, in place of the roster's: one the roster does not hold, or a live
-        one whose file may have moved (N6).
+        ``plugin`` is kb's plugin id, ``path`` the agent's file under its root,
+        ``frontmatter`` what that file's frontmatter reads as and ``servers``
+        the plugin's MCP server names. ``skills`` maps each ``skills:`` entry of
+        the frontmatter to the ``SKILL.md`` address it resolves to among the
+        agent's own plugin's skills alone (N9): this is computed once per
+        generation and never sees a scope, and every scope that admits the
+        agent admits its plugin, so it never names a skill a caller cannot see
+        (SCP-24).
         """
-        agent = read or self.agent(library, plugin, path)
-        if agent is None:
-            return None
         names = self.qualified_names(library, plugin)
         own = QualifiedNames(names.plugins[:1])
         return {
-            "plugin": agent.plugin,
-            "library": agent.library,
+            "plugin": plugin,
+            "library": library,
             "path": path,
-            "frontmatter": agent.parsed.frontmatter,
-            "servers": list(agent.servers),
-            "skills": own.preload(agent.parsed.frontmatter.get("skills")),
+            "frontmatter": frontmatter,
+            "servers": list(servers),
+            "skills": own.preload(frontmatter.get("skills")),
         }
 
     def _library_files(self, library: str, scope: Scope) -> list[str]:

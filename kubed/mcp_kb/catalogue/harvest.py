@@ -23,7 +23,6 @@ running it.
 
 from __future__ import annotations
 
-import unicodedata
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -69,23 +68,6 @@ METADATA_DOTDIRS: frozenset[str] = frozenset({".claude-plugin"})
 # What a fingerprint descends into: everything a harvest reads, plus the
 # directories holding the files that decide what a harvest reads.
 FINGERPRINTED_DOTDIRS: frozenset[str] = CONVENTIONAL_DOTDIRS | METADATA_DOTDIRS
-
-
-def usable_name(text: object) -> bool:
-    """Whether a fetched name can be served: a map key, an agent's, one a path built.
-
-    It becomes a served prompt or agent name, a ``/health`` reason and a log
-    line, so it is one non-empty token: no whitespace, no control or other
-    invisible character, no ``/`` (a path) and no ``@`` (AGT-8's rename).
-    """
-    return (
-        isinstance(text, str)
-        and bool(text)
-        and not any(
-            c.isspace() or c in "/@" or unicodedata.category(c).startswith("C")
-            for c in text
-        )
-    )
 
 
 def patterns(kind: str, globs: Globs) -> tuple[str, ...]:

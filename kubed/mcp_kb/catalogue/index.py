@@ -4,8 +4,9 @@ Cold start reads this file and reconstructs every ``Skill`` straight from it,
 with no filesystem walk and no frontmatter parse -- that is the whole point of
 writing one. A prompt is recorded as the path of its file and nothing more: the
 plugin layer reads and parses it, through kb's command reader, as the plugin
-is added. A row is therefore self-contained: absolute
-paths as strings, and no reference back to a live object.
+is added. So is an agent file: the plugin layer is its one reader (AGT-6). A
+row is therefore self-contained: absolute paths as strings, and no reference
+back to a live object.
 
 Two kinds of record, because two things are expensive: a ``FetchRecord`` is
 one materialised tree (a clone, a copy, a directory) and its fingerprint, and
@@ -43,7 +44,7 @@ from ..config import Config
 from ..plugins import Globs
 from .skills import Skill
 
-INDEX_VERSION = 10
+INDEX_VERSION = 11
 
 
 @dataclass(frozen=True)
@@ -119,14 +120,6 @@ class FetchRecord:
 
 
 @dataclass(frozen=True)
-class AgentRow:
-    """One agent file: where it is (relative to its plugin root) and its name."""
-
-    path: str
-    name: str
-
-
-@dataclass(frozen=True)
 class PluginRecord:
     """One plugin's harvest out of its fetch's tree: every row built from it.
 
@@ -155,12 +148,13 @@ class PluginRecord:
     prompts: tuple[str, ...]
     files: tuple[str, ...]
     skill_dirs: tuple[str, ...]
-    # What the harvest found and could not load -- an agent file that does not
-    # parse -- as ``{"path", "reason"}`` rows. Kept on the record because the
-    # harvest is the only pass that sees such a file: its rows never name it.
+    # What the harvest found and could not load, as ``{"path", "reason"}``
+    # rows. None is written now: an agent file is the plugin layer's to read,
+    # and the plugin layer says what it skips (AGT-6).
     skipped: tuple[dict[str, str], ...] = ()
-    # Agents and the paths a fallback must refuse, relative to the plugin root.
-    agents: tuple[AgentRow, ...] = ()
+    # The agent files the harvest found, root-relative and in its order, read
+    # by nothing here; and the paths a fallback must refuse (AGT-3).
+    agents: tuple[str, ...] = ()
     agent_paths: tuple[str, ...] = ()
     globs: Globs | None = None
     # Those of ``prompts`` a ``commands`` declaration selects, which are read in
@@ -192,7 +186,7 @@ def _plugin_record_from_dict(raw: dict) -> PluginRecord:
         files=tuple(raw["files"]),
         skill_dirs=tuple(raw["skill_dirs"]),
         skipped=tuple(_skipped_row(row) for row in raw["skipped"]),
-        agents=tuple(AgentRow(**a) for a in raw["agents"]),
+        agents=_paths(raw["agents"]),
         agent_paths=tuple(raw["agent_paths"]),
         globs=_globs_from_dict(raw["globs"]),
         claude_prompts=_paths(raw["claude_prompts"]),

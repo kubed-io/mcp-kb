@@ -8,6 +8,7 @@ answer back out of what it serves and its ``status``, which is ``/health``.
 
 import json
 import logging
+import re
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ from fastmcp import Client
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue.snapshot import effective_globs
 from kubed.mcp_kb.config import Config
-from kubed.mcp_kb.mcp.skills import _read_agent
+from kubed.mcp_kb.mcp.skills import _frontmatter
 from tests.conftest import DEEP_YAML, ext_request, server_of
 
 pytestmark = pytest.mark.unit
@@ -529,8 +530,9 @@ def test_a_listed_agent_is_a_path_not_a_glob(tmp_path):
     _manifest(root, name="kit", agents=["./agents/[draft].md", "./agents/*.md"])
 
     knowledge_base = _declared(tmp_path, root)
+    server_of(knowledge_base)
 
-    cards = knowledge_base.catalogue.agents.visible()
+    cards = knowledge_base.snapshot.agents
     assert [card.name for card in cards] == ["kit_draft"]
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [
         "agents entry 'agents/*.md' is not in the plugin"
@@ -548,8 +550,9 @@ def test_a_listed_agent_in_a_dot_folder_is_served_and_one_outside_is_not(tmp_pat
     _manifest(root, name="kit", agents=["./.private/wip.md", "./agents/out.md"])
 
     knowledge_base = _declared(tmp_path, root)
+    server_of(knowledge_base)
 
-    cards = knowledge_base.catalogue.agents.visible()
+    cards = knowledge_base.snapshot.agents
     assert [card.name for card in cards] == ["kit_wip"]
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [
         "agents entry 'agents/out.md' is not in the plugin"
@@ -570,7 +573,7 @@ async def test_a_listed_agent_linked_out_of_the_root_is_not_served(tmp_path):
         listing = await ext_request(client, "agents/list")
 
     assert [agent["name"] for agent in listing["agents"]] == ["kit_in"]
-    assert len(knowledge_base.snapshot.catalogue.agents) == 1
+    assert len(knowledge_base.snapshot.agents) == 1
 
 
 def test_kb_reads_no_agent_file_linked_out_of_the_root(tmp_path):
@@ -583,15 +586,29 @@ def test_kb_reads_no_agent_file_linked_out_of_the_root(tmp_path):
     (root / "agents/out.md").symlink_to(outside)
     (root / "agents/dir.md").mkdir()
     _write(root, "agents/in.md", "---\nname: in\ndescription: I.\n---\nGo.\n")
-    plugin = _declared(tmp_path, root)._plugins[0]
 
-    def read(path):
-        return _read_agent("kit", frozenset(), plugin, root, path)
+    for path in ("agents/out.md", "agents/dir.md", "../elsewhere.md"):
+        with pytest.raises(
+            ValueError, match=f"kb cannot read agent file {re.escape(path)}"
+        ):
+            _frontmatter(root, path)
+    assert _frontmatter(root, "agents/in.md") == {"name": "in", "description": "I."}
 
-    assert read("agents/out.md") is None
-    assert read("agents/dir.md") is None
-    assert read("../elsewhere.md") is None
-    assert read("agents/in.md").name == "in"
+
+def test_kb_names_the_reason_an_agent_file_it_reads_does_not_parse(tmp_path):
+    # AGT-6: the layer's own reason, for a file that changed after it read it.
+    root = tmp_path / "kit"
+    _write(root, "agents/bad.md", "---\nname: a:b\ndescription: d\n---\nGo.\n")
+    (root / "agents/latin.md").write_bytes(b"---\nname: l\ndescription: caf\xe9\n---\n")
+
+    with pytest.raises(ValueError) as bad:
+        _frontmatter(root, "agents/bad.md")
+    assert str(bad.value) == (
+        "agent file agents/bad.md: agent name 'a:b' is not a usable name"
+    )
+    with pytest.raises(ValueError) as latin:
+        _frontmatter(root, "agents/latin.md")
+    assert str(latin.value) == "kb cannot read agent file agents/latin.md"
 
 
 LISTED_COMMANDS = [
@@ -777,7 +794,8 @@ def test_a_component_glob_python_refuses_matches_nothing(
     assert knowledge_base.status["plugins"]["kit"]["status"] == "ok"
     assert "a" in _served(knowledge_base)
     if key == "agents":
-        cards = knowledge_base.catalogue.agents.visible()
+        server_of(knowledge_base)
+        cards = knowledge_base.snapshot.agents
         assert [card.name for card in cards] == ["kit_good"]
     if key == "commands":
         assert _names(knowledge_base) == ["kit_ok"]

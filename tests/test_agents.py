@@ -16,12 +16,6 @@ import pytest
 from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.catalogue.agents import (
-    ParsedAgent,
-    parse_agent,
-    routing_hint,
-)
-from kubed.mcp_kb.catalogue.snapshot import build_snapshot
 from kubed.mcp_kb.catalogue.uris import AGENT_META
 from kubed.mcp_kb.config import Config
 from tests.conftest import (
@@ -146,124 +140,211 @@ def agents_tree(tmp_path: Path) -> AgentsTree:
     return AgentsTree(tmp_path, config)
 
 
-def test_parse_agent_reads_the_diagrammer(tmp_path):
-    _write(tmp_path, "d.md", DIAGRAMMER)
+TWIN = "agent drawio_twin is already served by agents/twin-a.md"
 
-    parsed = parse_agent(tmp_path / "d.md")
 
-    assert isinstance(parsed, ParsedAgent)
-    assert parsed.name == "diagrammer"
-    assert parsed.model == "sonnet"
-    assert parsed.frontmatter["color"] == "cyan"
-    assert parsed.body == (
-        "Read ${CLAUDE_PLUGIN_ROOT}/skills/drawio/SKILL.md in ${CLAUDE_PROJECT_DIR}.\n"
-    )
+def _rows(knowledge_base: KnowledgeBase, plugin: str, path: str) -> list[dict]:
+    """The ``skipped`` rows of ``plugin`` for ``path``, once its set is served."""
+    server_of(knowledge_base)
+    skipped = knowledge_base.status["plugins"][plugin].get("skipped", ())
+    return [row for row in skipped if row["path"] == path]
 
 
 def test_a_description_has_its_whitespace_collapsed(tmp_path):
-    _write(
-        tmp_path, "d.md", "---\nname: a\ndescription: |\n  One\n  two   three\n---\n"
+    knowledge_base = _kit_agent(
+        tmp_path, "---\nname: a\ndescription: |\n  One\n  two   three\n---\n"
     )
 
-    assert parse_agent(tmp_path / "d.md").description == "One two three"
+    assert _served_cards(knowledge_base)["kit_a"]["description"] == "One two three"
 
 
 @pytest.mark.parametrize(
-    ("text", "problem"),
+    ("text", "reason"),
     [
-        ("---\nname: a\n---\nBody\n", "description"),
-        ("---\ndescription: d\n---\nBody\n", "name"),
-        ("---\nname: 3\ndescription: d\n---\nBody\n", "name"),
-        ("---\nname: a\ndescription: ''\n---\nBody\n", "description"),
-        ("---\nname: [unclosed\ndescription: d\n---\nBody\n", "parse"),
-        ("---\n- a\n- b\n---\nBody\n", "mapping"),
-        ("Just a body.\n", "mapping"),
-        ("---\nname: a\ndescription: d\nscore: .nan\n---\nBody\n", "JSON"),
-        ("---\nname: '  '\ndescription: d\n---\nBody\n", "name"),
-        ("---\nname: a\ndescription: '  '\n---\nBody\n", "description"),
-        ("---\n1: x\nname: a\ndescription: d\n---\nBody\n", "parse"),
+        ("---\nname: a\n---\nBody\n", "its description must be a non-empty string"),
+        ("---\nname: 3\ndescription: d\n---\nBody\n", "its name must be a non-empty string"),
+        (
+            "---\nname: a\ndescription: ''\n---\nBody\n",
+            "its description must be a non-empty string",
+        ),
+        ("---\nname: [unclosed\ndescription: d\n---\nBody\n", "no YAML frontmatter"),
+        ("---\n- a\n- b\n---\nBody\n", "its frontmatter is not a non-empty mapping"),
+        ("Just a body.\n", "no YAML frontmatter"),
+        (
+            "---\nname: a\ndescription: d\nscore: .nan\n---\nBody\n",
+            "its frontmatter is not representable as JSON",
+        ),
+        (
+            "---\nname: '  '\ndescription: d\n---\nBody\n",
+            "agent name 'kit_  ' is not a usable name",
+        ),
+        (
+            "---\nname: a\ndescription: '  '\n---\nBody\n",
+            "its description must be a non-empty string",
+        ),
     ],
 )
-def test_what_makes_an_agent_file_skipped(tmp_path, text, problem):
-    _write(tmp_path, "a.md", text)
+def test_what_makes_an_agent_file_skipped(tmp_path, text, reason):
+    """AGT-6: the plugin layer's reason, under the plugin, and nothing served."""
+    knowledge_base = _kit_agent(tmp_path, text)
 
-    reason = parse_agent(tmp_path / "a.md")
-
-    assert isinstance(reason, str)
-    assert problem in reason
-    assert "unclosed" not in reason
+    assert _rows(knowledge_base, "kit", "agents/a.md") == [
+        {"path": "agents/a.md", "reason": reason}
+    ]
+    assert "kit_a" not in _served(knowledge_base)
+    assert knowledge_base.status["plugins"]["kit"]["agents"] == 0
 
 
 @pytest.mark.parametrize(
     ("value", "kept"),
-    [("[a, b]", ("a", "b")), ("a", ()), ("[1]", ())],
+    [("[a, b]", ["a", "b"]), ("a", []), ("[1]", [])],
 )
 def test_capabilities_are_a_list_of_strings_or_nothing(tmp_path, value, kept):
-    _write(tmp_path, "a.md", _agent("a", capabilities=value))
+    knowledge_base = _kit_agent(tmp_path, _agent("a", capabilities=value))
 
-    assert parse_agent(tmp_path / "a.md").capabilities == kept
+    assert _served_cards(knowledge_base)["kit_a"]["capabilities"] == kept
 
 
 @pytest.mark.parametrize(
-    ("model", "role"),
+    ("model", "hint"),
     [
-        ("opus", "large"),
-        ("sonnet", "medium"),
-        ("haiku", "small"),
-        ("claude-opus-5-5", "large"),
-        ("claude-3-5-sonnet-20241022", "medium"),
-        ("us.anthropic.claude-haiku-4-5-v1:0", "small"),
-        ("Opus[1m]", "large"),
-        ("sonnet-distilled-from-opus", "medium"),
-        ("opus-then-sonnet", "large"),
+        ("sonnet", {"role": "medium", "vision": False}),
+        ("claude-opus-5-5", {"role": "large", "vision": False}),
+        ("opus-then-sonnet", {"role": "large", "vision": False}),
+        ("opus4", None),
+        ("inherit", None),
     ],
 )
-def test_routing_hint_by_family(model, role):
-    assert routing_hint(model) == {"role": role, "vision": False}
-
-
-@pytest.mark.parametrize("model", [None, "inherit", "gpt-5", "opusx", ""])
-def test_no_routing_hint(model):
-    assert routing_hint(model) is None
+def test_the_routing_hint_is_agt9s(tmp_path, model, hint):
+    agent = f"---\nname: a\ndescription: d\nmodel: {model}\n---\nB.\n"
+    got = _served(_kit_agent(tmp_path, agent))["kit_a"]
+    assert got.get("modelRoutingHint") == hint
 
 
 def _record(tree: AgentsTree, tmp_path: Path, plugin: str):
     return tree.knowledge_base(tmp_path / "cache")._records[plugin]
 
 
-def test_the_default_scan_adds_a_segment_per_folder(tmp_path):
-    tree = agents_tree(tmp_path)
-    knowledge_base = tree.knowledge_base(tmp_path / "cache")
+def test_the_harvest_records_paths_and_parses_nothing(tmp_path):
+    """D1: the agent files kb found, by path in path order, broken ones too; the
+    plugin layer is the one reader of them."""
+    kb = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
 
-    record = knowledge_base._records["extra@drawio"]
-
-    assert [a.name for a in record.agents] == [
-        "db_migrator",
-        "diagrammer",
-        "twin",
-        "twin",
-    ]
-    assert [a.path for a in record.agents] == [
+    record = kb._records["extra@drawio"]
+    assert record.agents == (
+        "agents/broken.md",
         "agents/db/migrate.md",
         "agents/diagrammer.md",
         "agents/twin-a.md",
         "agents/twin-b.md",
-    ]
+    )
     assert record.agent_paths == ("agents",)
-    skipped = knowledge_base.status["plugins"]["extra@drawio"]["skipped"]
+    assert record.skipped == ()
+
+
+def test_agent_skip_rows_are_the_layers(tmp_path):
+    """Review Focus 3: a non-UTF-8 file, a blank description and a twin in one
+    plugin each earn one row with the layer's reason and no cache path, and
+    the plugin's other agents serve."""
+    tree = agents_tree(tmp_path)
+    latin = tmp_path / "market/plugins/extra/agents/latin.md"
+    latin.write_bytes(b"---\nname: l\xe9\ndescription: d\n---\n")
+    kb = tree.knowledge_base(tmp_path / "cache")
+    server_of(kb)
+
+    skipped = kb.status["plugins"]["extra@drawio"]["skipped"]
     assert skipped == [
-        {"path": "agents/broken.md", "reason": "agent frontmatter has no description"},
+        {"path": "agents/broken.md", "reason": "its description must be a non-empty string"},
         {
-            "path": "agents/twin-b.md",
-            "reason": "agent twin is already served by agents/twin-a.md",
+            "path": "agents/latin.md",
+            "reason": "'utf-8' codec can't decode byte 0xe9 in position 11:"
+            " invalid continuation byte",
         },
+        {"path": "agents/twin-b.md", "reason": TWIN},
     ]
+    assert str(tmp_path / "cache") not in json.dumps(kb.status)
+    assert _owners(kb) == {
+        "drawio_db_migrator": "extra@drawio",
+        "drawio_diagrammer": "drawio@drawio",
+        "drawio_diagrammer@extra": "extra@drawio",
+        "drawio_twin": "extra@drawio",
+    }
+    assert kb.status["plugins"]["extra@drawio"]["agents"] == 3
+
+
+def test_a_nameless_agent_serves_under_its_stem_and_is_not_skipped(tmp_path):
+    """Review Focus 2: no frontmatter ``name`` is the file's stem, not a skip."""
+    kb = _kit_agent(
+        tmp_path, _agent("a"), **{"agents/helper.md": "---\ndescription: d\n---\nBody.\n"}
+    )
+
+    assert "kit_helper" in _served(kb)
+    assert _rows(kb, "kit", "agents/helper.md") == []
+    assert kb.status["plugins"]["kit"]["agents"] == 2
+
+
+def test_an_agent_only_the_layer_finds_is_not_served(tmp_path, monkeypatch, caplog):
+    """Review Focus 1, D4: an agent file kb's harvest did not find is vetoed in
+    ``agent_meta``, so the layer skips it; the plugin's skill still serves."""
+    from kubed.mcp_kb.catalogue import harvest
+
+    # The kit plugin is the config's only one: kb's harvest finds no agent in it.
+    monkeypatch.setattr(harvest, "agent_files", lambda root, globs: [])
+    kb = _kit_agent(tmp_path, _agent("a"))
+    assert kb._records["kit"].agents == ()
+
+    with caplog.at_level(logging.WARNING):
+        served = _served(kb)
+        kb.refresh(force=True)
+
+    assert "kit_a" not in served
+    assert read_served(kb, "skill://kit/draw/SKILL.md")
+    # Not a path kb found, so not one of the plugin's rows (D3).
+    assert _rows(kb, "kit", "agents/a.md") == []
+    # The layer logs its own refusal on every add; kb notes it once (A5).
+    assert caplog.text.count("agent file agents/a.md is not one kb found") >= 1
+    kbs = [
+        r.getMessage() for r in caplog.records if r.name == "kubed.mcp_kb.mcp.skills"
+    ]
+    assert kbs.count(
+        "agent file agents/a.md of plugin kit is not served:"
+        " kb's harvest did not find it"
+    ) == 1
+    assert kb.status["plugins"]["kit"]["agents"] == 0
+
+
+def test_a_v10_index_is_rebuilt(tmp_path):
+    """Review Focus 5, A4: a v10 ``index.json``, its agents rows of a path and a
+    name, is ignored; the sources are fetched and the index written at v11."""
+    tree = agents_tree(tmp_path)
+    tree.knowledge_base(tmp_path / "cache")
+    index_path = tmp_path / "cache/index.json"
+    raw = json.loads(index_path.read_text())
+    raw["version"] = 10
+    for record in raw["plugins"].values():
+        # v10's rows: each agent file's path and the name its harvest parsed.
+        record["agents"] = [
+            {"path": row, "name": Path(row).stem} if isinstance(row, str) else row
+            for row in record["agents"]
+        ]
+    index_path.write_text(json.dumps(raw))
+
+    kb = tree.knowledge_base(tmp_path / "cache")
+
+    assert _names(kb, "drawio") == [
+        "drawio_db_migrator",
+        "drawio_diagrammer",
+        "drawio_diagrammer@extra",
+        "drawio_twin",
+    ]
+    assert kb._records["extra@drawio"].agents[0] == "agents/broken.md"
+    assert json.loads(index_path.read_text())["version"] == 11
 
 
 def test_a_manifest_plugin_records_its_agent(tmp_path):
     record = _record(agents_tree(tmp_path), tmp_path, "lone")
 
-    assert [a.name for a in record.agents] == ["solo"]
+    assert record.agents == ("agents/solo.md",)
 
 
 def test_a_listed_agent_has_no_folder_segment(tmp_path):
@@ -282,12 +363,12 @@ def test_a_listed_agent_has_no_folder_segment(tmp_path):
         }
     )
 
-    record = KnowledgeBase(config, tmp_path / "cache")._records["kit"]
+    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
 
-    assert [(a.path, a.name) for a in record.agents] == [
-        ("agents/db/migrate.md", "migrator")
-    ]
+    record = knowledge_base._records["kit"]
+    assert record.agents == ("agents/db/migrate.md",)
     assert record.agent_paths == ("agents", "agents/db/migrate.md")
+    assert sorted(_served(knowledge_base)) == ["kit_migrator"]
 
 
 def test_a_bare_plugin_has_no_agents(tmp_path):
@@ -316,20 +397,6 @@ def test_a_symlinked_agent_out_of_the_root_is_not_harvested(tmp_path):
     assert record.agents == ()
 
 
-def test_a_file_that_is_not_utf8_is_skipped_with_a_reason(tmp_path):
-    (tmp_path / "a.md").write_bytes(b"---\nname: a\ndescription: \xff\xfe\n---\n")
-
-    reason = parse_agent(tmp_path / "a.md")
-
-    assert reason == "agent file is not UTF-8"
-
-
-def test_the_body_is_exactly_the_text_after_the_frontmatter(tmp_path):
-    _write(tmp_path, "a.md", "---\nname: a\ndescription: d\n---\n\n  indented\n")
-
-    assert parse_agent(tmp_path / "a.md").body == "\n  indented\n"
-
-
 def _kit(tmp_path: Path, manifest: dict | None = None) -> KnowledgeBase:
     root = tmp_path / "kit"
     _write(root, "agents/good.md", _agent("good"))
@@ -351,16 +418,26 @@ def test_one_bad_agent_file_skips_itself_and_not_the_plugin(tmp_path):
 
     knowledge_base = _kit(tmp_path)
 
+    assert sorted(_served(knowledge_base)) == ["kit_good"]
     status = knowledge_base.status["plugins"]["kit"]
     assert status["status"] == "ok"
-    assert {row["path"] for row in status["skipped"]} == {
-        "agents/bytes.md",
-        "agents/keys.md",
-    }
-    assert [a.name for a in knowledge_base._records["kit"].agents] == ["good"]
+    assert status["skipped"] == [
+        {
+            "path": "agents/bytes.md",
+            "reason": "'utf-8' codec can't decode byte 0xff in position 10:"
+            " invalid start byte",
+        },
+        {
+            "path": "agents/keys.md",
+            "reason": "its frontmatter is not representable as JSON",
+        },
+    ]
+    assert status["agents"] == 1
 
 
 def test_an_unreadable_agent_file_is_skipped_without_its_error(tmp_path, monkeypatch):
+    """A file kb cannot read for its ``_meta`` key is refused in ``agent_meta``
+    (PLUG-73): skipped with kb's reason, which quotes no errno and no path."""
     real = Path.read_text
 
     def read_text(self, *args, **kwargs):
@@ -374,12 +451,16 @@ def test_an_unreadable_agent_file_is_skipped_without_its_error(tmp_path, monkeyp
 
     knowledge_base = _kit(tmp_path)
 
+    assert sorted(_served(knowledge_base)) == ["kit_good"]
     status = knowledge_base.status["plugins"]["kit"]
     assert status["status"] == "ok"
     assert status["skipped"] == [
-        {"path": "agents/bad.md", "reason": "agent file is not readable"}
+        {
+            "path": "agents/bad.md",
+            "reason": "agent_meta failed: kb cannot read agent file agents/bad.md",
+        }
     ]
-    assert [a.name for a in knowledge_base._records["kit"].agents] == ["good"]
+    assert str(tmp_path / "cache") not in json.dumps(knowledge_base.status)
 
 
 def test_a_listed_agent_that_is_not_there_is_a_note(tmp_path):
@@ -390,7 +471,7 @@ def test_a_listed_agent_that_is_not_there_is_a_note(tmp_path):
     status = knowledge_base.status["plugins"]["kit"]
     assert status["status"] == "ok"
     assert "agents entry 'agents/gone.md' is not in the plugin" in status["notes"]
-    assert [a.name for a in knowledge_base._records["kit"].agents] == ["good"]
+    assert knowledge_base._records["kit"].agents == ("agents/good.md",)
 
 
 # -- Task 7: names claimed per library, and the roster in the catalogue --------
@@ -433,6 +514,16 @@ def _served(knowledge_base: KnowledgeBase) -> dict[str, dict]:
     return run_client(knowledge_base, read)
 
 
+def _served_cards(knowledge_base: KnowledgeBase) -> dict[str, dict]:
+    """Every agent card ``agents/list`` gives an unscoped caller, by name."""
+
+    async def read(client) -> dict[str, dict]:
+        cards = (await ext_request(client, "agents/list"))["agents"]
+        return {card["name"]: card for card in cards}
+
+    return run_client(knowledge_base, read)
+
+
 def _names(knowledge_base: KnowledgeBase, library: str) -> list[str]:
     """The served agents of ``library``: every one's name starts ``<library>_``."""
     return sorted(n for n in _served(knowledge_base) if n.startswith(f"{library}_"))
@@ -462,6 +553,7 @@ def test_names_follow_claude_code(tmp_path):
 
 def test_a_clash_is_renamed_and_reported(tmp_path):
     knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+    server_of(knowledge_base)
 
     status = knowledge_base.status["libraries"]
     assert status["drawio"]["renamed"] == {
@@ -537,7 +629,10 @@ def test_an_agent_named_like_a_rename_does_not_squat_it(tmp_path):
     assert "sneak@drawio" not in owners.values()
     assert "unserved" not in knowledge_base.status["libraries"]["drawio"]
     assert knowledge_base.status["plugins"]["sneak@drawio"]["skipped"] == [
-        {"path": "agents/d.md", "reason": "agent frontmatter name is not a usable name"}
+        {
+            "path": "agents/d.md",
+            "reason": "agent name 'drawio_diagrammer@extra' is not a usable name",
+        }
     ]
 
 
@@ -545,21 +640,28 @@ def test_an_agent_named_like_a_rename_does_not_squat_it(tmp_path):
     "name", ["a\nb", "x/y", "sp ace", "tab\there", "a\x07b", "../../etc", "d@x"]
 )
 def test_an_agent_name_that_is_not_a_name_is_skipped(tmp_path, name):
-    _write(tmp_path, "a.md", f"---\nname: {json.dumps(name)}\ndescription: d\n---\n")
-
-    assert parse_agent(tmp_path / "a.md") == (
-        "agent frontmatter name is not a usable name"
+    knowledge_base = _kit_agent(
+        tmp_path, f"---\nname: {json.dumps(name)}\ndescription: d\n---\n"
     )
+
+    assert _rows(knowledge_base, "kit", "agents/a.md") == [
+        {
+            "path": "agents/a.md",
+            "reason": f"agent name {'kit_' + name!r} is not a usable name",
+        }
+    ]
+    assert list(_served(knowledge_base)) == []
 
 
 def test_a_twin_in_one_plugin_is_skipped(tmp_path):
+    """Skipped, not renamed: a rename is for a clash with another plugin."""
     knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
 
-    skipped = knowledge_base.status["plugins"]["extra@drawio"]["skipped"]
-    assert {
-        "path": "agents/twin-b.md",
-        "reason": "agent twin is already served by agents/twin-a.md",
-    } in skipped
+    assert _rows(knowledge_base, "extra@drawio", "agents/twin-b.md") == [
+        {"path": "agents/twin-b.md", "reason": TWIN}
+    ]
+    renamed = knowledge_base.status["libraries"]["drawio"]["renamed"]
+    assert not [name for name in renamed if name.startswith("drawio_twin")]
 
 
 def test_an_appended_plugin_renames_nothing(tmp_path):
@@ -570,6 +672,37 @@ def test_an_appended_plugin_renames_nothing(tmp_path):
     after = _owners(tree.knowledge_base(tmp_path / "after"))
 
     assert after == {**before, "drawio_diagrammer@late": "late@drawio"}
+
+
+def test_rename_order_holds_across_refreshes(tmp_path):
+    """AGT-8: names are claimed in the order kb adds plugins, every generation,
+    and kb stores no owner, so a refresh renames nothing and a plugin appended
+    to the library takes the rename, not the name."""
+    tree = agents_tree(tmp_path)
+    knowledge_base = tree.knowledge_base(tmp_path / "cache")
+    before = _owners(knowledge_base)
+    renamed = {
+        "drawio_diagrammer@extra": (
+            "drawio_diagrammer is already served by plugin 'drawio@drawio'"
+        )
+    }
+    assert before["drawio_diagrammer"] == "drawio@drawio"
+    for _ in range(2):
+        assert knowledge_base.refresh(force=True)
+        assert _owners(knowledge_base) == before
+        assert knowledge_base.status["libraries"]["drawio"]["renamed"] == renamed
+
+    _entries(tree, after=[("late", {"agents/d.md": _agent("diagrammer")})])
+    assert knowledge_base.refresh(force=True)
+
+    late = {"drawio_diagrammer@late": "late@drawio"}
+    assert _owners(knowledge_base) == {**before, **late}
+    assert knowledge_base.status["libraries"]["drawio"]["renamed"] == {
+        **renamed,
+        "drawio_diagrammer@late": (
+            "drawio_diagrammer is already served by plugin 'drawio@drawio'"
+        ),
+    }
 
 
 def test_a_prepended_plugin_takes_the_short_name(tmp_path):
@@ -618,7 +751,9 @@ def test_a_conflicting_plugin_serves_no_agents(tmp_path):
 
 
 def test_counts(tmp_path):
+    """AGT-14: what the plugin layer serves of each plugin added."""
     knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
+    server_of(knowledge_base)
 
     status = knowledge_base.status
     assert status["plugins"]["drawio@drawio"]["agents"] == 1
@@ -728,35 +863,6 @@ def test_a_blank_body_and_no_model_leave_their_fields_out(tmp_path):
     assert definition["_meta"][AGENT_META]["servers"] == []
 
 
-def test_a_row_that_no_longer_parses_is_reported_and_keeps_its_claim(tmp_path):
-    """A cold start serves the rows the index recorded; a file that broke since
-    is reported under its plugin, and kb's roster keeps its claim."""
-    knowledge_base = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
-    drawio = tmp_path / "market/plugins/drawio/agents/diagrammer.md"
-    drawio.write_text("---\nname: diagrammer\n---\nNo description now.\n")
-
-    snapshot = build_snapshot(
-        knowledge_base.config,
-        knowledge_base._plugins,
-        knowledge_base._libraries,
-        knowledge_base._fetches,
-        knowledge_base._records,
-        1,
-    )
-
-    plugin = snapshot.status["plugins"]["drawio@drawio"]
-    assert plugin["agents"] == 0
-    assert {
-        "path": "agents/diagrammer.md",
-        "reason": "agent frontmatter has no description",
-    } in plugin["skipped"]
-    names = [a.name for a in snapshot.catalogue.agents.visible()]
-    assert "drawio_diagrammer" not in names
-    assert "drawio_diagrammer@extra" in names
-    assert snapshot.status["libraries"]["drawio"]["agents"] == 3
-    assert str(tmp_path / "cache") not in json.dumps(snapshot.status)
-
-
 def test_a_broken_agent_frees_its_name_on_a_cold_start(tmp_path):
     """N11: kubed-mcp reads each file when its plugin is added, so an agent that
     no longer parses claims nothing, and the next one takes the short name."""
@@ -776,15 +882,21 @@ def test_a_broken_agent_frees_its_name_on_a_cold_start(tmp_path):
 def test_renames_and_unserved_agents_are_logged_once(tmp_path, caplog):
     config = _mix(agents_tree(tmp_path))
 
-    with caplog.at_level(logging.INFO, logger="kubed.mcp_kb.catalogue.snapshot"):
+    logger = "kubed.mcp_kb.catalogue.snapshot"
+
+    def kbs() -> str:
+        return "\n".join(r.getMessage() for r in caplog.records if r.name == logger)
+
+    with caplog.at_level(logging.INFO, logger=logger):
         knowledge_base = KnowledgeBase(config, tmp_path / "cache")
-        boot = caplog.text
+        server_of(knowledge_base)
+        boot = kbs()
         caplog.clear()
         knowledge_base.refresh(force=True)
 
     assert boot.count("mix_diagrammer@extra") == 2  # renamed once, unserved once
     assert "agents/diagrammer.md" in boot
-    assert "mix_diagrammer@extra" not in caplog.text
+    assert "mix_diagrammer@extra" not in kbs()
 
 
 # -- served by kubed-mcp (D11) -------------------------------------------------
@@ -793,9 +905,10 @@ def test_renames_and_unserved_agents_are_logged_once(tmp_path, caplog):
 def test_agent_names_are_kbs(tmp_path):
     """Review Focus 5: kubed-mcp's names across the set are kb's per library."""
     knowledge_base = KnowledgeBase(_mix(agents_tree(tmp_path)), tmp_path / "cache")
-    roster = sorted(a.name for a in knowledge_base.catalogue.agents.visible())
+    served = sorted(_served(knowledge_base))
+    roster = sorted(a.name for a in knowledge_base.snapshot.agents)
 
-    assert sorted(_served(knowledge_base)) == roster
+    assert served == roster
     assert "mix_diagrammer@extra" in roster
     assert "drawio_diagrammer@extra" in roster
     libraries = knowledge_base.status["libraries"]
@@ -1091,6 +1204,7 @@ def test_an_agent_whose_folder_is_not_a_usable_name_is_skipped(tmp_path, folder,
     )
 
     knowledge_base = tree.knowledge_base(tmp_path / "cache")
+    server_of(knowledge_base)
 
     assert "drawio_ok_r" in _names(knowledge_base, "drawio")
     assert not [
@@ -1101,6 +1215,6 @@ def test_an_agent_whose_folder_is_not_a_usable_name_is_skipped(tmp_path, folder,
     assert knowledge_base.status["plugins"]["odd@drawio"]["skipped"] == [
         {
             "path": f"agents/{folder}/r.md",
-            "reason": f"agent name {name!r} is not a usable name",
+            "reason": f"agent name {'drawio_' + name!r} is not a usable name",
         }
     ]
