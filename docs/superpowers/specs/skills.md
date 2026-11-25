@@ -299,11 +299,12 @@ prefix (SKL-41) and without `skill://`.
 
 **SKL-37.** When a file read belongs to a `cache: live` source
 ([config-and-sources.md](config-and-sources.md)), the read first revalidates that one file against
-the server: library files and both fallbacks alike. A request that reads skills or agents first
-revalidates every file of each live skill, and each agent file, of the plugins its scope admits. A
+the server: library files and both fallbacks alike. A request that reads skills, agents or prompts
+first revalidates every file of each live skill, and each agent and prompt file, of the plugins its
+scope admits. A
 file that moved re-reads that plugin and serves it again, every other plugin kept as it is served,
 and from the next request on a skill's files, its `_manifest`, its extension entry and the
-plugin's agents describe the new bytes: the request that re-reads still reads what it began with.
+plugin's agents and prompts describe the new bytes: the request that re-reads still reads what it began with.
 A request that arrives while a refresh is publishing re-reads nothing.
 
 **SKL-38.** A revalidated file is trusted for 2 seconds. A revalidation that fails, including a
@@ -312,9 +313,10 @@ request that takes over 1 second, serves the copy on disk, and that source is no
 
 **SKL-39.** A live read changes only the bytes of files already harvested. What the plugin layer
 serves follows a live re-read (SKL-37): a skill's files, its `_manifest`, its extension entry and
-the plugin's agents. kb's own listing rows, index lines and their descriptions, and files added or
-removed upstream, follow the next refresh, except that a skill a re-read leaves unserved drops out
-of them, and comes back when it serves again (SKL-45).
+the plugin's agents and prompts. kb's own listing rows, index lines and their descriptions, and
+files added or removed upstream, follow the next refresh, except that a skill a re-read leaves
+unserved drops out of them, and comes back when it serves again (SKL-45). Only files already served
+are watched, so a skill or a prompt file added to a live plugin is served from the next refresh.
 
 ## Addresses behind a gateway
 

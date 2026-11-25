@@ -380,7 +380,7 @@ which generation is being served, and has a refresh picked up an edit yet.
   async WebDAV client — is the outstanding follow-up**, and it is a change to
   `mcp/resources.py`, `catalogue/uris.py` (the library-file read, and
   `Catalogue.live_stamp`) and `mcp/skills.py` (`_stamp`, which the view calls
-  to revalidate a live plugin's skill and agent files before kubed-mcp
+  to revalidate a live plugin's skill, agent and prompt files before kubed-mcp
   builds), not to `sources/live.py`.
 - **A plugin named like one of its library's main plugin's skills is a
   conflict.** Its namespace, `<library>/<plugin>`, is that skill's own address,

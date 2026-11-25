@@ -17,6 +17,7 @@ Two quirks of the server under test:
 
 import hashlib
 import json
+import logging
 import socket
 import threading
 import time
@@ -24,6 +25,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from fastmcp import Client
 from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
@@ -31,6 +33,7 @@ from kubed.mcp_kb.config import BasicAuth, Config, EnvRef
 from kubed.mcp_kb.plugins import Fetch
 from kubed.mcp_kb.sources import live
 from tests.conftest import (
+    DEEP_YAML,
     ext_request,
     http_client,
     read_served,
@@ -49,6 +52,10 @@ SKILL = "skill://notes/x"
 URI = f"{SKILL}/SKILL.md"
 GUIDE = "skill://notes/docs/guide.md"
 PROMPT = "---\ndescription: A prompt.\n---\n\n{body}\n"
+ARGUED = (
+    "---\ndescription: A prompt.\narguments:\n- name: who\n  description: Whom.\n"
+    "  required: true\n---\n\n{body}\n"
+)
 EDITED = "---\nname: x\ndescription: Edited upstream.\n---\n\nedited in nextcloud, and longer\n"
 OTHER = "skill://other/z/SKILL.md"
 AGENT = "---\nname: helper\ndescription: {description}\n---\n\n{body}\n"
@@ -262,6 +269,76 @@ def test_a_library_level_file_is_revalidated_too(webdav, tmp_path):
     webdav.write("docs/guide.md", "guidance, revised and lengthened upstream\n")
 
     assert "revised and lengthened" in read_served(knowledge_base, GUIDE)
+
+
+async def _rendered(client, name, **arguments) -> str:
+    got = await client.get_prompt(name, arguments)
+    return "".join(m.content.text for m in got.messages)
+
+
+async def test_a_live_prompt_edit_serves_from_the_next_request(webdav, tmp_path):
+    """PRM-58, PRM-59: the request that notices an edit still reads the old
+    build; the next one reads the edit, with its arguments."""
+    webdav.write("prompts/p.md", PROMPT.format(body="the first body"))
+    kb = _knowledge_base(webdav, tmp_path)
+    async with Client(server_of(kb)) as client:
+        assert "the first body" in await _rendered(client, "notes_p")
+        webdav.write(
+            "prompts/p.md", ARGUED.format(body="the second, longer body {{ who }}")
+        )
+        assert "the first body" in await _rendered(client, "notes_p")  # noticed here
+        assert "the second, longer body you" in await _rendered(
+            client, "notes_p", who="you"
+        )
+        (listed,) = [p for p in await client.list_prompts() if p.name == "notes_p"]
+        assert [a.name for a in listed.arguments] == ["who"]
+
+
+async def _keeps_the_last_good_build(webdav, tmp_path, caplog, broken, reason):
+    webdav.write("prompts/p.md", PROMPT.format(body="the first body"))
+    kb = _knowledge_base(webdav, tmp_path)
+    async with Client(server_of(kb)) as client:
+        assert "the first body" in await _rendered(client, "notes_p")
+        webdav.write("prompts/p.md", broken)
+        with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
+            assert "the first body" in await _rendered(client, "notes_p")
+            assert "the first body" in await _rendered(client, "notes_p")
+        warned = [
+            r.getMessage() for r in caplog.records if "not read again" in r.getMessage()
+        ]
+        assert len(warned) == 1 and "prompts/p.md" in warned[0], warned
+        assert reason in warned[0], warned
+        assert str(tmp_path) not in warned[0], warned
+        webdav.write(
+            "prompts/p.md", PROMPT.format(body="the third body, longest of all")
+        )
+        assert "the first body" in await _rendered(client, "notes_p")  # noticed here
+        assert "the third body" in await _rendered(client, "notes_p")
+
+
+async def test_a_live_prompt_saved_mid_edit_keeps_the_last_good_build(
+    webdav, tmp_path, caplog
+):
+    """PRM-60: an unquoted `[a] [b]` is no YAML at all."""
+    await _keeps_the_last_good_build(
+        webdav,
+        tmp_path,
+        caplog,
+        "---\ndescription: A prompt.\nargument-hint: [a] [b]\n---\n\nthe edited body\n",
+        "did not find expected key",
+    )
+
+
+async def test_a_live_prompt_saved_too_deep_keeps_the_last_good_build(
+    webdav, tmp_path, caplog, frontmatter_out_of_stack
+):
+    await _keeps_the_last_good_build(
+        webdav,
+        tmp_path,
+        caplog,
+        f"---\ndescription: A prompt.\nx: {DEEP_YAML}\n---\n\nthe edited body\n",
+        "nested too deeply",
+    )
 
 
 # -- and what it does not ------------------------------------------------------

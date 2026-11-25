@@ -793,7 +793,7 @@ git commit -m "kubed-mcp serves kb's prompts through kb's command_reader; Prompt
   (was `agents`), and `SkillServing._vet(self, key: Key, row: _Row, root: Path) -> None`, which
   raises `ValueError(f"prompt {path}: {reason}")`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Replace the three `PromptProvider` tests. Each one changes the file's length (wsgidav's ETag) and
 reads twice (AGENTS.md: a live edit reads one request late).
@@ -823,12 +823,12 @@ async def test_a_live_prompt_saved_too_deep_keeps_the_last_good_build(
     # the same, with DEEP_YAML; the warning says "nested too deeply"
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `pytest tests/test_live.py -k live_prompt -v`
 Expected: FAIL. The watch does not stamp command files, so the edit never serves.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `_Watch.commands: tuple[Path, ...] = ()` holds `root / rel` for each
   `snapshot.commands[plugin.id].selected`. `_watch` fills it, and both `_watch` and
@@ -842,7 +842,7 @@ Expected: FAIL. The watch does not stamp command files, so the edit never serves
   `except` keeps the plugin as served and notes it once (D7). A moved plugin keeps its new stamp,
   so it is not tried again until a file moves.
 
-- [ ] **Step 4: Update the spec**
+- [x] **Step 4: Update the spec**
 
 - PRM-58: a prompt from a `cache: live` source is revalidated when a request's scope admits its
   plugin, as SKL-37 says for a skill. A moved file re-reads the plugin, and the prompt as edited
@@ -852,12 +852,12 @@ Expected: FAIL. The watch does not stamp command files, so the edit never serves
   block, YAML that does not parse or is nested too deeply), the plugin keeps the build it served.
   kb logs one warning, and tries again when a file of the plugin moves.
 
-- [ ] **Step 5: Run the checks**
+- [x] **Step 5: Run the checks**
 
 Run: `ruff check .` then `pytest tests/test_live.py tests/test_prompt_serving.py -v`
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add kubed/mcp_kb/mcp/skills.py tests/test_live.py docs/superpowers/specs/prompts.md

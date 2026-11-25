@@ -187,10 +187,11 @@ library file is read off disk each time.
 ## `cache: live`
 
 **SRC-21.** On a live fetch, each read of one of its library files first
-revalidates that file, and each request that reads skills or agents first revalidates every file
-of the live skills, and each agent file, of the plugins its scope admits (SKL-37): one request for
-its ETag, and a download only if the ETag differs from the local copy's. A skill's or an agent's
-edit found that way is served from the next request on, not to the request that found it.
+revalidates that file, and each request that reads skills, agents or prompts first revalidates
+every file of the live skills, and each agent and prompt file, of the plugins its scope admits
+(SKL-37): one request for its ETag, and a download only if the ETag differs from the local copy's.
+A skill's, an agent's or a prompt's edit found that way is served from the next request on, not to
+the request that found it.
 
 **SRC-22.** A download is staged in `<cache>/src/<slug>/.work/` and renamed over the local copy in
 one step, so a reader sees one whole version of the file.

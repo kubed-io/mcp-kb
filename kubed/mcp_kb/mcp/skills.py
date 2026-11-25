@@ -54,8 +54,8 @@ kubed-mcp pinning its state and the view reading kb's. If that
 serves. Either order of the swaps leaves such a window. Closing it needs
 kubed-mcp to hand the pinned generation to the view and on ``Site``.
 
-**A live plugin is re-read on view (D9).** What a live plugin's skill and agent
-files held on disk is stamped as it enters the set. The view revalidates the
+**A live plugin is re-read on view (D9).** What a live plugin's skill, agent and
+prompt files held on disk is stamped as it enters the set. The view revalidates the
 live plugins its request's scope admits and stamps them again; a plugin whose
 stamp moved is added again, every other one is kept as served, and the set is
 served and kb's catalogue narrowed afresh, under the generation it already had.
@@ -155,8 +155,8 @@ Table = Mapping[Key, _Row]
 
 @dataclass(frozen=True)
 class _Watch:
-    """A live plugin's skills and agent files, and what they held on disk when
-    it entered the set (D9)."""
+    """A live plugin's skills, agent files and prompt files, and what they held
+    on disk when it entered the set (D9)."""
 
     skills: tuple[Skill, ...]
     agents: tuple[Path, ...]
@@ -166,6 +166,8 @@ class _Watch:
     root: Path | None = None
     # Its agents as the add read them, by path from the root (N6).
     read: Mapping[str, Agent] = field(default_factory=dict)
+    # Its selected prompt files, as paths under ``root`` (D7).
+    commands: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -427,6 +429,7 @@ class SkillServing:
                                     plugin,
                                     found.get(own, ()),
                                     agents.get(own, ()),
+                                    commands,
                                 )
                             self._prompt_reads.pop(key, None)
                             served, kept = self._add(
@@ -504,6 +507,15 @@ class SkillServing:
         """``plugin`` read and added to ``staged``, and False. On a re-read, a
         refused one is kept as served instead, said once, and True (D9)."""
         try:
+            if served_now is not None:
+                # A re-read: a file the plugin served that no longer reads would
+                # leave it serving less, so the plugin keeps its build (D7).
+                self._vet(
+                    key,
+                    _Row(lib.name, plugin, frozenset(lib.categories)),
+                    self._root_of(plugin),
+                    commands,
+                )
             served = staged.add(
                 plugin.address,
                 namespace=key[0],
@@ -521,6 +533,39 @@ class SkillServing:
                 f" it serves what it served: {self._clean(str(exc), plugin)}",
             )
             return self._keep(staged, key, served_now, last), True
+
+    def _vet(
+        self,
+        key: Key,
+        row: _Row,
+        root: Path | None,
+        commands: PluginCommands | None = None,
+    ) -> None:
+        """Raise ``ValueError`` when a prompt file ``key`` last served does not
+        read now, in the dialect its text says (PRM-59, PRM-60)."""
+        # Not _reading(): on a re-read that is the entering state, whose prompts
+        # are still empty; ``_published`` is what is being replaced (D6).
+        published = self._published
+        for path, last in published.prompts.get(key, {}).items():
+            try:
+                if root is None:
+                    raise OSError("the plugin's tree is not served")
+                text = (root / path).read_text(encoding="utf-8")
+                parse_prompt(
+                    text,
+                    root / path,
+                    name=last.name,
+                    library=row.library,
+                    plugin=row.plugin.id,
+                    dialect=dialect_of(
+                        path,
+                        configured=row.plugin.dialect,
+                        claude=() if commands is None else commands.claude,
+                    ),
+                )
+            except (OSError, UnicodeDecodeError, *READ_ERRORS) as exc:
+                reason = self._clean(str(exc) or type(exc).__name__, row.plugin)
+                raise ValueError(f"prompt {path}: {reason}") from exc
 
     def _keep(
         self, staged: PluginSet, key: Key, served_now: Served, last: _Watch | None
@@ -542,8 +587,9 @@ class SkillServing:
         plugin: Plugin,
         skills: Sequence[Skill],
         harvested: Sequence[Agent],
+        commands: PluginCommands | None = None,
     ) -> _Watch:
-        """A live ``plugin``'s root, skills and agent files, stamped now.
+        """A live ``plugin``'s root, skills, agent files and prompt files, stamped now.
 
         The agent files are the ones ``snapshot`` harvested for it, its roster's
         paths: what its ``plugin.json`` or entry lists decides them, and a fresh
@@ -553,8 +599,13 @@ class SkillServing:
         agents = (
             tuple(agent.path for agent in harvested) if plugin.claude_format else ()
         )
-        stamp = _stamp(snapshot, tuple(skills), agents)
-        return _Watch(tuple(skills), agents, stamp, root)
+        prompts = (
+            ()
+            if root is None or commands is None
+            else tuple(root / path for path in commands.selected)
+        )
+        stamp = _stamp(snapshot, tuple(skills), (*agents, *prompts))
+        return _Watch(tuple(skills), agents, stamp, root, commands=prompts)
 
     def _clean(self, text: str, plugin: Plugin) -> str:
         """A kubed-mcp message with no cache path and no credential in it."""
@@ -849,7 +900,7 @@ class SkillServing:
                 row = published.table.get(key)
                 if row is None or not row.admitted(scope):
                     continue
-                stamp = _stamp(source, watch.skills, watch.agents)
+                stamp = _stamp(source, watch.skills, (*watch.agents, *watch.commands))
                 if stamp != watch.stamp:
                     moved[key] = replace(watch, stamp=stamp)
             if not moved:
@@ -1037,14 +1088,12 @@ def _same_folder(recorded: Path | None, read: Path) -> bool:
         return False
 
 
-def _stamp(
-    snapshot: Snapshot, skills: Sequence[Skill], agents: Sequence[Path]
-) -> tuple:
-    """What a live plugin's ``skills`` and ``agents`` files hold on disk now,
+def _stamp(snapshot: Snapshot, skills: Sequence[Skill], files: Sequence[Path]) -> tuple:
+    """What a live plugin's ``skills``, agent and prompt ``files`` hold on disk now,
     each revalidated first (SKL-37)."""
     catalogue = snapshot.catalogue
     parts: list[tuple] = [catalogue.live_stamp(skill) for skill in skills]
-    for path in agents:
+    for path in files:
         snapshot.revalidate(path)
         try:
             stat = path.stat()

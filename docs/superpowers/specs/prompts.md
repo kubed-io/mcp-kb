@@ -290,17 +290,16 @@ tool are never asked. They get the failure in PRM-52.
 
 ## Live prompts
 
-A live source's prompt file is read when its plugin is added, once per generation, as SRC-20 says
-of a file source's; the rows below are proposed.
-
-**PRM-58.** *(proposed)* A prompt file of a `cache: live` source (see
+**PRM-58.** A prompt file of a `cache: live` source (see
 [config-and-sources.md](config-and-sources.md)) is revalidated with its plugin's skill and agent
 files, on each request whose scope admits the plugin (SKL-37). One that moved re-reads its plugin,
-and the edit serves from the next request.
+and the prompt as edited serves from the next request.
 
-**PRM-59.** *(proposed)* The edit's arguments, defaults and dialect are served with it; no refresh
-is needed.
+**PRM-59.** The edit's arguments, defaults and dialect are read from the edited file and served
+with it; no refresh is needed.
 
-**PRM-60.** *(proposed)* When an edited prompt file no longer parses (unreadable, no frontmatter
-block, YAML that does not parse or is nested too deeply), the re-read is refused: the plugin keeps
-its last good build, its skills and agents included, and kb logs one warning.
+**PRM-60.** When an edited prompt file the plugin served no longer reads as a prompt (for
+example unreadable, not a prompt, no frontmatter block, YAML that does not parse or is nested too
+deeply, a placeholder that is not a declared argument, or a required argument with a default), the
+re-read is refused: the plugin keeps its last good build, its skills and agents included, and kb
+logs one warning. It tries again when a file of the plugin moves.
