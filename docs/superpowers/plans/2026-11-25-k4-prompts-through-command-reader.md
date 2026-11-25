@@ -5,6 +5,10 @@
 > with Dr K's rulings 1 to 4 on #82 and the parent's corrections of 2026-11-25 (13:17): remove
 > `prefixed()` from `_filled`, settle the prompt description's prefix, and pin what `issue-80`
 > pins. The design is below; there is no separate design file.
+>
+> **Approved** 2026-11-25 (for Dr K): D8 and P7, D7 and P3, D9 and P5 as written; P8 changed to a
+> log filter (see P8 and Task 3); the changelog takes a **BREAKING:** line for P1 and a line for
+> P7. Task 0 found rc2 names prompts as PLG-25 does and lists no `prompts://` row (P6).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -177,13 +181,19 @@ FastMCP through it, pytest + pytest-asyncio, uvicorn, wsgidav.
 - **P5. Which plugins' prompts serve.** A plugin the layer refuses serves no prompt in that
   library (LIB-29), and neither does a plugin declared `skills: []` (LIB-33). A plugin with prompts
   and no skill or agent is now added. It serves as before.
-- **P6. `prompts://`.** Whatever Task 0 records rc2 doing with a served command's
-  `prompts://<namespace>/<path>`: listed or not, readable or not. #85 owns the spec rows.
+- **P6. `prompts://`.** Recorded by Task 0 under rc2: a served command is never listed in
+  `resources/list`, but it reads, unlisted, at `prompts://<namespace>/<place>`, where `<place>`
+  is its path below the folder entry that read it (`commands/top.md` is
+  `prompts://lib/top.md`; `prompts://lib/commands/top.md` misses). The read is the file's raw
+  text, frontmatter included. #85 owns the spec rows.
 - **P7. A library named `mcp-kb` fails the config.**
 - **P8. Log lines.** The layer logs a skipped prompt file at WARNING on every read, beside kb's
   one `/health` line. It logs PLG-23's note when a config's `prompts:` leaves an existing
-  `commands/` unread. It logs a file that a command folder reads and kb's selection leaves out as
-  skipped (`not one of the plugin's prompt files`).
+  `commands/` unread, and that one note stays. A file that a command folder reads and kb's
+  selection leaves out on purpose (`not one of the plugin's prompt files`) is *not* logged:
+  Dr K ruled that a warning per such file on every read buries real ones, so a kb logging
+  filter on `kubed.mcp.plugins` drops exactly that skip line (Task 3). It still shows in
+  `Plugin.skipped`.
 - **P9.** For a plugin no library serves, `/health`'s plugin `prompts` counts its selected files,
   parsed or not.
 
@@ -241,13 +251,13 @@ tools, and the description (D9).
   manifest=…)`, `serve(...)` and its default command reader.
 - Produces: the go/no-go for every later task, and P6's wording.
 
-- [ ] **Step 1: Merge**
+- [x] **Step 1: Merge**
 
 Run: `git fetch origin && git merge origin/issue-80`.
 Expected: `mcp/skills.py` has `_PINNED` (#94). Read `pyproject.toml`'s pin: rc2, or rc3 if #92
 merged. Run `pip install -e '.[test]'`, then `pytest -q`. Expected: green, as `issue-80` is.
 
-- [ ] **Step 2: Write the layer checks**
+- [x] **Step 2: Write the layer checks**
 
 These run against kubed-mcp alone, with no kb code: a `QuickMCP("mcp-kb")` and one plugin folder
 in `tmp_path`. It holds `commands/db/migrate.md`, `commands/top.md`, `prompts/x.prompt.md` and
@@ -273,7 +283,7 @@ async def test_a_served_command_adds_no_listing_row(tmp_path):
     assert not [uri for uri in rows if uri.startswith("prompts://")]
 ```
 
-- [ ] **Step 3: Run them**
+- [x] **Step 3: Run them**
 
 Run: `pytest tests/test_command_layer.py -v`
 Expected: all pass. **If the names test fails, stop.** Report on the PR that the pinned rc does
@@ -281,14 +291,14 @@ not name prompts as PLG-25 does: the work is blocked upstream and not redesigned
 If the listing test fails, stop too: a listing row per prompt breaks the address-space rule in
 AGENTS.md, and that is Dr K's call.
 
-- [ ] **Step 4: Record P6**
+- [x] **Step 4: Record P6**
 
 In the same file, add `test_a_served_commands_prompts_address`. It reads
 `prompts://lib/commands/top.md`, and the spelling the layer uses if that one misses (its
 `_file_uri("prompts", namespace, place)`), and asserts what rc2 does. Write the outcome into
 this plan's P6 and the PR body.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_command_layer.py docs/superpowers/plans/2026-11-25-k4-prompts-through-command-reader.md
@@ -609,7 +619,10 @@ elicitation and description tests may pass already; they pin the switch.
 
 - `command_entries`: for each selected path in order, take the deepest of `COMMAND_DIRS` and
   `command_dirs` that contains it (`"."` contains every path), as `prompt_name` decides. Emit
-  that folder, or else the file, and each entry once, at its first file.
+  that folder, or else the file, and each entry once, at its first file. `entry_for` writes
+  each entry with a leading `./` (the root as `./`): rc2 notes and logs every manifest path
+  that lacks one (`commands path 'x' does not start with ./`), on every read. The test above
+  compares the bare entries.
 - `build_plugin`:
   - `prompts=tuple(_relative(p, root) for p in harvest.prompt_files(root, globs))`;
   - `claude_prompts` = the subset in `harvest.command_files(root, globs)`;
@@ -686,6 +699,15 @@ return adapt(file)
   - `PromptProvider` and the `names`, `Catalogue`, `SCHEME`, `prefix`, `prefixed`, `EVERYTHING`
     and `Scope` imports go;
   - `register(mcp)` adds only `ReadOnlyPromptsAsTools(mcp.server)` and returns `PROMPT_TOOLS`.
+- The log filter (P8, Dr K's ruling): `mcp/skills.py` defines `QuietSelection`, a
+  `logging.Filter` that `create_app` adds once to the `kubed.mcp.plugins` logger. It drops a
+  record whose `msg` is `"prompt %s is skipped: %s"` and whose last arg is `NOT_SELECTED`, and
+  nothing else. The skip still reaches `Plugin.skipped`, and so `/health`'s rule above. Adding
+  it twice (two apps in one process) must not stack: the filter is added only when the logger
+  has none of its class. Test in `tests/test_prompt_serving.py`:
+  `test_a_file_kb_left_out_is_not_logged`, a `commands/` folder with one file outside a
+  config's `prompts:` glob, asserting no `is skipped` line for it in `caplog` and the
+  `Default commands/ folder is ignored` note still logged when that applies.
 - `pins._serving`: `if snapshot.visible_prompts(scope): return True`.
   `app.py`: `prompt_tools = prompts.register(mcp)`.
 - `catalogue/prompts`: delete what the Files list says. `render` keeps the missing-argument
@@ -884,7 +906,8 @@ git commit -m "A library named like the server is refused: its prompts would hav
 **Files:**
 - Modify: `wiki/Prompts.md` (drop "the commands map" section; rewrite the live paragraph at
   ~289 to PRM-58 to PRM-60), `wiki/Plugins.md:106-107`, on the wiki's `issue-82` branch
-- Modify: `CHANGELOG.md` (`[Unreleased]`, only if Dr K wants lines; see the PR body)
+- Modify: `CHANGELOG.md` (`[Unreleased]`: one **BREAKING:** line for P1, one line for P7;
+  Dr K's ruling, no `no changelog` label)
 
 - [ ] **Step 1: Update the wiki**
 
