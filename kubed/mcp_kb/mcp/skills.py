@@ -26,17 +26,24 @@ Four hooks make what kubed-mcp serves kb's:
   decides at the read, and a build re-reads its rewritten text in that same
   dialect (D3).
 - **``agent_meta``** adds kb's ``io.kubed.mcp-kb/agent`` key to an agent's
-  ``_meta``. It never sees a scope, so its ``skills`` names the agent's own
-  plugin's skills alone (N9).
+  ``_meta``, its ``frontmatter`` read through kubed-mcp's own ``parse_agent``
+  (``_frontmatter``), so kb parses no agent itself. It is kb's veto too: it
+  raises for a file that is not a regular file inside the plugin root, at the
+  path ``readable`` resolves, or that kb's harvest did not find (D4), and the
+  set skips that agent. It never sees a scope, so its ``skills`` names the
+  agent's own plugin's skills alone (N9).
 
 **The parity guard.** After the set is staged, kb's catalogue is narrowed to
-what kubed-mcp reports serving -- each added plugin's ``skills`` URIs, and its
-``agent_files`` -- so no index, hint, listing or rewritten name points at a
-skill or an agent that does not read. Anything either side has alone is logged
-once, and a skill only kubed-mcp found is failed in the rewriter, so it is not
-served either: kb never vetted it (N13). A plugin kubed-mcp refuses is a
-conflict in its library, as LIB-28's are. kb's prompts are what the reader read
-as the set was staged, kept to the names kubed-mcp serves (D5).
+what kubed-mcp reports serving -- each added plugin's ``skills`` URIs -- so no
+index, hint, listing or rewritten name points at a skill that does not read.
+Anything either side has alone is logged once, and a skill only kubed-mcp found
+is failed in the rewriter, so it is not served either: kb never vetted it
+(N13); an agent file only kubed-mcp found is refused in ``agent_meta`` alike
+(D4). The agents served are each added plugin's ``agent_files``, and
+``/health`` reads them and the plugin's ``skipped`` (AGT-14). A plugin
+kubed-mcp refuses is a conflict in its library, as LIB-28's are. kb's prompts
+are what the reader read as the set was staged, kept to the names kubed-mcp
+serves (D5).
 
 The rewriter and the reader read the published state its request's view
 pinned, so a build of one set never reads the next one's, whether a re-read, a
@@ -72,15 +79,16 @@ import threading
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
 from kubed.mcp import Prompt, QuickMCP
+from kubed.mcp.agents import META_KEY, parse_agent
 from kubed.mcp.plugins import Plugin as Served
 from kubed.mcp.plugins import PluginError, PluginSet, Site, View
 
-from ..catalogue.agents import Agent, AgentRoster, parse_agent
+from ..catalogue.agents import ServedAgent
 from ..catalogue.harvest import readable
 from ..catalogue.names import split_frontmatter
 from ..catalogue.prompts import (
@@ -98,7 +106,7 @@ from ..catalogue.snapshot import (
     namespace_for,
     unrooted,
 )
-from ..catalogue.uris import AGENT_META, MAIN_FILE, SCHEME, agent_path
+from ..catalogue.uris import AGENT_META, MAIN_FILE, SCHEME
 from ..config import scrub
 from ..plugins import Plugin
 from ..sources import plugin_root
@@ -125,6 +133,10 @@ _SKIP_LINE = "prompt %s is skipped: %s"
 _ENTRY = f"/{MAIN_FILE}"
 # kubed-mcp's reason for an agent whose rename is taken (PLUG-64).
 _RENAME_TAKEN = re.compile(r"^agent (?P<name>\S+) is already served by plugin .+$")
+# kubed-mcp's prefix for an agent ``agent_meta`` refused (PLUG-73): the only way a
+# file it read is skipped for kb's sake, and how kb tells an agent's skip from a
+# prompt's or a skill's for a path kb never found.
+_AGENT_META_FAILED = "agent_meta failed: "
 
 
 @dataclass(frozen=True)
@@ -164,8 +176,6 @@ class _Watch:
     # The folder the plugin was added from: a refresh points its fetch at a
     # new export before it publishes, and a re-read must not add from that.
     root: Path | None = None
-    # Its agents as the add read them, by path from the root (N6).
-    read: Mapping[str, Agent] = field(default_factory=dict)
     # Its selected prompt files, as paths under ``root`` (D7).
     commands: tuple[Path, ...] = ()
 
@@ -175,9 +185,10 @@ class _Published:
     """What one generation is served from: its snapshot, narrowed, and its table.
 
     ``hidden`` is the addresses of the skills holding a hidden path, which the
-    rewriter fails in every build (N13). ``source`` is the snapshot as it was
-    handed to ``publish``, which a re-read narrows again, and ``live`` each live
-    plugin's watch, by key.
+    rewriter fails in every build (N13): while the set is staged every skill
+    kb found that holds one, once published those the layer would serve.
+    ``source`` is the snapshot as it was handed to ``publish``, which a re-read
+    narrows again, and ``live`` each live plugin's watch, by key.
     """
 
     snapshot: Snapshot
@@ -188,6 +199,12 @@ class _Published:
     # What the reader made of each added plugin's prompt files as it entered
     # the set, by key and then root-relative path, in read order (D5).
     prompts: Mapping[Key, Mapping[str, FilePrompt]] = field(default_factory=dict)
+    # The frontmatter ``agent_meta`` read for each added plugin's agents as it
+    # entered the set, by key and then root-relative path: what a plugin kept
+    # unread answers from, live or not (D9, AGT-16).
+    agent_reads: Mapping[Key, Mapping[str, Mapping[str, object]]] = field(
+        default_factory=dict
+    )
 
 
 def holds_hidden(folder: Path) -> bool:
@@ -301,11 +318,11 @@ class SkillServing:
         self._lock = threading.Lock()
         # What the parity guard has said, so a refresh does not say it again.
         self._noted: set[str] = set()
-        # While a set is staged: the live watches of the plugins kept unread,
-        # and the agents ``agent_meta`` read for those added, by key and path,
-        # and the prompts ``read_command`` read for them alike.
-        self._carried: dict[Key, _Watch] = {}
-        self._reads: dict[Key, dict[str, Agent]] = {}
+        # While a set is staged: the agent frontmatter each plugin kept unread
+        # was published with, and what ``agent_meta`` read for those added, by
+        # key and path, and the prompts ``read_command`` read for them alike.
+        self._carried: dict[Key, Mapping[str, Mapping[str, object]]] = {}
+        self._reads: dict[Key, dict[str, Mapping[str, object]]] = {}
         self._prompt_reads: dict[Key, dict[str, FilePrompt]] = {}
 
     def attach(self) -> None:
@@ -346,9 +363,13 @@ class SkillServing:
         for skill in catalogue.visible_skills():
             skills.setdefault((skill.library, skill.plugin), []).append(skill.address)
             found.setdefault((skill.library, skill.plugin), []).append(skill)
-        agents: dict[tuple[str, str], list[Agent]] = {}
-        for agent in catalogue.agents.visible():
-            agents.setdefault((agent.library, agent.plugin), []).append(agent)
+        # Walked once a publish, before any plugin enters: ``agent_meta`` and
+        # the parity guard both read it (N13).
+        hidden = frozenset(
+            skill.address
+            for skill in catalogue.visible_skills()
+            if holds_hidden(skill.path)
+        )
 
         noted: set[str] = set()
         table: dict[tuple[str, str], _Row] = {}
@@ -356,7 +377,8 @@ class SkillServing:
         # What each plugin in the set was read as: this publish's reads for one
         # added, and what it was published with for one kept (D5).
         prompts: dict[Key, Mapping[str, FilePrompt]] = {}
-        entering = _ENTERING.set((self, _Published(snapshot, table)))
+        agent_reads: dict[Key, Mapping[str, Mapping[str, object]]] = {}
+        entering = _ENTERING.set((self, _Published(snapshot, table, hidden)))
         self._carried, self._reads, self._prompt_reads = {}, {}, {}
         staged = self._mcp.plugin_set()
         added: list[tuple[Library, Plugin, Served]] = []
@@ -372,11 +394,11 @@ class SkillServing:
                         continue
                     if plugins.get(pid, {}).get("status") != "ok":
                         continue
-                    # An agent kb's roster left unserved still counts: the
-                    # plugin layer has to name it to say so.
+                    # Any agent file kb found counts: the plugin layer is the
+                    # one to read it, and to say whether it serves.
                     own = (lib.name, pid)
                     commands = snapshot.commands.get(pid)
-                    has_agents = bool(plugins[pid].get("agents"))
+                    has_agents = bool(snapshot.agent_files.get(pid))
                     has_prompts = commands is not None and bool(commands.selected)
                     if own not in skills and not has_agents and not has_prompts:
                         continue
@@ -412,6 +434,8 @@ class SkillServing:
                     before = table.get(key)
                     table[key] = _Row(lib.name, plugin, frozenset(lib.categories))
                     last = self._published.live.get(key)
+                    # What its agents were published with, if it is served now.
+                    read = self._published.agent_reads.get(key, {})
                     watch: _Watch | None = None
                     # Kept as served: what it was published with stands.
                     kept = True
@@ -420,7 +444,7 @@ class SkillServing:
                             # Not moved: carried as served, unread (D9), its
                             # agents as its last add read them.
                             watch = last
-                            served = self._keep(staged, key, served_now, last)
+                            served = self._keep(staged, key, served_now, read)
                         else:
                             if moved is not None and key in moved:
                                 watch = moved[key]
@@ -430,7 +454,6 @@ class SkillServing:
                                     snapshot,
                                     plugin,
                                     found.get(own, ()),
-                                    agents.get(own, ()),
                                     commands,
                                 )
                             self._prompt_reads.pop(key, None)
@@ -439,20 +462,13 @@ class SkillServing:
                                 key,
                                 plugin,
                                 served_now,
-                                last,
+                                read,
                                 lib,
                                 noted,
                                 commands,
                             )
                             if moved is not None and key in moved and not kept:
                                 readded.append((moved[key].root, served))
-                            if watch is not None:
-                                read = (
-                                    self._reads.get(key, {})
-                                    if not kept
-                                    else ({} if last is None else last.read)
-                                )
-                                watch = replace(watch, read=read)
                     except (PluginError, ValueError) as exc:
                         # A refused add leaves the set as it was, and the table.
                         if before is None:
@@ -471,6 +487,7 @@ class SkillServing:
                         if kept
                         else self._prompt_reads.get(key, {})
                     )
+                    agent_reads[key] = read if kept else self._reads.get(key, {})
                     added.append((lib, plugin, served))
         finally:
             _ENTERING.reset(entering)
@@ -481,14 +498,14 @@ class SkillServing:
                 # Read from another export than the one it was added from: a
                 # refresh moved the fetch under this re-read, and publishes it.
                 raise _Abandoned
-        published, hidden = self._narrowed(
-            snapshot, added, refused, skills, agents, noted, live, prompts
+        published, served_hidden = self._narrowed(
+            snapshot, added, refused, skills, noted, prompts, hidden
         )
         # Before serve(): a build of the new set must find its own generation.
         # A serve that raises serves nothing new, so what was published stays.
         previous = self._published
         self._published = _Published(
-            published, table, hidden, snapshot, live, prompts
+            published, table, served_hidden, snapshot, live, prompts, agent_reads
         )
         try:
             self._mcp.serve(staged)
@@ -504,13 +521,14 @@ class SkillServing:
         key: Key,
         plugin: Plugin,
         served_now: Served | None,
-        last: _Watch | None,
+        read: Mapping[str, Mapping[str, object]],
         lib: Library,
         noted: set[str],
         commands: PluginCommands | None = None,
     ) -> tuple[Served, bool]:
         """``plugin`` read and added to ``staged``, and False. On a re-read, a
-        refused one is kept as served instead, said once, and True (D9)."""
+        refused one is kept as served instead, its agents as ``read`` gives
+        them, said once, and True (D9)."""
         try:
             if served_now is not None:
                 # A re-read: a file the plugin served that no longer reads would
@@ -537,7 +555,7 @@ class SkillServing:
                 f"plugin {plugin.id} in library {lib.name} was not read again, so"
                 f" it serves what it served: {self._clean(str(exc), plugin)}",
             )
-            return self._keep(staged, key, served_now, last), True
+            return self._keep(staged, key, served_now, read), True
 
     def _vet(
         self,
@@ -547,7 +565,8 @@ class SkillServing:
         commands: PluginCommands | None = None,
     ) -> None:
         """Raise ``ValueError`` when a prompt file ``served_now`` serves does not
-        read now, in the dialect its text says (PRM-59, PRM-60).
+        read now, in the dialect its text says (PRM-59, PRM-60), or an agent file
+        it serves does not read as an agent (AGT-16).
 
         Only the first read of each name it serves, as ``_prompts_of`` keeps
         them: a file that lost its name to another served nothing to keep."""
@@ -578,14 +597,34 @@ class SkillServing:
             except (OSError, UnicodeDecodeError, *READ_ERRORS) as exc:
                 reason = self._clean(str(exc) or type(exc).__name__, row.plugin)
                 raise ValueError(f"prompt {path}: {reason}") from exc
+        # Every agent it serves, read as ``agent_meta`` reads it: one that no
+        # longer reads would be skipped by the add, or lose its name (AGT-16).
+        for file in served_now.agent_files:
+            if root is None:
+                raise ValueError(f"agent {file.path}: the plugin's tree is not served")
+            try:
+                _frontmatter(root, file.path)
+            except ValueError as exc:
+                message = str(exc)
+                reason = (
+                    message.removeprefix(f"agent file {file.path}: ")
+                    if message.startswith("agent file ")
+                    else "kb cannot read it"
+                )
+                reason = self._clean(reason, row.plugin)
+                raise ValueError(f"agent {file.path}: {reason}") from exc
 
     def _keep(
-        self, staged: PluginSet, key: Key, served_now: Served, last: _Watch | None
+        self,
+        staged: PluginSet,
+        key: Key,
+        served_now: Served,
+        read: Mapping[str, Mapping[str, object]],
     ) -> Served:
         """``served_now`` carried into ``staged`` unread: ``agent_meta`` answers
-        its live agents from ``last``, what its last add read."""
-        if last is not None:
-            self._carried[key] = last
+        its agents from ``read``, what its last add read, never from disk -- a
+        ``file://`` tree is served in place, and an edit to it is a refresh's."""
+        self._carried[key] = read
         return staged.keep(served_now)
 
     def _root_of(self, plugin: Plugin) -> Path | None:
@@ -598,18 +637,19 @@ class SkillServing:
         snapshot: Snapshot,
         plugin: Plugin,
         skills: Sequence[Skill],
-        harvested: Sequence[Agent],
         commands: PluginCommands | None = None,
     ) -> _Watch:
         """A live ``plugin``'s root, skills, agent files and prompt files, stamped now.
 
-        The agent files are the ones ``snapshot`` harvested for it, its roster's
-        paths: what its ``plugin.json`` or entry lists decides them, and a fresh
-        glob of the config's ``agents:`` would miss a listed file and watch an
-        ignored one."""
+        The agent files are the ones ``snapshot`` harvested for it
+        (``agent_files``): what its ``plugin.json`` or entry lists decides them,
+        and a fresh glob of the config's ``agents:`` would miss a listed file and
+        watch an ignored one."""
         root = self._root_of(plugin)
         agents = (
-            tuple(agent.path for agent in harvested) if plugin.claude_format else ()
+            tuple(root / rel for rel in snapshot.agent_files.get(plugin.id, ()))
+            if root is not None and plugin.claude_format
+            else ()
         )
         prompts = (
             ()
@@ -667,38 +707,40 @@ class SkillServing:
         added: list[tuple[Library, Plugin, Served]],
         refused: dict[str, dict[str, str]],
         skills: dict[tuple[str, str], list[str]],
-        agents: dict[tuple[str, str], list[Agent]],
         noted: set[str],
-        live: Mapping[Key, _Watch],
         reads: Mapping[Key, Mapping[str, FilePrompt]],
+        hidden: frozenset[str],
     ) -> tuple[Snapshot, frozenset[str]]:
         """``snapshot`` less what kubed-mcp does not serve, with its ``/health``
-        reading what it does: the parity guard (D3, D11). Also the skills
-        holding a hidden path, which kb does not let it serve (N13).
+        reading what it does: the parity guard (D3, D11). Also the skills it
+        would serve of those ``hidden`` gives, which hold a hidden path and
+        which kb does not let it serve (N13).
 
         Its prompts are what kb's reader read as each plugin entered the set,
         the first read of each name kubed-mcp serves (D5), and ``/health``
         counts them and gives a ``skipped`` row for each selected file that
-        did not serve."""
+        did not serve. Its agents are each added plugin's ``agent_files``, and
+        ``/health`` counts them and gives a ``skipped`` row, with the layer's
+        reason, for each agent file kb found that the layer skipped (AGT-14)."""
         catalogue = snapshot.catalogue
-        folders = {s.address: s.path for s in catalogue.visible_skills()}
-        hidden: set[str] = set()
+        served_hidden: set[str] = set()
         kept = {(lib.name, plugin.id) for lib, plugin, _ in added}
         gone: list[str] = []
         for (library, pid), addresses in skills.items():
             if (library, pid) not in kept:
                 gone += addresses
 
-        roster: list[Agent] = []
+        served_agents: list[ServedAgent] = []
         # Every served agent name across the set, to its kb plugin id.
         owners: dict[str, str] = {}
         renamed: dict[str, dict[str, str]] = {}
         unserved: dict[str, list[dict[str, str]]] = {}
         prompts: list[FilePrompt] = []
         library_prompts: dict[str, int] = {}
-        # Each plugin's prompt count and skipped rows, from the first library
-        # that serves it: both are the plugin's own.
+        # Each plugin's prompt and agent counts and skipped rows, from the
+        # first library that serves it: all are the plugin's own.
         plugin_prompts: dict[str, tuple[int, list[dict[str, str]]]] = {}
+        plugin_agents: dict[str, tuple[int, list[dict[str, str]]]] = {}
         for lib, plugin, served in added:
             served_prompts, skipped = self._prompts_of(
                 plugin, served, reads, snapshot.commands.get(plugin.id), noted
@@ -711,8 +753,8 @@ class SkillServing:
             mine = set(skills.get((lib.name, plugin.id), ()))
             theirs = {_address_of(uri) for uri in served.skills}
             for address in sorted(mine & theirs):
-                if holds_hidden(folders[address]):
-                    hidden.add(address)
+                if address in hidden:
+                    served_hidden.add(address)
                     gone.append(address)
                     self._note(noted, HIDDEN.format(address))
             for address in sorted(mine - theirs):
@@ -724,7 +766,6 @@ class SkillServing:
             for address in sorted(theirs - mine):
                 # Its SKILL.md fails in the rewriter, which finds no such skill.
                 self._note(noted, f"skill {address} is not served: kb did not find it")
-            matched: set[str] = set()
             for file in served.agent_files:
                 if file.renamed:
                     base = file.name.rpartition("@")[0]
@@ -732,55 +773,24 @@ class SkillServing:
                         f"{base} is already served by plugin '{owners.get(base, '?')}'"
                     )
                 owners[file.name] = plugin.id
-                # A live one as its add read it, which a re-read is for.
-                watch = live.get((served.namespace, served.address))
-                agent = (
-                    watch.read.get(file.path)
-                    if watch is not None
-                    else catalogue.agent(lib.name, plugin.id, file.path)
+                served_agents.append(
+                    ServedAgent(
+                        name=file.name,
+                        library=lib.name,
+                        plugin=plugin.id,
+                        path=file.path,
+                        category=plugin.category,
+                        tags=plugin.labels,
+                        library_categories=frozenset(lib.categories),
+                    )
                 )
-                if agent is None:
-                    # One kb's harvest did not read, a nameless one say (N10):
-                    # read as kb's roster reads one, its stem its name.
-                    agent = _read_agent(
-                        lib.name,
-                        frozenset(lib.categories),
-                        plugin,
-                        served.root,
-                        file.path,
-                    )
-                if agent is None:
-                    self._note(
-                        noted,
-                        f"agent {file.name} ({file.path} of plugin {plugin.id}) is"
-                        " served by the plugin layer, but kb cannot read it",
-                    )
-                    continue
-                matched.add(file.path)
-                roster.append(replace(agent, name=file.name))
-            for path, why in served.skipped:
-                taken = _RENAME_TAKEN.match(why)
-                if taken is None:
-                    continue
-                matched.add(path)
-                unserved.setdefault(lib.name, []).append(
-                    {
-                        "plugin": plugin.id,
-                        "path": path,
-                        "reason": f"{taken['name']} is already served by plugin"
-                        f" '{owners.get(taken['name'], '?')}'",
-                    }
-                )
-            for agent in agents.get((lib.name, plugin.id), ()):
-                path = agent_path(agent)
-                if path not in matched:
-                    self._note(
-                        noted,
-                        f"agent {agent.name} ({path} of plugin {plugin.id}) is not"
-                        " served: the plugin layer refused it",
-                    )
+            # Per library, for its ``unserved``; the counts are the first's.
+            counted = self._agents_of(
+                lib, plugin, served, snapshot, unserved, owners, noted
+            )
+            plugin_agents.setdefault(plugin.id, counted)
 
-        narrowed = catalogue.without(sorted(set(gone)), AgentRoster(roster))
+        narrowed = catalogue.without(sorted(set(gone)))
         status_libraries = {}
         for name, entry in snapshot.status.get("libraries", {}).items():
             entry = dict(entry)
@@ -789,7 +799,7 @@ class SkillServing:
             entry["skills"] = sum(
                 1 for s in narrowed.visible_skills() if s.library == name
             )
-            entry["agents"] = sum(1 for a in roster if a.library == name)
+            entry["agents"] = sum(1 for a in served_agents if a.library == name)
             entry["prompts"] = library_prompts.get(name, 0)
             for key, found in (("renamed", renamed), ("unserved", unserved)):
                 if found.get(name):
@@ -800,24 +810,85 @@ class SkillServing:
         status_plugins = {}
         for pid, entry in snapshot.status.get("plugins", {}).items():
             entry = dict(entry)
-            if pid in plugin_prompts:
-                count, rows = plugin_prompts[pid]
-                entry["prompts"] = count
-                if rows:
-                    entry["skipped"] = [*entry.get("skipped", ()), *rows]
+            for kind, by_plugin in (
+                ("prompts", plugin_prompts),
+                ("agents", plugin_agents),
+            ):
+                if pid in by_plugin:
+                    count, rows = by_plugin[pid]
+                    entry[kind] = count
+                    if rows:
+                        entry["skipped"] = [*entry.get("skipped", ()), *rows]
             status_plugins[pid] = entry
         published = replace(
             snapshot,
             index=snapshot.index.without(gone),
             catalogue=narrowed,
             prompts=tuple(prompts),
+            agents=tuple(sorted(served_agents, key=lambda a: a.name)),
             status={
                 **snapshot.status,
                 "libraries": status_libraries,
                 "plugins": status_plugins,
             },
         )
-        return published, frozenset(hidden)
+        return published, frozenset(served_hidden)
+
+    def _agents_of(
+        self,
+        lib: Library,
+        plugin: Plugin,
+        served: Served,
+        snapshot: Snapshot,
+        unserved: dict[str, list[dict[str, str]]],
+        owners: Mapping[str, str],
+        noted: set[str],
+    ) -> tuple[int, list[dict[str, str]]]:
+        """What one added plugin serves of its agent files: the count, and a
+        ``skipped`` row for each agent file kb found that the layer skipped,
+        with the layer's reason and no cache path (AGT-6, AGT-14).
+
+        A rename that is taken too is the library's ``unserved`` instead
+        (AGT-8). A file kb never found, which ``agent_meta`` refused (D4), is
+        not the plugin's to report: it is said once, and so is a file kb found
+        that the layer neither served nor skipped, as the parity guard says a
+        skill's."""
+        found = snapshot.agent_files.get(plugin.id, ())
+        accounted = {file.path for file in served.agent_files}
+        rows: dict[str, str] = {}
+        for path, why in served.skipped:
+            taken = _RENAME_TAKEN.match(why)
+            if taken is not None:
+                accounted.add(path)
+                unserved.setdefault(lib.name, []).append(
+                    {
+                        "plugin": plugin.id,
+                        "path": path,
+                        "reason": f"{taken['name']} is already served by plugin"
+                        f" '{owners.get(taken['name'], '?')}'",
+                    }
+                )
+            elif path in found:
+                accounted.add(path)
+                rows.setdefault(path, self._clean(why, plugin))
+            elif why.startswith(_AGENT_META_FAILED):
+                # The layer logs its own refusal on every add; kb says it once.
+                self._note(
+                    noted,
+                    f"agent file {self._clean(path, plugin)} of plugin {plugin.id}"
+                    " is not served: kb's harvest did not find it",
+                )
+        for path in found:
+            if path not in accounted:
+                self._note(
+                    noted,
+                    f"agent file {path} of plugin {plugin.id} is not served:"
+                    " the plugin layer did not read it",
+                )
+        return (
+            len(served.agent_files),
+            [{"path": path, "reason": why} for path, why in rows.items()],
+        )
 
     def _prompts_of(
         self,
@@ -1047,42 +1118,55 @@ class SkillServing:
         return adapt(file)
 
     def agent_meta(self, name: str, plugin: Served) -> dict | None:
-        """kb's ``io.kubed.mcp-kb/agent`` for an agent entering the set."""
+        """kb's ``io.kubed.mcp-kb/agent`` for an agent entering the set.
+
+        Raises, so the set skips the agent (PLUG-73), for a file kb's harvest
+        did not find (D4) -- every agent served is then one AGT-3's fallback
+        refuses -- and for one kb cannot read (``_frontmatter``). ``frontmatter``
+        is what kubed-mcp's own parser makes of the file, so the two keys agree:
+        read from the file when its plugin is added, and as that add read it
+        when the plugin is kept unread, live or not. ``skills`` is narrowed to
+        the skills the layer serves of its plugin, less any the parity guard
+        drops for a hidden path (N13)."""
         published, _ = self._reading()
-        row = published.table.get((plugin.namespace, plugin.address))
+        key = (plugin.namespace, plugin.address)
+        row = published.table.get(key)
         if row is None:
             return None
         path = next((f.path for f in plugin.agent_files if f.name == name), None)
         if path is None:
             return None
+        if path not in published.snapshot.agent_files.get(row.plugin.id, ()):
+            # Fail closed, as the rewriter fails a skill kb never found (N13).
+            raise ValueError(f"agent file {path} is not one kb found")
         catalogue = published.snapshot.catalogue
-        read = None
-        if is_live(row.plugin.fetch):
-            key = (plugin.namespace, plugin.address)
-            carried = self._carried.get(key)
-            if carried is not None:
-                # Kept unread: as its last add read it.
-                read = carried.read.get(path)
-            else:
-                # Added: what the file says now, which a re-read is for (N6).
-                read = _read_agent(
-                    row.library, row.library_categories, row.plugin, plugin.root, path
-                )
-                if read is not None:
-                    self._reads.setdefault(key, {})[path] = read
-            if read is None:
-                raise ValueError(f"kb cannot read agent file {path}")
-        value = catalogue.agent_meta(row.library, row.plugin.id, path, read)
-        if value is None:
-            read = _read_agent(
-                row.library, row.library_categories, row.plugin, plugin.root, path
-            )
+        carried = self._carried.get(key)
+        if carried is not None:
+            # Kept unread: as its last add read it, whatever its file says now.
+            read = carried.get(path)
             if read is None:
                 # kb cannot say what this agent is, so the set skips it (PLUG-73).
                 raise ValueError(f"kb cannot read agent file {path}")
-            value = catalogue.agent_meta(row.library, row.plugin.id, path, read)
+        else:
+            # Added: what the file says now, which a live re-read is for (N6).
+            # A file kb cannot read raises, so the set skips it (PLUG-73).
+            read = _frontmatter(Path(plugin.root), path)
+            self._reads.setdefault(key, {})[path] = read
+        value = catalogue.agent_meta(
+            row.library, row.plugin.id, path, read, row.plugin.servers
+        )
         served = set(plugin.skills)
-        value["skills"] = {k: v for k, v in value["skills"].items() if v in served}
+        index = published.snapshot.index
+
+        def serves(uri: str) -> bool:
+            # The parity guard runs after the set is staged, so a skill it drops
+            # for a hidden path (N13) is still the layer's here: leave it out.
+            address = _address_of(uri)
+            if uri not in served or index.get(address) is None:
+                return False
+            return address not in published.hidden
+
+        value["skills"] = {k: v for k, v in value["skills"].items() if serves(v)}
         return {AGENT_META: value}
 
 
@@ -1116,38 +1200,24 @@ def _stamp(snapshot: Snapshot, skills: Sequence[Skill], files: Sequence[Path]) -
     return tuple(parts)
 
 
-def _read_agent(
-    library: str,
-    library_categories: frozenset[str],
-    plugin: Plugin,
-    root: Path,
-    path: str,
-) -> Agent | None:
-    """An agent file kb's harvest did not read, read as its roster reads one,
-    with the file's stem as the name its frontmatter does not give (N10); None
-    when kb cannot read it. Named by the plugin layer, whose name replaces it.
+def _frontmatter(root: Path, path: str) -> dict[str, object]:
+    """The frontmatter of the agent file at ``path`` under ``root``, as kubed-mcp's
+    own parser reads it (``parse_agent``, with no prefix: GW-8), for kb's
+    ``_meta`` key.
 
-    Only a regular file inside ``root``, as kb's harvest reads one: a symlink
-    out of the plugin is refused here whatever the plugin layer lists, so
-    ``agent_meta`` raises and the set skips it (PLUG-73)."""
-    if readable(root, path) is None:
-        return None
+    Only a regular file inside ``root``, read at the path ``readable`` resolves:
+    a symlink out of the plugin, a directory or a ``..`` is refused here whatever
+    the plugin layer lists. Raises ``ValueError``, so ``agent_meta`` skips the
+    agent (PLUG-73), naming ``path`` and never the cache path under it."""
+    target = readable(root, path)
     try:
-        parsed = parse_agent(root / path, stem=Path(path).stem)
-    except OSError:
-        return None
+        if target is None:
+            raise FileNotFoundError
+        text = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        # No errno or decode text in the reason: either can carry a path.
+        raise ValueError(f"kb cannot read agent file {path}") from None
+    parsed = parse_agent(text, stem=PurePosixPath(path).stem)
     if isinstance(parsed, str):
-        return None
-    return Agent(
-        name=parsed.name,
-        library=library,
-        plugin=plugin.id,
-        root=root,
-        path=root / path,
-        parsed=parsed,
-        servers=plugin.servers,
-        category=plugin.category,
-        tags=plugin.labels,
-        library_categories=library_categories,
-        live=is_live(plugin.fetch),
-    )
+        raise ValueError(f"agent file {path}: {parsed}")
+    return dict(parsed.detail["_meta"][META_KEY]["frontmatter"])

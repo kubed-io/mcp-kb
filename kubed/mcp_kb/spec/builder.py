@@ -67,9 +67,11 @@ SKIPPED = {
         "frontmatter `name` breaks the Agent Skills naming rule or differs "
         "from its directory, or that a skill before it already serves at that "
         "address; a prompt whose name a prompt before it already has, or whose "
-        "file does not parse or cannot be read; an agent file with no usable "
-        "name or description, or whose name this plugin already serves. A "
-        "clash with another plugin is "
+        "file does not parse or cannot be read; an agent file the plugin layer "
+        "refuses, with its reason (no frontmatter or none JSON can carry, an "
+        "unusable name, a blank description, a name an earlier file of this "
+        "plugin already serves, bytes that are not UTF-8), or that kb cannot "
+        "read. A clash with another plugin is "
         "not listed here: it fails the later plugin in that library instead, "
         "under the library's `conflicts`."
     ),
@@ -150,7 +152,7 @@ PLUGIN_STATUS = {
     "description": (
         "One plugin, keyed under `plugins` by its id: its config name, or "
         "`<entry>@<library>` for a marketplace entry. `skills`, `prompts`, "
-        "`agents`, `files` and `built` are the plugin's own harvest, independent of "
+        "`agents`, `files` and `built` are the plugin's own, independent of "
         "which libraries serve it, and are absent when `status` is `failed`."
     ),
     "required": [
@@ -178,7 +180,11 @@ PLUGIN_STATUS = {
         "skills": _field("integer", "Skills this plugin yields."),
         "prompts": _field("integer", "Prompts this plugin yields."),
         "files": _field("integer", "Library-level files this plugin yields."),
-        "agents": _field("integer", "Agents this plugin yields."),
+        "agents": _field(
+            "integer",
+            "Agents the plugin layer serves for this plugin; the agent files "
+            "found, when no library serves it.",
+        ),
         "built": _field("string", "When this plugin was last harvested."),
         "error": _field(
             "string",

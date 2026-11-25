@@ -9,7 +9,6 @@ import pytest
 
 from kubed.mcp_kb.catalogue.index import (
     INDEX_VERSION,
-    AgentRow,
     FetchRecord,
     Index,
     PluginRecord,
@@ -126,7 +125,7 @@ def test_a_missing_or_corrupt_index_reads_as_none(tmp_path):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("version", [INDEX_VERSION + 1, 9, 8, 7, 6, 5, 4, 3, 2, 1])
+@pytest.mark.parametrize("version", [INDEX_VERSION + 1, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1])
 def test_a_different_version_reads_as_none(tmp_path, version):
     """Older as well as newer, by literal and not only by offset.
 
@@ -136,7 +135,8 @@ def test_a_different_version_reads_as_none(tmp_path, version):
     per-source shape before plugins, 5 before a prompt row carried its name, 6
     before a plugin record carried the globs it was harvested with, 7 while a
     plugin's skills were globs rather than the folders kubed-mcp reads, 8 and 9
-    while a prompt was a row of its path, dialect and name):
+    while a prompt was a row of its path, dialect and name, 10 while an agent
+    was a row of its path and name):
     lowering `INDEX_VERSION` back to any of them must fail here, which an
     offset from the current value alone never would.
     """
@@ -330,7 +330,7 @@ def test_a_skill_row_round_trips_to_a_skill(tmp_path):
 def test_a_record_with_agents_round_trips(tmp_path):
     path = tmp_path / "index.json"
     record = _plugin_record(
-        agents=(AgentRow(path="agents/db/migrate.md", name="db_migrator"),),
+        agents=("agents/db/migrate.md", "agents/diagrammer.md"),
         agent_paths=("agents",),
     )
     written = _index(plugins={"flatsource": record})
@@ -339,7 +339,10 @@ def test_a_record_with_agents_round_trips(tmp_path):
     read = Index.read(path)
 
     assert read == written
-    assert read.plugins["flatsource"].agents[0].name == "db_migrator"
+    assert read.plugins["flatsource"].agents == (
+        "agents/db/migrate.md",
+        "agents/diagrammer.md",
+    )
 
 
 @pytest.mark.unit

@@ -34,6 +34,7 @@ ROW_7 = (
     " diagrams, diagrams.net, drawio, extra, lonely, mcp, mxgraph."
 )
 SEE = "see: skill://drawio/drawio/SKILL.md\n"
+PRELOAD = "skills: [drawio]\n"
 COMMAND = "---\ndescription: Draw one.\n---\nDraw a diagram.\n"
 
 
@@ -215,9 +216,12 @@ async def test_nothing_else_changes(tmp_path, mode):
 def url(tmp_path_factory):
     base = tmp_path_factory.mktemp("agents-extension")
     tree = agents_tree(base)
-    # An address in the frontmatter, which a prefix must leave as written.
+    # An address in the frontmatter, which a prefix must leave as written, and
+    # a skill to preload, which kb's key resolves to an address (AGT-17).
     diagrammer = base / "market/plugins/drawio/agents/diagrammer.md"
-    diagrammer.write_text(DIAGRAMMER.replace("color: cyan\n", SEE + "color: cyan\n"))
+    diagrammer.write_text(
+        DIAGRAMMER.replace("color: cyan\n", SEE + PRELOAD + "color: cyan\n")
+    )
     app = server_of(tree.knowledge_base(base / "_cache")).http_app()
     port = _free_port()
     server = uvicorn.Server(
@@ -355,16 +359,22 @@ async def test_a_prefix_reaches_instructions_only(url):
         got = await request(client, "agents/get", name="drawio_diagrammer")
         listing = await request(client, "agents/list")
 
-    # N10: kubed-mcp trims the body.
+    # N10: kubed-mcp trims the body. The prefix is the plugin layer's, written
+    # once over kb's rewrite (GW-5), and never into kb's key (GW-8).
     assert got["instructions"] == (
         "Read kb+skill://drawio/drawio/SKILL.md in ${CLAUDE_PROJECT_DIR}."
     )
+    assert "kb+kb+" not in got["instructions"]
     meta = got["_meta"]["io.kubed.mcp-kb/agent"]
+    assert meta["skills"] == {"drawio": "skill://drawio/drawio/SKILL.md"}
+    assert all(uri.startswith("skill://") for uri in meta["skills"].values())
     assert meta["frontmatter"] == {
         "name": "diagrammer",
         "description": "Draws diagrams.",
         "model": "sonnet",
         "see": "skill://drawio/drawio/SKILL.md",
+        "skills": ["drawio"],
         "color": "cyan",
     }
+    assert "kb+" not in json.dumps(meta)
     assert "drawio_diagrammer" in [card["name"] for card in listing["agents"]]
