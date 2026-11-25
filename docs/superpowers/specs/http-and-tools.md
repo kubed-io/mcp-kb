@@ -128,6 +128,14 @@ connection whose client declared form elicitation, as in [prompts.md](prompts.md
 `serverInfo` of a handshake-era `initialize` answer, and the `io.modelcontextprotocol/serverInfo`
 entry FastMCP stamps in a modern-era result's `_meta`. It is never FastMCP's own version.
 
+**HTTP-42.** *(proposed)* Both answers also carry `_meta["io.kubed/delivery"]`, which kubed-mcp
+writes from the delivery settings it resolves itself: the `X-MCP-*` headers, their query
+parameters, and its table of known clients. kb reads none of it. What kb lists, hides and prefixes
+is decided by TOOL-1 to TOOL-4 and the request settings in
+[scoping-and-instructions.md](scoping-and-instructions.md), so the echo can disagree with them. A
+`Kb-Resource-Prefix` is not echoed. A VS Code client that sends no header is echoed
+`resources: off`, although TOOL-2 lists it no tools.
+
 **HTTP-29.** Every cacheable result (`tools/list`, `prompts/list`, `resources/list`,
 `resources/templates/list`, `resources/read`, `server/discover`) carries `ttlMs` equal to the
 shortest `refresh` interval in the config and `cacheScope: "private"`. A config with no `refresh`
