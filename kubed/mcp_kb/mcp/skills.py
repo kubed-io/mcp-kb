@@ -490,7 +490,7 @@ class SkillServing:
                 # refresh moved the fetch under this re-read, and publishes it.
                 raise _Abandoned
         published, hidden = self._narrowed(
-            snapshot, added, refused, skills, noted, live, prompts
+            snapshot, added, refused, skills, noted, prompts
         )
         # Before serve(): a build of the new set must find its own generation.
         # A serve that raises serves nothing new, so what was published stays.
@@ -555,7 +555,8 @@ class SkillServing:
         commands: PluginCommands | None = None,
     ) -> None:
         """Raise ``ValueError`` when a prompt file ``served_now`` serves does not
-        read now, in the dialect its text says (PRM-59, PRM-60).
+        read now, in the dialect its text says (PRM-59, PRM-60), or an agent file
+        it serves does not read as an agent (AGT-16).
 
         Only the first read of each name it serves, as ``_prompts_of`` keeps
         them: a file that lost its name to another served nothing to keep."""
@@ -586,6 +587,22 @@ class SkillServing:
             except (OSError, UnicodeDecodeError, *READ_ERRORS) as exc:
                 reason = self._clean(str(exc) or type(exc).__name__, row.plugin)
                 raise ValueError(f"prompt {path}: {reason}") from exc
+        # Every agent it serves, read as ``agent_meta`` reads it: one that no
+        # longer reads would be skipped by the add, or lose its name (AGT-16).
+        for file in served_now.agent_files:
+            if root is None:
+                raise ValueError(f"agent {file.path}: the plugin's tree is not served")
+            try:
+                _frontmatter(root, file.path)
+            except ValueError as exc:
+                message = str(exc)
+                reason = (
+                    message.removeprefix(f"agent file {file.path}: ")
+                    if message.startswith("agent file ")
+                    else "kb cannot read it"
+                )
+                reason = self._clean(reason, row.plugin)
+                raise ValueError(f"agent {file.path}: {reason}") from exc
 
     def _keep(
         self, staged: PluginSet, key: Key, served_now: Served, last: _Watch | None
@@ -677,7 +694,6 @@ class SkillServing:
         refused: dict[str, dict[str, str]],
         skills: dict[tuple[str, str], list[str]],
         noted: set[str],
-        live: Mapping[Key, _Watch],
         reads: Mapping[Key, Mapping[str, FilePrompt]],
     ) -> tuple[Snapshot, frozenset[str]]:
         """``snapshot`` less what kubed-mcp does not serve, with its ``/health``

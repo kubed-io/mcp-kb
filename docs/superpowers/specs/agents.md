@@ -153,8 +153,20 @@ gateway needs to find them. `invalid_agent_definition` therefore never arises.
 under a scope admitting its plugin (SKL-37). A file that moved re-reads its plugin, and from the
 next request on `agents/list` and `agents/get` both serve the new read: the request that found the
 edit still reads what it began with. An edit of the frontmatter `name` serves the agent under the
-new name without a refresh, and a later plugin's agent it now clashes with is renamed by AGT-8. An
-edit that no longer parses takes the agent away until it parses again.
+new name without a refresh, and a later plugin's agent it now clashes with is renamed by AGT-8.
+
+An edit that no longer reads as an agent leaves the plugin serving the build it served, its skills
+and prompts and the agent under its name included. It no longer reads when kb cannot read it (it
+is not a regular file inside its plugin root, or not UTF-8 text) or when the plugin layer's parser
+refuses it for one of AGT-6's reasons: no YAML frontmatter, frontmatter that is not a non-empty
+mapping or has no JSON form, a `name` or a `description` that is not a non-empty string, or a
+frontmatter `name` that is not usable. The server logs one warning and reads the plugin again when
+one of its files moves, as PRM-60 says for a prompt.
+
+An edit that gives an agent a name another agent file of the same plugin serves still reads, so
+nothing is kept: from the next request the first of the two files in path order is served under
+that name and the other is skipped (AGT-6), as a refresh of the same tree serves them. A refresh
+reads the plugin from its source and has no earlier build to keep.
 
 **AGT-17.** `instructions` rewrites qualified skill names (SKL-54) as SKL-55 says, for the
 request's scope. The agent's plugin is the own plugin and its library is the library, and the

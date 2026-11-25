@@ -848,10 +848,11 @@ async def test_an_out_of_scope_live_skill_is_not_revalidated(webdav, tmp_path):
     assert not [p for p in paths if p.startswith(f"/{FOLDER}/skills/")]
 
 
-def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock):
+def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock, caplog):
     """N6 for an agent: the request after the re-adding one serves the edit, on
     ``agents/get`` and ``agents/list`` both; an edit that no longer parses
-    takes the agent away, and the next good one brings it back."""
+    keeps the plugin's last good build, said once (AGT-16), and the next good
+    one is served."""
     webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
     webdav.write(
         "agents/helper.md", AGENT.format(description="Helps.", body="Help first.")
@@ -893,20 +894,104 @@ def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock):
         ), key
     assert listed[name]["description"] == "Helps, edited upstream."
 
-    # An unquoted `[a] [b]` is no YAML at all.
-    first, got, listed = edit(
+    first, got, listed = edit(  # an unquoted `[a] [b]` is no YAML at all
         "---\nname: helper\ndescription: [a] [b]\n---\n\nHalfway through a save.\n"
     )
-    assert first is not None, "N6: the re-adding request"
-    assert got is None
-    assert name not in listed
+    assert first["instructions"] == "Help, edited."
+    assert got["instructions"] == "Help, edited.", "AGT-16: the last good build"
+    assert listed[name]["description"] == "Helps, edited upstream."
+    assert "was not read again" in caplog.text and "agents/helper.md" in caplog.text
 
     first, got, listed = edit(
         AGENT.format(description="Helps again.", body="Help, saved properly.")
     )
-    assert first is None, "N6: the re-adding request"
+    assert first["instructions"] == "Help, edited.", "N6: the re-adding request"
     assert got["instructions"] == "Help, saved properly."
     assert listed[name]["description"] == "Helps again."
+
+
+def test_a_live_agent_saved_with_an_unusable_name_keeps_its_name(
+    webdav, tmp_path, clock, caplog
+):
+    """AGT-16: an edit to a name the plugin layer refuses keeps the plugin's last
+    good build, the agent under its name and with its body, said once and with
+    no cache path in it."""
+    webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
+    webdav.write(
+        "agents/helper.md", AGENT.format(description="Helps.", body="Help first.")
+    )
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+
+    async def names(client):
+        listed = (await ext_request(client, "agents/list"))["agents"]
+        return {card["name"] for card in listed}
+
+    assert run_client(knowledge_base, names) == {"notes_helper"}
+
+    webdav.write(
+        "agents/helper.md",
+        '---\nname: "a b"\ndescription: Helps, renamed.\n---\n\nRenamed.\n',
+    )
+    clock(2.5)
+
+    async def go(client):
+        first = await names(client)
+        then = await names(client)
+        got = await ext_request(client, "agents/get", name="notes_helper")
+        return first, then, got
+
+    first, then, got = run_client(knowledge_base, go)
+    assert first == {"notes_helper"}, "N6: the re-adding request"
+    assert then == {"notes_helper"}, "AGT-16: the agent keeps its name"
+    assert got["instructions"] == "Help first."
+    assert got["_meta"]["io.kubed.mcp-kb/agent"]["frontmatter"]["name"] == "helper"
+    kbs = [r.getMessage() for r in caplog.records if r.name.startswith("kubed.mcp_kb")]
+    warned = [message for message in kbs if "agents/helper.md" in message]
+    assert len(warned) == 1, warned
+    assert "was not read again" in warned[0]
+    assert "is not a usable name" in warned[0]
+    assert not [message for message in kbs if str(tmp_path) in message]
+
+
+def test_a_live_edit_taking_a_twins_name_serves_the_first_in_path_order(
+    webdav, tmp_path, clock
+):
+    """AGT-16's carve-out: an edit that gives an agent the name another file of
+    its plugin serves still reads, so no build is kept. From the next request
+    the first file in path order is served under that name and the other is
+    skipped (AGT-6), as a refresh of the same tree serves them."""
+    webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
+    webdav.write(
+        "agents/alpha.md", "---\nname: alpha\ndescription: A.\n---\n\nAlpha's.\n"
+    )
+    webdav.write(
+        "agents/helper.md", AGENT.format(description="Helps.", body="Helper's.")
+    )
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+
+    async def names(client):
+        listed = (await ext_request(client, "agents/list"))["agents"]
+        return {card["name"] for card in listed}
+
+    assert run_client(knowledge_base, names) == {"notes_alpha", "notes_helper"}
+
+    webdav.write(
+        "agents/alpha.md",
+        "---\nname: helper\ndescription: A, renamed.\n---\n\nAlpha's, renamed.\n",
+    )
+    clock(2.5)
+
+    async def go(client):
+        first = await names(client)
+        then = await names(client)
+        got = await ext_request(client, "agents/get", name="notes_helper")
+        return first, then, got
+
+    first, then, got = run_client(knowledge_base, go)
+    assert first == {"notes_alpha", "notes_helper"}, "N6: the re-adding request"
+    assert then == {"notes_helper"}, "AGT-6: one name, the first file in path order"
+    assert got["instructions"] == "Alpha's, renamed."
+    assert knowledge_base.generation == 0, "no refresh did it"
 
 
 def test_a_live_watch_stamps_the_agents_the_manifest_lists(webdav, tmp_path, clock):

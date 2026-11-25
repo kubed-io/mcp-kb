@@ -583,7 +583,7 @@ git commit -m "K5: kb's agent key reads through kubed-mcp's parser; kb's agent p
 - Consumes: Task 2's `_frontmatter`; K4's `_vet(served_now, row, root, commands)` and `_add`'s
   kept path.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Change `test_a_live_agent_edit_reads_after_trust`'s last two edits:
 
@@ -605,19 +605,19 @@ Add `caplog` to its fixtures, and add
 `test_a_live_agent_saved_with_an_unusable_name_keeps_its_name`: an edit to `name: "a b"` keeps
 serving `notes_helper` with the earlier body.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_live.py -k live_agent -v`
 Expected: FAIL. The broken edit takes the agent away.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 At the end of `_vet`, for each `file` in `served_now.agent_files`, call `_frontmatter(root,
 file.path)`, and raise `ValueError(f"agent {file.path}: {reason}")` with the reason through
 `self._clean` when it raises. A `root` of None raises as the prompt check does. `_add`'s existing
 `except` keeps the plugin as served and notes it once.
 
-- [ ] **Step 4: Update the spec**
+- [x] **Step 4: Update the spec**
 
 AGT-16's last sentence becomes:
 - An edit that no longer reads (D5's failures, or a name the plugin layer refuses) leaves the
@@ -625,12 +625,12 @@ AGT-16's last sentence becomes:
 - The server logs one warning and reads the plugin again when one of its files moves, as PRM-60
   says for a prompt.
 
-- [ ] **Step 5: Run the checks**
+- [x] **Step 5: Run the checks**
 
 Run: `ruff check .` then `pytest tests/test_live.py tests/test_prompt_serving.py -v`
 Expected: all pass, `test_a_live_rename_renames_a_later_clashing_agent` included.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add kubed/mcp_kb/mcp/skills.py tests/test_live.py docs/superpowers/specs/agents.md
