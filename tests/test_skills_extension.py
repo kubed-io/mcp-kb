@@ -195,14 +195,27 @@ def test_a_skill_inside_a_skill_is_refused_and_its_files_are_the_outers(tmp_path
     for path, name in ((outer, "outer"), (outer / "inner", "inner")):
         path.mkdir(parents=True)
         (path / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\n")
-    # Nothing below a skill is searched, so only a folder declared in its own
-    # right puts one skill inside another.
+    # One plugin's skills share a folder, and a plugin named like a main
+    # plugin's skill is refused in that library (LIB-28), so only a catalogue
+    # built past those claims puts one skill inside another: a plugin `outer`
+    # nested beside a main plugin whose skill is `outer`.
     dirs = harvest.skill_dirs(root, ("./skills/outer/inner",))
     plugin = fake_plugin("flatsource", root)
     files = LibraryFiles()
     files.add("flatsource", root, [], dirs, plugin=plugin)
     catalogue = Catalogue(
-        SkillIndex(load_skills(dirs, library="flatsource", plugin=plugin, root=root)),
+        SkillIndex(
+            [
+                *load_skills(dirs[:1], library="flatsource", plugin=plugin, root=root),
+                *load_skills(
+                    dirs[1:],
+                    library="flatsource",
+                    plugin=fake_plugin("outer", root),
+                    root=root,
+                    folder="outer",
+                ),
+            ]
+        ),
         files,
     )
     skills = SkillCatalogue(lambda: catalogue)
@@ -480,9 +493,9 @@ async def test_a_prompt_names_no_skill_that_is_not_served(tmp_path):
     server = KnowledgeBase(config, tmp_path / "cache")
     async with Client(server_of(server)) as client:
         text = (await client.get_prompt("lib_use")).messages[0].content.text
-        assert "skill://lib/good/SKILL.md" in text
+        assert "skill://lib/kit/good/SKILL.md" in text
         assert "kit:bad" in text
-        assert "skill://lib/bad" not in text
+        assert "skill://lib/kit/bad" not in text
 
 
 def test_a_scope_whose_only_skills_are_refused_names_nothing(tmp_path):

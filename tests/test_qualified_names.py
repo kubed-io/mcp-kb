@@ -36,7 +36,7 @@ NAMES = (
 RESOLVED = (
     "A skill://kit/writing/SKILL.md\n"
     "B skill://kit/writing/SKILL.md\n"
-    "C skill://kit/ops/SKILL.md\n"
+    "C skill://kit/kit-extra/ops/SKILL.md\n"
     "D kit:nope\n"
     "E https://kit:writing\n"
     "F /kit:db:migrate\n"
@@ -224,7 +224,7 @@ async def test_an_agent_reads_names_as_addresses_and_preloads_its_skills(url):
     assert meta["skills"] == {
         "kit:writing": "skill://kit/writing/SKILL.md",
         "writing": "skill://kit/writing/SKILL.md",
-        "kit-extra:ops": "skill://kit/ops/SKILL.md",
+        "kit-extra:ops": "skill://kit/kit-extra/ops/SKILL.md",
     }
     assert meta["frontmatter"]["skills"] == [
         "kit:writing", "writing", "kit-extra:ops", "nope"

@@ -317,7 +317,9 @@ def _build_shared_root(base, helper_files=("shared/**/*",)):
     return Config.model_validate(
         {
             "plugins": [
-                {"name": "a", "source": f"file://{kit}", "tags": ["core"]},
+                # The kit is the library's main plugin, so its skills sit at
+                # lib/<name>; the helper serves no skill to place.
+                {"name": "lib", "source": f"file://{kit}", "tags": ["core"]},
                 {
                     "name": "b",
                     "source": f"file://{kit}",
@@ -326,7 +328,7 @@ def _build_shared_root(base, helper_files=("shared/**/*",)):
                     "files": list(helper_files),
                 },
             ],
-            "libraries": [{"name": "lib", "plugins": ["a", "b"]}],
+            "libraries": [{"name": "lib", "plugins": ["lib", "b"]}],
         }
     )
 
@@ -367,9 +369,9 @@ async def test_a_sibling_plugins_skill_is_not_readable_through_a_shared_root(
 ):
     """The ceiling excludes every skill directory of the *library*.
 
-    Two plugins on one root: ``a`` ships the skills, ``b`` only the shared
+    Two plugins on one root: ``lib`` ships the skills, ``b`` only the shared
     files. ``b`` has no skill directories of its own, so a per-plugin exclusion
-    let its root answer for ``a``'s skills -- and a client scoped to ``extra``,
+    let its root answer for ``lib``'s skills -- and a client scoped to ``extra``,
     which may not see skill ``loki`` at its own address, read the skill's
     instructions and references at the library base, unsubstituted.
     """

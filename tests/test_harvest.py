@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from kubed.mcp_kb.catalogue.harvest import (
-    folder_of,
     library_files,
     patterns,
     prompt_files,
@@ -242,19 +241,6 @@ def test_a_skill_md_symlinked_out_of_the_root_does_not_register(tmp_path):
 
     assert skill_dirs(root) == []
     assert skill_dirs(root, ["./skills/leak"]) == []
-
-
-# -- the folder a skill is in, until Task 3's namespaces -----------------------
-
-
-def test_the_folder_is_the_path_below_skills(tree):
-    assert folder_of(tree / "skills/grafana-lgtm/loki", tree) == "grafana-lgtm"
-    assert folder_of(tree / "skills/flat", tree) == ""
-    assert folder_of(tree / "skills/a/b/deep", tree) == "a/b"
-    assert folder_of(tree / ".github/skills/gh", tree) == ""
-    assert folder_of(tree / "template", tree) == ""
-    assert folder_of(tree / "docs/skills-extra/x", tree) == ""
-    assert folder_of(tree, tree) == ""
 
 
 # -- prompts and library files -------------------------------------------------

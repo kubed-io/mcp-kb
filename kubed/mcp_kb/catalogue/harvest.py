@@ -342,21 +342,3 @@ def library_files(root: Path, globs: Globs, skill_dirs: Sequence[Path]) -> list[
         if not any(f == d or d in f.parents for d in skills)
     ]
 
-
-def folder_of(skill_dir: Path, root: Path) -> str:
-    """The folders between a skill and its plugin's ``skills/``, as a posix path.
-
-    Empty for a skill directly in ``skills/``, and for one anywhere else -- a
-    declared folder outside ``skills/``, or the plugin root. So
-    ``skills/grafana-lgtm/loki`` is in ``grafana-lgtm``: every skill of a
-    plugin loses the same leading segment, which keeps a sibling reference
-    like ``../other/SKILL.md`` pointing at the sibling's address.
-    """
-    # Not resolved: a skill reached through a symlink is placed by where it
-    # was found, not by the timestamp directory it happens to live in.
-    try:
-        rel = skill_dir.relative_to(root.resolve() / SKILLS_DIR)
-    except ValueError:
-        return ""
-    parent = rel.parent.as_posix()
-    return "" if parent == "." else parent

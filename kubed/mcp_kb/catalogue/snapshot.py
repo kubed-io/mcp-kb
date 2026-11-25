@@ -72,12 +72,19 @@ class Library:
     deduplicated in that order. ``error`` is why part of that could not be
     resolved (the marketplace could not be read, a named plugin does not
     exist); the library still serves the rest.
+
+    ``main`` is the id of the plugin whose skills sit at ``<library>/<name>``,
+    or None: every other plugin's sit at ``<library>/<plugin name>/<name>``
+    (see ``main_plugin``). Decided here, from the config and what the
+    marketplace publishes, so no request's scope and no serving outcome can
+    move an address.
     """
 
     name: str
     description: str
     plugins: tuple[str, ...]
     error: str | None = None
+    main: str | None = None
     skipped: tuple[dict[str, str], ...] = ()
     notes: str = ""
     list_skills: bool = True
@@ -519,6 +526,7 @@ def assemble_libraries(
     errors: dict[str, str] | None = None,
     skipped: dict[str, tuple[dict[str, str], ...]] | None = None,
     descriptions: dict[str, str] | None = None,
+    entries: dict[str, int] | None = None,
 ) -> list[Library]:
     """Each library's plugins, in config order: marketplace, ``plugins:``, selector.
 
@@ -532,6 +540,10 @@ def assemble_libraries(
     ``descriptions`` is each marketplace library's upstream description. A
     library's own is the first non-empty of: configured, upstream, its
     plugins' joined by newlines.
+
+    ``entries`` is how many entries each marketplace library's catalog
+    publishes, skipped ones included; a library whose marketplace could not
+    be read has none, and so no main plugin by the lone-entry rule.
     """
     by_id = {plugin.id: plugin for plugin in plugins}
     libraries: list[Library] = []
@@ -545,7 +557,8 @@ def assemble_libraries(
         if lib.plugin_selector is not None:
             ids += [p.id for p in select(plugins, lib.plugin_selector)]
         upstream = (descriptions or {}).get(lib.name, "")
-        own = [by_id[i].description for i in dict.fromkeys(ids)]
+        resolved = tuple(dict.fromkeys(ids))
+        own = [by_id[i].description for i in resolved]
         if missing:
             problems.append(_no_such_plugins(missing, plugins))
         libraries.append(
@@ -555,7 +568,12 @@ def assemble_libraries(
                 notes=lib.notes,
                 list_skills=lib.list_skills,
                 categories=tuple(lib.categories),
-                plugins=tuple(dict.fromkeys(ids)),
+                plugins=resolved,
+                main=main_plugin(
+                    lib.name,
+                    [by_id[i] for i in resolved],
+                    (entries or {}).get(lib.name) if lib.source else None,
+                ),
                 error=scrub("; ".join(problems)) or None,
                 # Both of these quote fetched content -- a marketplace entry's
                 # own fields -- and `/health` publishes them unauthenticated,
@@ -569,6 +587,33 @@ def assemble_libraries(
             )
         )
     return libraries
+
+
+def main_plugin(
+    library: str, plugins: Sequence[Plugin], entries: int | None
+) -> str | None:
+    """The id of the library's main plugin, or None (design D1).
+
+    The first of ``plugins`` named like the library; else, when the library's
+    marketplace publishes exactly one entry (``entries``, skipped ones
+    counted), that entry's plugin -- whatever its path -- unless that one
+    entry was itself skipped; else none. ``plugins`` is the library's resolved
+    list, in its order, and nothing about a request enters into it.
+    """
+    named = next((p.id for p in plugins if p.name == library), None)
+    if named is not None or entries != 1:
+        return named
+    return next((p.id for p in plugins if p.marketplace == library), None)
+
+
+def folder_for(library: Library, plugin: Plugin) -> str:
+    """Where ``plugin``'s skills sit in ``library``: ``""`` for its main plugin."""
+    return "" if plugin.id == library.main else plugin.name
+
+
+def namespace_for(library: Library, plugin: Plugin) -> str:
+    """The namespace ``plugin`` is served under in ``library``: its skills' base."""
+    return "/".join(p for p in (library.name, folder_for(library, plugin)) if p)
 
 
 def _resolved(configured: str, upstream: str, plugins: list[str]) -> str:
@@ -640,6 +685,7 @@ def build_snapshot(
     # counts, and the prompt files its rows name that are no longer there.
     served: dict[str, dict[str, int]] = {}
     vanished: dict[str, list[dict[str, str]]] = {}
+    shadowed: dict[str, list[dict[str, str]]] = {}
     status_libraries: dict[str, dict] = {}
     # Library-independent, so read once: every plugin some library lists.
     listed = {pid for lib in libraries for pid in lib.plugins}
@@ -652,7 +698,15 @@ def build_snapshot(
 
     for lib in libraries:
         entry, own, loaded, named = _serve_library(
-            lib, by_id, records, admitted, resources, served, vanished, read_agents
+            lib,
+            by_id,
+            records,
+            admitted,
+            resources,
+            served,
+            vanished,
+            shadowed,
+            read_agents,
         )
         skills += own
         prompts += loaded
@@ -666,7 +720,9 @@ def build_snapshot(
             [lib.name for lib in libraries if plugin.id in lib.plugins],
             admitted.get(plugin.id),
             served.get(plugin.id),
-            vanished.get(plugin.id, []),
+            # What the libraries left out of it: files inside its own skills,
+            # and prompt files its rows name that are gone.
+            [*shadowed.get(plugin.id, []), *vanished.get(plugin.id, [])],
             read_agents.get(plugin.id),
         )
         for plugin in plugins
@@ -718,14 +774,19 @@ def _serve_library(
     resources: LibraryFiles,
     served: dict[str, dict[str, int]],
     vanished: dict[str, list[dict[str, str]]],
+    shadowed: dict[str, list[dict[str, str]]],
     read_agents: dict[str, _ReadAgents],
 ) -> tuple[dict, list[Skill], list[FilePrompt], list[Agent]]:
     """One library's plugins in order: its ``/health`` entry, skills, prompts
     and agents.
 
-    Registers the library's files on ``resources`` as it goes. ``served`` and
-    ``vanished`` are written for a plugin the first time any library serves
-    it, since both are the plugin's own and the same in every library.
+    Each plugin's skills take their addresses here, in the library's folder for
+    the plugin (``folder_for``). Registers the library's files on ``resources``
+    as it goes. ``served`` and ``vanished`` are written for a plugin the first
+    time any library serves it, since both are the plugin's own and the same
+    in every library. ``shadowed`` -- its library files that lie inside its own
+    skills -- depends on the folder each library gives it, so every library
+    adds what it finds.
     """
     claims = _Claims()
     names = _AgentNames(lib.name)
@@ -751,6 +812,7 @@ def _serve_library(
         own = [
             row.to_skill(
                 library=lib.name,
+                folder=folder_for(lib, plugin),
                 plugin=pid,
                 root=root,
                 category=plugin.category,
@@ -779,7 +841,9 @@ def _serve_library(
                 for p, r in gone
             ],
         )
-        files = admitted[pid].files
+        files, inside = _outside_skills(lib.name, own, admitted[pid].files)
+        rows = shadowed.setdefault(pid, [])
+        rows += [row for row in inside if row not in rows]
         conflict = claims.conflict(lib.name, own, files, loaded)
         if conflict is not None:
             conflicts[pid] = conflict
@@ -827,7 +891,7 @@ def _plugin_status(
     libraries: list[str],
     admitted: _Admitted | None,
     served: dict[str, int] | None,
-    vanished: list[dict[str, str]],
+    left_out: list[dict[str, str]],
     read_agents: _ReadAgents | None = None,
 ) -> dict:
     """One plugin's entry in ``/health``: what it is, and what it yielded."""
@@ -865,7 +929,7 @@ def _plugin_status(
     )
     entry["built"] = record.built
     gone = [] if read_agents is None else read_agents.gone
-    skipped = [*record.skipped, *admitted.skipped, *vanished, *gone]
+    skipped = [*record.skipped, *admitted.skipped, *left_out, *gone]
     if skipped:
         entry["skipped"] = skipped
     return entry
@@ -994,20 +1058,20 @@ def _admit(record: PluginRecord) -> _Admitted:
     ``skipped`` row -- the plugin-relative path and the reason -- for
     everything left out. A skipped thing is a defect in the plugin, not a
     failure of it: the rest serves, and ``/health`` says what is missing and
-    why. Decided per plugin, not per library: the address a skill takes below
-    a library is the same in every library that serves the plugin.
+    why. Decided per plugin, not per library: a plugin's skills share one
+    folder in any library (``folder_for``), so two of them meet below it as
+    their names meet. Where a library file lies against them is the library's
+    question, answered by ``_outside_skills``.
 
     A skill is left out when its frontmatter ``name`` breaks the Agent Skills
     naming rule or differs from its directory's name (a skill that is the whole
     plugin excepted) -- SEP-2640 makes the name the last segment of the
     address, so anything else mints a URI that does not resolve, or invents a
-    folder -- and when a skill before it already has its address, as one tree
-    reaching a skill through two skill roots does.
+    folder -- and when a skill before it already has its name, and so its
+    address, as one tree reaching a skill through two skill folders does.
 
-    A library file is left out when its address is a served skill's or lies
-    inside one -- the skill answers that URI, so the file could be listed and
-    never read, or read only under a scope that hides the skill -- and when it
-    is named like an index the server generates.
+    A library file is left out when it is named like an index the server
+    generates.
 
     A prompt or an agent is left out when the name its path built is not a
     usable name (PLG-25, AGT-5): a folder or a stem holding a space, a control
@@ -1041,25 +1105,19 @@ def _admit(record: PluginRecord) -> _Admitted:
         at_root = where == "."
         if problem is None and not at_root and row.name != path.name:
             problem = f"name {row.name!r} differs from its directory {path.name!r}"
-        address = "/".join(p for p in (row.folder, row.name) if p)
-        if problem is None and address in served:
-            first = _relative(Path(served[address].path), root)
-            problem = f"{address} is already served by {first}"
+        if problem is None and row.name in served:
+            first = _relative(Path(served[row.name].path), root)
+            problem = f"{row.name} is already served by {first}"
         if problem is not None:
             skip(where, problem)
             continue
-        served[address] = row
+        served[row.name] = row
 
-    roots = sorted(served, key=len, reverse=True)
     files: list[str] = []
     for rel in record.files:
         name = PurePosixPath(rel).name
         if name in RESERVED_NAMES:
             skip(rel, f"{name} is the name of an index the server generates")
-            continue
-        inside = next((r for r in roots if _overlap(rel, r)), None)
-        if inside is not None:
-            skip(rel, f"its address lies inside the skill at {inside}")
             continue
         files.append(rel)
 
@@ -1092,6 +1150,33 @@ def _admit(record: PluginRecord) -> _Admitted:
         skipped,
         list(agents.values()),
     )
+
+
+def _outside_skills(
+    library: str, skills: Sequence[Skill], files: Sequence[str]
+) -> tuple[list[str], list[dict[str, str]]]:
+    """The plugin's library files that do not lie against its own skills here.
+
+    A file whose address is one of the plugin's skills', or lies inside one,
+    is left out -- the skill answers that URI, so the file could be listed and
+    never read, or read only under a scope that hides the skill -- with a
+    ``skipped`` row saying which skill. Asked per library, because a skill's
+    address is: ``loki/notes.md`` lies inside the main plugin's ``loki`` and
+    beside a nested plugin's. Another plugin's skills are ``_Claims``'.
+    """
+    roots = sorted(
+        (s.address.removeprefix(f"{library}/") for s in skills), key=len, reverse=True
+    )
+    kept: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for rel in files:
+        inside = next((r for r in roots if _overlap(rel, r)), None)
+        if inside is None:
+            kept.append(rel)
+        else:
+            reason = f"its address lies inside the skill at {inside}"
+            skipped.append({"path": rel, "reason": reason})
+    return kept, skipped
 
 
 def unrooted(text: str, root: Path) -> str:

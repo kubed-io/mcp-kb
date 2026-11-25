@@ -209,7 +209,10 @@ class KnowledgeBase:
 
         A marketplace's plugins are re-derived by re-reading its
         ``marketplace.json`` off the tree on disk every time: cheap, and the
-        only way a refresh of that fetch can serve an entry it gained.
+        only way a refresh of that fetch can serve an entry it gained. A stale
+        fetch is read off its last good tree, so its entry count -- what decides
+        a lone entry is its library's main plugin -- is still known; only a
+        marketplace that could not be read at all leaves it out.
         """
         declared = declared_plugins(self.config)
         markets = marketplace_fetches(self.config)
@@ -218,6 +221,7 @@ class KnowledgeBase:
         errors: dict[str, str] = {}
         skipped: dict[str, tuple[dict[str, str], ...]] = {}
         descriptions: dict[str, str] = {}
+        entries: dict[str, int] = {}
         for name, (library, fetch, address) in markets.items():
             record = self._fetch_record(fetches, fetch, refusal_is_fatal)
             if not _serving(record):
@@ -245,6 +249,7 @@ class KnowledgeBase:
                 continue
             derived += market.plugins
             descriptions[name] = market.description
+            entries[name] = market.entries
             if market.skipped:
                 skipped[name] = market.skipped
 
@@ -271,6 +276,7 @@ class KnowledgeBase:
             errors=errors,
             skipped=skipped,
             descriptions=descriptions,
+            entries=entries,
         )
         return completed, libraries, records
 

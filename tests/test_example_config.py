@@ -31,11 +31,13 @@ ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_CONFIG = ROOT / "examples" / "config.yaml"
 
 # One skill's real URI per library the shipped config declares, from the
-# BUILDERS fixtures below: grafana nests its skill a folder deeper than the
-# other three, which is exactly the case an address built by hand gets wrong.
+# BUILDERS fixtures below: grafana publishes several entries, so its skills sit
+# in a folder named for their plugin, a level deeper than the other three's,
+# whose one entry each is the library's main plugin -- exactly the case an
+# address built by hand gets wrong.
 SKILL_URI_PER_LIBRARY = {
     "n8n": "skill://n8n/s/SKILL.md",
-    "grafana": "skill://grafana/g/s/SKILL.md",
+    "grafana": "skill://grafana/grafana-lgtm/s/SKILL.md",
     "penpot": "skill://penpot/s/SKILL.md",
     "superpowers": "skill://superpowers/s/SKILL.md",
 }
@@ -95,8 +97,8 @@ def _grafana(root: Path) -> None:
     the scan of `skills/` never reaches, so the repository's scaffolding stays
     out of the catalogue without anything written here.
     """
-    _skill(root, "skills", "g", "s")
-    _skill(root, "skills", "h", "t")
+    _skill(root, "skills", "grafana-lgtm", "s")
+    _skill(root, "skills", "grafana-cloud", "t")
     _skill(root, "template")
     _catalog(
         root,
@@ -104,14 +106,14 @@ def _grafana(root: Path) -> None:
         {
             "name": "grafana-lgtm",
             "source": "./",
-            "skills": ["./skills/g"],
+            "skills": ["./skills/grafana-lgtm"],
             "category": "observability",
             "tags": ["lgtm"],
         },
         {
             "name": "grafana-cloud",
             "source": "./",
-            "skills": ["./skills/h"],
+            "skills": ["./skills/grafana-cloud"],
             "category": "observability",
             "tags": ["cloud"],
         },

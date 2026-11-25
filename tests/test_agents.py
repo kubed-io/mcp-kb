@@ -582,11 +582,14 @@ def test_a_prepended_plugin_takes_the_short_name(tmp_path):
 
 def test_a_conflicting_plugin_serves_no_agents(tmp_path):
     tree = agents_tree(tmp_path)
-    skill = "---\nname: drawio\ndescription: Again.\n---\nAgain.\n"
+    # A skill of `copy` sits in its own folder (SKL-59), so what it collides on
+    # is a prompt name an earlier plugin of the library already serves.
+    command = "---\ndescription: Draw.\n---\nDraw.\n"
     _entries(
         tree,
+        before=[("first", {"commands/draw.md": command})],
         after=[
-            ("copy", {"skills/drawio/SKILL.md": skill, "agents/c.md": _agent("clone")})
+            ("copy", {"commands/draw.md": command, "agents/c.md": _agent("clone")})
         ],
     )
 

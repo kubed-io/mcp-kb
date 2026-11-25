@@ -6,6 +6,12 @@ plugin *in that library* -- ``/health`` names the conflict under the library,
 and nothing of it is served there, its other skills and files included, while
 the earlier plugin carries on. The same plugin serves normally in any other
 library, because addresses are per library.
+
+A library is a namespace (SKL-59): its main plugin's skills sit at
+``<library>/<name>`` and every other plugin's at ``<library>/<plugin>/<name>``,
+so two plugins' skills meet only where a plugin is named like one of the main
+plugin's skills, or a skill and a library file overlap. The trees here are
+named so: the first plugin is the main one, ``lib``, unless a test says not.
 """
 
 import httpx
@@ -30,34 +36,30 @@ def _skill(root, rel, name, description):
     _write(root, f"{rel}/SKILL.md", frontmatter)
 
 
-# The folders below skills/ these trees put skills in, declared by both plugins
-# so a skill one level further down is found; a folder a tree lacks finds none.
-FOLDERS = ("./skills/folder", "./skills/guides", "./skills/x")
+def _pair(
+    tmp_path,
+    first,
+    second,
+    files=("shared/**",),
+    libraries=None,
+    names=("lib", "second"),
+):
+    """Two plugins feeding library `lib`, in ``names`` order; each gets a tree.
 
-
-def _pair(tmp_path, first, second, files=("shared/**",), libraries=None):
-    """Two plugins feeding library `lib`, in that order; each gets a tree.
-
+    By default the first is named like the library, and so is its main plugin.
     ``libraries`` replaces the one-library default, for the test that serves
     the second plugin elsewhere as well.
     """
     plugins = []
-    for name, build in (("first", first), ("second", second)):
+    for name, build in zip(names, (first, second), strict=True):
         root = tmp_path / name
         root.mkdir()
         build(root)
-        plugins.append(
-            {
-                "name": name,
-                "source": f"file://{root}",
-                "skills": list(FOLDERS),
-                "files": list(files),
-            }
-        )
+        plugins.append({"name": name, "source": f"file://{root}", "files": list(files)})
     config = Config.model_validate(
         {
             "plugins": plugins,
-            "libraries": libraries or [{"name": "lib", "plugins": ["first", "second"]}],
+            "libraries": libraries or [{"name": "lib", "plugins": list(names)}],
         }
     )
     return KnowledgeBase(config, tmp_path / "c")
@@ -75,68 +77,67 @@ async def _serves(knowledge_base, uri):
 
 
 def _conflict(health, library="lib"):
-    """What `second` collided on in ``library``, and that `first` is untouched."""
-    assert health["plugins"]["first"]["status"] == "ok"
-    assert health["plugins"]["second"]["status"] == "ok", "the harvest itself is fine"
+    """What a later plugin collided on in ``library``; every harvest is fine."""
+    assert {p["status"] for p in health["plugins"].values()} == {"ok"}
     return health["libraries"][library]["conflicts"]
 
 
-async def test_a_second_plugin_serving_a_claimed_skill_uri_fails(tmp_path):
+async def test_a_plugin_named_like_a_main_plugins_skill_fails(tmp_path):
+    """Its folder is the skill's directory, so every skill of it would sit
+    inside that skill and be read as the skill's files."""
     kb = _pair(
         tmp_path,
-        lambda r: _skill(r, "skills/folder/x", "x", "From first."),
+        lambda r: _skill(r, "skills/second", "second", "From first."),
         lambda r: (
-            _skill(r, "skills/folder/x", "x", "From second."),
-            _skill(r, "skills/folder/y", "y", "Only second."),
+            _skill(r, "skills/x", "x", "From second."),
+            _skill(r, "skills/y", "y", "Only second."),
         ),
     )
     health = await _health(kb)
 
     assert _conflict(health) == {
-        "second": "conflict: skill://lib/folder/x/SKILL.md is already served by"
-        " plugin 'first'"
+        "second": "conflict: skill://lib/second/x/SKILL.md is already served by"
+        " plugin 'lib'"
     }
     assert health["libraries"]["lib"]["skills"] == 1
-    assert "From first." in await _serves(kb, "skill://lib/folder/x/SKILL.md")
+    assert "From first." in await _serves(kb, "skill://lib/second/SKILL.md")
     async with Client(server_of(kb)) as client:
         with pytest.raises(Exception, match="not found"):
-            await client.read_resource("skill://lib/folder/y/SKILL.md")
+            await client.read_resource("skill://lib/second/y/SKILL.md")
 
 
 async def test_a_conflict_fails_the_plugin_in_that_library_alone(tmp_path):
-    """The same two plugins in another library are another question: served
-    there in the other order, it is `first` that loses; served alone, `second`
-    serves everything it has."""
+    """The same two plugins in another library are another question: where
+    neither is the main plugin each has a folder of its own and both serve;
+    served alone, `second` serves everything it has."""
     kb = _pair(
         tmp_path,
-        lambda r: _skill(r, "skills/folder/x", "x", "From first."),
+        lambda r: _skill(r, "skills/second", "second", "From first."),
         lambda r: (
-            _skill(r, "skills/folder/x", "x", "From second."),
-            _skill(r, "skills/folder/y", "y", "Only second."),
+            _skill(r, "skills/x", "x", "From second."),
+            _skill(r, "skills/y", "y", "Only second."),
         ),
         libraries=[
-            {"name": "lib", "plugins": ["first", "second"]},
-            {"name": "reversed", "plugins": ["second", "first"]},
+            {"name": "lib", "plugins": ["lib", "second"]},
+            {"name": "mixed", "plugins": ["second", "lib"]},
             {"name": "alone", "plugins": ["second"]},
         ],
     )
     health = await _health(kb)
 
     assert _conflict(health, "lib") == {
-        "second": "conflict: skill://lib/folder/x/SKILL.md is already served by"
-        " plugin 'first'"
+        "second": "conflict: skill://lib/second/x/SKILL.md is already served by"
+        " plugin 'lib'"
     }
-    assert _conflict(health, "reversed") == {
-        "first": "conflict: skill://reversed/folder/x/SKILL.md is already served by"
-        " plugin 'second'"
-    }
+    assert "conflicts" not in health["libraries"]["mixed"]
+    assert health["libraries"]["mixed"]["skills"] == 3
     assert "conflicts" not in health["libraries"]["alone"]
     assert health["libraries"]["alone"]["skills"] == 2
-    assert "From first." in await _serves(kb, "skill://lib/folder/x/SKILL.md")
-    assert "From second." in await _serves(kb, "skill://reversed/folder/x/SKILL.md")
-    assert "Only second." in await _serves(kb, "skill://reversed/folder/y/SKILL.md")
-    assert "Only second." in await _serves(kb, "skill://alone/folder/y/SKILL.md")
-    assert health["plugins"]["second"]["libraries"] == ["lib", "reversed", "alone"]
+    assert "From first." in await _serves(kb, "skill://lib/second/SKILL.md")
+    assert "From first." in await _serves(kb, "skill://mixed/lib/second/SKILL.md")
+    assert "From second." in await _serves(kb, "skill://mixed/second/x/SKILL.md")
+    assert "Only second." in await _serves(kb, "skill://alone/second/y/SKILL.md")
+    assert health["plugins"]["second"]["libraries"] == ["lib", "mixed", "alone"]
 
 
 async def test_a_second_plugin_serving_a_claimed_file_uri_fails(tmp_path):
@@ -152,7 +153,7 @@ async def test_a_second_plugin_serving_a_claimed_file_uri_fails(tmp_path):
 
     assert _conflict(health) == {
         "second": "conflict: skill://lib/shared/a.md is already served by"
-        " plugin 'first'"
+        " plugin 'lib'"
     }
     assert await _serves(kb, "skill://lib/shared/a.md") == "first a\n"
     assert kb.index.visible() == []
@@ -170,7 +171,7 @@ async def test_a_second_plugin_serving_a_claimed_prompt_name_fails(tmp_path):
     health = await _health(kb)
 
     assert _conflict(health) == {
-        "second": "conflict: prompt lib_same is already served by plugin 'first'"
+        "second": "conflict: prompt lib_same is already served by plugin 'lib'"
     }
     async with Client(server_of(kb)) as client:
         prompts = await client.list_prompts()
@@ -195,7 +196,7 @@ async def test_a_later_file_inside_an_earlier_plugins_skill_fails_its_plugin(tmp
 
     assert _conflict(health) == {
         "second": "conflict: skill://lib/x/notes.md is already served by"
-        " plugin 'first'"
+        " plugin 'lib'"
     }
     async with Client(server_of(kb)) as client:
         with pytest.raises(Exception, match="not found"):
@@ -203,62 +204,70 @@ async def test_a_later_file_inside_an_earlier_plugins_skill_fails_its_plugin(tmp
 
 
 async def test_a_later_skill_holding_an_earlier_plugins_file_fails_its_plugin(tmp_path):
+    """The later plugin is the main one here: being main places its skills,
+    and claims nothing ahead of a plugin listed before it."""
     kb = _pair(
         tmp_path,
         lambda r: _write(r, "x/notes.md", "first notes\n"),
         lambda r: _skill(r, "skills/x", "x", "From second."),
         files=("x/**",),
+        names=("first", "lib"),
     )
     health = await _health(kb)
 
     assert _conflict(health) == {
-        "second": "conflict: skill://lib/x/notes.md is already served by"
-        " plugin 'first'"
+        "lib": "conflict: skill://lib/x/notes.md is already served by plugin 'first'"
     }
     assert await _serves(kb, "skill://lib/x/notes.md") == "first notes\n"
 
 
 @pytest.mark.parametrize(
-    ("outer", "inner", "later"),
-    [("first", "second", "skill://lib/x/y/SKILL.md"), ("second", "first", "skill://lib/x/SKILL.md")],
+    ("names", "message"),
+    [
+        (("lib", "x"), "skill://lib/x/y/SKILL.md is already served by plugin 'lib'"),
+        (("x", "lib"), "skill://lib/x/SKILL.md is already served by plugin 'x'"),
+    ],
 )
 async def test_a_skill_nested_in_another_plugins_skill_fails_the_later_plugin(
-    tmp_path, outer, inner, later
+    tmp_path, names, message
 ):
-    """Either way round: the nested skill would hide the outer one's files."""
+    """Either way round: the nested skill would hide the outer one's files.
+    The main plugin `lib` holds the skill `x`, and the plugin `x` holds `y`."""
     trees = {
-        outer: lambda r: _skill(r, "skills/x", "x", f"Outer from {outer}."),
-        inner: lambda r: _skill(r, "skills/x/y", "y", f"Inner from {inner}."),
+        "lib": lambda r: _skill(r, "skills/x", "x", "Outer."),
+        "x": lambda r: _skill(r, "skills/y", "y", "Inner."),
     }
-    kb = _pair(tmp_path, trees["first"], trees["second"])
+    kb = _pair(tmp_path, trees[names[0]], trees[names[1]], names=names)
     health = await _health(kb)
 
-    assert _conflict(health) == {
-        "second": f"conflict: {later} is already served by plugin 'first'"
-    }
+    assert _conflict(health) == {names[1]: f"conflict: {message}"}
 
 
 @pytest.mark.parametrize("file_first", [True, False])
 async def test_a_file_at_a_skill_folders_address_fails_the_later_plugin(
     tmp_path, file_first
 ):
-    """A library file `guides` and a skill under `guides/` claim overlapping
-    addresses: `skill://lib/guides` would serve the file where the skill's folder
-    is a directory that serves nothing. One plugin cannot hold both — a name is a
-    file or a directory — so only two plugins can, and the later one fails.
+    """A library file `guides` and the plugin `guides`'s skills claim
+    overlapping addresses: `skill://lib/guides` would serve the file where the
+    plugin's folder is a directory that serves nothing. One plugin cannot hold
+    both -- its folder is its name -- so only two plugins can, and the later
+    one fails.
     """
 
     def with_file(r):
         _write(r, "guides", "a file named like a folder")
 
     def with_skill(r):
-        _skill(r, "skills/guides/y", "y", "Under guides.")
+        _skill(r, "skills/y", "y", "Under guides.")
 
-    first, second = (with_file, with_skill) if file_first else (with_skill, with_file)
-    kb = _pair(tmp_path, first, second, files=("guides",))
+    trees = {"lib": with_file, "guides": with_skill}
+    names = ("lib", "guides") if file_first else ("guides", "lib")
+    kb = _pair(
+        tmp_path, trees[names[0]], trees[names[1]], files=("guides",), names=names
+    )
     health = await _health(kb)
 
-    assert "skill://lib/guides" in _conflict(health)["second"]
+    assert "skill://lib/guides" in _conflict(health)[names[1]]
 
 
 @pytest.mark.parametrize("short_first", [True, False])

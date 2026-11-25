@@ -50,13 +50,14 @@ INDEX_VERSION = 8
 class SkillRow:
     """A harvested skill, flattened to JSON-safe fields.
 
-    No library, plugin, category or tags: those are the library's and the
-    plugin's, put back on by ``to_skill`` when a snapshot assigns the plugin
-    to a library.
+    No library, folder, plugin, category or tags: those are the library's and
+    the plugin's, put back on by ``to_skill`` when a snapshot assigns the plugin
+    to a library. The folder is the library's decision too -- empty for its
+    main plugin, the plugin's name otherwise -- so one plugin in two libraries
+    is one row served at two addresses.
     """
 
     name: str
-    folder: str
     description: str
     path: str
 
@@ -64,7 +65,6 @@ class SkillRow:
     def from_skill(cls, skill: Skill) -> SkillRow:
         return cls(
             name=skill.name,
-            folder=skill.folder,
             description=skill.description,
             path=str(skill.path),
         )
@@ -73,6 +73,7 @@ class SkillRow:
         self,
         *,
         library: str,
+        folder: str,
         plugin: str,
         root: Path,
         category: str | None,
@@ -83,7 +84,7 @@ class SkillRow:
         return Skill(
             name=self.name,
             library=library,
-            folder=self.folder,
+            folder=folder,
             description=self.description,
             path=Path(self.path),
             plugin=plugin,

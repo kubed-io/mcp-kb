@@ -296,13 +296,16 @@ def test_config_hash_ignores_key_order_and_changes_with_content(tmp_path):
 
 @pytest.mark.unit
 def test_a_skill_row_round_trips_to_a_skill(tmp_path):
-    """The row carries the skill's own fields; the library and the plugin's
-    labels are put back on by whoever assigns the plugin to a library."""
+    """The row carries the skill's own fields; the library, the plugin's folder
+    in it and the plugin's labels are put back on by whoever assigns the
+    plugin to a library."""
     skill = _skill()
     row = SkillRow.from_skill(skill)
     assert not hasattr(row, "library")
+    assert not hasattr(row, "folder")
     back = row.to_skill(
         library=skill.library,
+        folder=skill.folder,
         plugin=skill.plugin,
         root=skill.root,
         category=skill.category,
@@ -310,9 +313,14 @@ def test_a_skill_row_round_trips_to_a_skill(tmp_path):
     )
     assert back == skill
     twice = row.to_skill(
-        library="other", plugin=skill.plugin, root=skill.root, category=None, tags=frozenset()
+        library="other",
+        folder="flatsource",
+        plugin=skill.plugin,
+        root=skill.root,
+        category=None,
+        tags=frozenset(),
     )
-    assert twice.address == "other/alpha"
+    assert twice.address == "other/flatsource/alpha"
 
 
 @pytest.mark.unit

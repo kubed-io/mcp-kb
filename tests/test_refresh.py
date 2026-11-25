@@ -18,7 +18,7 @@ from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.announce import _can_remember
 from kubed.mcp_kb.mcp.scope import Scope
 from kubed.mcp_kb.sources import SourceError, SourceLoader
-from tests.conftest import DEEP_FOLDERS, key_of, make_config, server_of
+from tests.conftest import NESTED, key_of, make_config, server_of
 
 
 @pytest.fixture
@@ -636,10 +636,10 @@ def test_listings_are_memoised_per_scope(skills_dir, cache):
 @pytest.mark.unit
 async def test_a_rebuild_is_visible_to_a_connected_client(skills_dir, cache):
     """A provider holding a ``Catalogue`` would serve generation 0 forever."""
-    # plugin-c is declared before it exists: declaring a folder that later
-    # appears is how a refresh picks up a new one.
-    folders = {"deepsource": (*DEEP_FOLDERS, "./skills/plugin-c")}
-    knowledge_base = KnowledgeBase(make_config(skills_dir, folders=folders), cache)
+    # plugin-c is declared before its folder exists: declaring a plugin whose
+    # folder later appears is how a refresh picks up a new one.
+    config = make_config(skills_dir, nested=(*NESTED, "plugin-c"))
+    knowledge_base = KnowledgeBase(config, cache)
     async with Client(server_of(knowledge_base)) as client:
         assert "skill://deepsource/plugin-c/_index.md" not in [
             str(r.uri) for r in await client.list_resources()

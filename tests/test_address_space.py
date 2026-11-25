@@ -1,12 +1,15 @@
 """The ``skill://`` grammar, read back through a running server.
 
-The tree is shaped like the grafana library upstream: skills two levels down
-under folders (``skills/<folder>/<skill>/SKILL.md``, each folder declared, as
-grafana's catalog entries declare theirs), a skill directly in ``skills/``, a
-skill nested deeper still, two skills sharing a name in different
-folders, a library-level file, and a prompt. A second plugin feeds the same
-library, and a second library reuses a folder and a skill name, which are the
-shapes scope and the listing have to keep apart.
+The tree is shaped like the grafana library upstream: one tree holding a
+plugin per folder below ``skills/`` (``skills/<folder>/<skill>/SKILL.md``, each
+plugin named like its folder and declaring it, as grafana's catalog entries
+declare theirs), a skill of the library's own plugin, one plugin declaring a
+folder deeper still, two skills sharing a name in different plugins, a
+library-level file, and a prompt. The library is a namespace (SKL-59): its own
+plugin's skills sit at ``grafana/<name>``, every other plugin's at
+``grafana/<plugin>/<name>``. A plugin on another tree feeds the same library,
+and a second library reuses a skill name, which are the shapes scope and the
+listing have to keep apart.
 
 Every address is read over MCP from a real ``KnowledgeBase`` on a loopback
 port, because scope and the ``?listing=full`` listing exist only inside an HTTP
@@ -79,7 +82,9 @@ def _build(base):
     _skill(grafana, "skills/grafana-k6/k6", "k6", "Load test.")
     _write(grafana, "skills/grafana-k6/k6/SETUP.md", "k6 setup\n")
     _skill(grafana, "skills/grafana-k6/testing", "testing", "Test with k6.")
-    _skill(grafana, "skills/overview", "overview", "Start here.")
+    # Not in skills/, which every plugin on this tree scans: the main
+    # plugin's own, declared by it alone.
+    _skill(grafana, "overview", "overview", "Start here.")
     _skill(grafana, "skills/grafana-plugins/app/sdk", "sdk", "Build a plugin.")
     _write(grafana, "shared/style.md", "house style\n")
     _write(grafana, "prompts/debug.md", "---\ndescription: Debug.\n---\nGo.\n")
@@ -90,7 +95,7 @@ def _build(base):
     _write(extra, "prompts/ops.md", "---\ndescription: Ops.\n---\nGo.\n")
 
     other = base / "other"
-    _skill(other, "skills/grafana-lgtm/loki", "loki", "Another loki.")
+    _skill(other, "skills/loki", "loki", "Another loki.")
 
     handbook = base / "handbook"
     _write(handbook, "guide/intro.md", "welcome\n")
@@ -102,25 +107,31 @@ def _build(base):
                     "name": "grafana",
                     "source": f"file://{grafana}",
                     "tags": ["core"],
-                    "skills": [
-                        "./skills/grafana-lgtm",
-                        "./skills/grafana-k6",
-                        "./skills/grafana-plugins/app",
-                    ],
+                    "skills": ["./overview"],
                     "files": ["shared/**"],
                 },
+                *(
+                    {
+                        "name": name,
+                        "source": f"file://{grafana}",
+                        "tags": ["core"],
+                        "skills": [folder],
+                        "prompts": [],
+                    }
+                    for name, folder in (
+                        ("grafana-lgtm", "./skills/grafana-lgtm"),
+                        ("grafana-k6", "./skills/grafana-k6"),
+                        ("grafana-plugins", "./skills/grafana-plugins/app"),
+                    )
+                ),
                 {
-                    "name": "grafana-extra",
+                    "name": "grafana-ops",
                     "source": f"file://{extra}",
                     "tags": ["extra"],
                     "skills": ["./skills/grafana-ops"],
                     "files": ["extra/**"],
                 },
-                {
-                    "name": "other",
-                    "source": f"file://{other}",
-                    "skills": ["./skills/grafana-lgtm"],
-                },
+                {"name": "other", "source": f"file://{other}"},
                 {
                     "name": "handbook",
                     "source": f"file://{handbook}",
@@ -130,7 +141,16 @@ def _build(base):
                 },
             ],
             "libraries": [
-                {"name": "grafana", "plugins": ["grafana", "grafana-extra"]},
+                {
+                    "name": "grafana",
+                    "plugins": [
+                        "grafana",
+                        "grafana-lgtm",
+                        "grafana-k6",
+                        "grafana-plugins",
+                        "grafana-ops",
+                    ],
+                },
                 {"name": "other", "plugins": ["other"]},
                 {"name": "handbook", "plugins": ["handbook"]},
             ],
@@ -228,7 +248,7 @@ async def test_a_skill_two_folders_down_is_served_at_its_real_path(url):
     assert await _read(url, "skill://grafana/grafana-k6/k6/SETUP.md") == "k6 setup\n"
     assert "Start here." in await _read(url, "skill://grafana/overview/SKILL.md")
     assert "Build a plugin." in await _read(
-        url, "skill://grafana/grafana-plugins/app/sdk/SKILL.md"
+        url, "skill://grafana/grafana-plugins/sdk/SKILL.md"
     )
 
 
@@ -244,12 +264,12 @@ async def test_a_sibling_reference_resolves_to_the_siblings_uri(url):
     assert "Query traces." in await _read(url, resolved)
 
 
-async def test_two_skills_with_one_name_in_different_folders_are_both_served(url):
+async def test_two_skills_with_one_name_in_different_plugins_are_both_served(url):
     lgtm = await _read(url, "skill://grafana/grafana-lgtm/testing/SKILL.md")
     k6 = await _read(url, "skill://grafana/grafana-k6/testing/SKILL.md")
     assert "Test the stack." in lgtm
     assert "Test with k6." in k6
-    other = await _read(url, "skill://other/grafana-lgtm/loki/SKILL.md")
+    other = await _read(url, "skill://other/loki/SKILL.md")
     assert "Another loki." in other
 
 
@@ -350,7 +370,7 @@ async def test_a_dot_segment_past_the_root_reads_nothing(url):
     """Dots resolve over the whole path below ``skill://`` (the library is a
     segment, not an authority), and a `..` with nothing left to pop resolves to
     nothing. A `..` that stays inside reads what the resolved address reads."""
-    escape = "skill://other/../../grafana-lgtm/loki/SKILL.md"
+    escape = "skill://other/../../loki/SKILL.md"
     raw = await _raw(url, escape)
     assert raw.startswith("error:")
     assert "not found" in raw
@@ -362,7 +382,7 @@ async def test_a_dot_segment_past_the_root_reads_nothing(url):
     # middleware, so it still clamps at the library; Task 4 retires it.
     assert "Another loki." in await _tool(url, escape)
     assert "Query logs." not in await _tool(url, across)
-    # Scope applies to the resolved address: `extra` admits grafana-extra alone, which has no loki.
+    # Scope applies to the resolved address: `extra` admits grafana-ops alone, which has no loki.
     assert "Query logs." not in await _raw(url, across, tags="extra")
     assert "Query logs." not in await _tool(url, across, tags="extra")
 
@@ -400,7 +420,7 @@ async def test_a_dot_segment_read_out_of_scope_reads_as_a_missing_one(url):
     sneak = "skill://grafana/grafana-k6/../grafana-lgtm/loki/SKILL.md"
     missing = "skill://grafana/grafana-k6/nope/SKILL.md"
     assert "Query logs." in await _raw(url, sneak)
-    # `extra` admits grafana-extra alone, which has no loki.
+    # `extra` admits grafana-ops alone, which has no loki.
     hidden = await _raw(url, sneak, tags="extra")
     assert hidden == (await _raw(url, missing, tags="extra")).replace(missing, sneak)
     hidden = await _tool(url, sneak, tags="extra")
@@ -585,13 +605,7 @@ async def test_the_listing_is_exactly_the_index_rows(url):
         (
             "skill://other/_index.md",
             "other/_index.md",
-            "The other library — 1 skill in 1 folder: grafana-lgtm.",
-            md,
-        ),
-        (
-            "skill://other/grafana-lgtm/_index.md",
-            "other/grafana-lgtm/_index.md",
-            "1 skill in the grafana-lgtm folder of the other library.",
+            "The other library — 1 skill.",
             md,
         ),
     ]
@@ -632,17 +646,6 @@ async def test_a_folder_index_lists_the_skills_directly_in_it(url):
     )
 
 
-async def test_a_folder_holding_only_folders_has_an_index_of_them(url):
-    assert await _read(url, "skill://grafana/grafana-plugins/_index.md") == (
-        "# grafana/grafana-plugins — 1 skill\n\n"
-        "skill://grafana/grafana-plugins/app/_index.md: 1 skill\n"
-        "\nRead a folder's _index.md for what is in it.\n"
-    )
-    assert "sdk/SKILL.md" in await _read(
-        url, "skill://grafana/grafana-plugins/app/_index.md"
-    )
-
-
 async def test_every_uri_an_index_names_reads(url):
     """Walked from the library indexes down, through both surfaces."""
     seen, queue = set(), [row[0] for row in await _rows(url)]
@@ -656,7 +659,7 @@ async def test_every_uri_an_index_names_reads(url):
         if uri.endswith(("/_index.md", "/_files.md")):
             queue += re.findall(r"^(skill://\S+?):? ", body + " ", re.M)
             queue += re.findall(r"^(skill://\S+)$", body, re.M)
-    assert "skill://grafana/grafana-plugins/app/sdk/SKILL.md" in seen
+    assert "skill://grafana/grafana-plugins/sdk/SKILL.md" in seen
     assert "skill://grafana/shared/style.md" in seen
 
 
@@ -680,9 +683,9 @@ async def test_the_full_listing_adds_every_skills_instructions(url):
         "skill://grafana/grafana-lgtm/tempo/SKILL.md",
         "skill://grafana/grafana-lgtm/testing/SKILL.md",
         "skill://grafana/grafana-ops/runbook/SKILL.md",
-        "skill://grafana/grafana-plugins/app/sdk/SKILL.md",
+        "skill://grafana/grafana-plugins/sdk/SKILL.md",
         "skill://grafana/overview/SKILL.md",
-        "skill://other/grafana-lgtm/loki/SKILL.md",
+        "skill://other/loki/SKILL.md",
     ]
     assert uris[: -len(skills)] == [row[0] for row in await _rows(url)]
 
@@ -716,7 +719,7 @@ async def test_every_listed_folder_is_one_an_index_names(url):
 
 
 async def test_a_tag_scope_cannot_read_another_plugins_library_file(url):
-    """`extra/notes.md` belongs to grafana-extra, which does not carry `core`."""
+    """`extra/notes.md` belongs to grafana-ops, which does not carry `core`."""
     assert await _read(url, "skill://grafana/shared/style.md", tags="core")
     error = await _read_error(url, "skill://grafana/extra/notes.md", tags="core")
     assert "not found" in error

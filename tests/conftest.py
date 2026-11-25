@@ -20,22 +20,38 @@ from tests.webdav_server import webdav  # noqa: F401 - a fixture, used by name
 FLAT = {"alpha": "First skill.", "beta": "Second skill."}
 NESTED = {"plugin-a": {"gamma": "Third skill."}, "plugin-b": {"delta": "Fourth skill."}}
 
-# Each synthetic library is one plugin whose root is that library's directory,
-# so its skill folders are relative to it rather than to the tree root.
-# flatsource lays its skills directly under itself and declares that folder
-# ("."); deepsource lays them in a folder below skills/ and declares each
-# folder, which harvest.folder_of() then names them by.
+# Each synthetic library is its directory's plugins, every one rooted at that
+# directory, so their skill folders are relative to it rather than to the tree
+# root. flatsource is one plugin, named like its library and so its main one,
+# which lays its skills directly under itself and declares that folder (".").
+# deepsource is three: its own -- the main plugin, serving the library's files
+# and prompts and no skill -- and one per folder below skills/, named like the
+# folder, which is what puts their skills at deepsource/<plugin>/<name>.
 FLAT_FOLDERS = (".",)
-DEEP_FOLDERS = tuple(f"./skills/{folder}" for folder in NESTED)
-SKILL_FOLDERS = {"flatsource": FLAT_FOLDERS, "deepsource": DEEP_FOLDERS}
-LIBRARY_GLOBS = {
-    name: Globs(skills=folders, files=("**/*",))
-    for name, folders in SKILL_FOLDERS.items()
-}
+DEEP_FILES = ("README.md", "shared/**/*")
+
+
+def library_plugins(library: str, nested=tuple(NESTED)) -> dict[str, Globs]:
+    """The plugins a synthetic library's directory is declared as, by name.
+
+    ``nested`` is deepsource's plugins below its own: one per folder below
+    ``skills/``, declared whether or not the folder is there yet.
+    """
+    if library != "deepsource":
+        return {library: Globs(skills=FLAT_FOLDERS, files=("**/*",))}
+    return {
+        library: Globs(skills=(), files=DEEP_FILES),
+        **{
+            name: Globs(skills=(f"./skills/{name}",), prompts=(), files=())
+            for name in nested
+        },
+    }
+
+
 PROMPT_GLOBS = Globs(skills=(), prompts=("*.md",))
 
-# What each synthetic skills plugin declares about itself. A tag per plugin, so
-# a tag scope can tell the two apart the way a library scope can.
+# What each synthetic library's plugins declare about themselves. A tag per
+# library, so a tag scope can tell the two apart the way a library scope can.
 PLUGIN_TAGS = {"flatsource": ("flat",), "deepsource": ("deep",)}
 
 # One app per knowledge base, so a test that reaches the server twice -- a route
@@ -152,37 +168,47 @@ def fake_plugin(name: str, root: Path, **overrides) -> Plugin:
     return Plugin(**fields)
 
 
-def load_all_skills(root):
-    """Harvest and load every synthetic library under ``root``, as one catalogue."""
-    skills = []
-    for library, globs in LIBRARY_GLOBS.items():
+def _synthetic_plugins(root):
+    """Each synthetic plugin under ``root``: library, name, root and globs."""
+    for library in PLUGIN_TAGS:
         library_root = root / library
         if library_root.is_dir():
-            dirs = harvest.skill_dirs(library_root, globs.skills)
-            skills += load_skills(
-                dirs,
-                library=library,
-                plugin=fake_plugin(library, library_root),
-                root=library_root,
-            )
+            for name, globs in library_plugins(library).items():
+                yield library, name, library_root, globs
+
+
+def load_all_skills(root):
+    """Harvest and load every synthetic library under ``root``, as one catalogue.
+
+    A plugin named like its library is its main one, as ``assemble_libraries``
+    decides it for these libraries; every other sits in a folder of its name.
+    """
+    skills = []
+    for library, name, library_root, globs in _synthetic_plugins(root):
+        dirs = harvest.skill_dirs(library_root, globs.skills)
+        skills += load_skills(
+            dirs,
+            library=library,
+            plugin=fake_plugin(name, library_root, tags=PLUGIN_TAGS[library]),
+            root=library_root,
+            folder="" if name == library else name,
+        )
     return skills
 
 
 def build_library_files(root):
     """A ``LibraryFiles`` fed from every synthetic library under ``root``."""
     resources = LibraryFiles()
-    for library, globs in LIBRARY_GLOBS.items():
-        library_root = root / library
-        if library_root.is_dir():
-            dirs = harvest.skill_dirs(library_root, globs.skills)
-            files = harvest.library_files(library_root, globs, dirs)
-            resources.add(
-                library,
-                library_root,
-                files,
-                dirs,
-                plugin=fake_plugin(library, library_root),
-            )
+    for library, name, library_root, globs in _synthetic_plugins(root):
+        dirs = harvest.skill_dirs(library_root, globs.skills)
+        files = harvest.library_files(library_root, globs, dirs)
+        resources.add(
+            library,
+            library_root,
+            files,
+            dirs,
+            plugin=fake_plugin(name, library_root, tags=PLUGIN_TAGS[library]),
+        )
     return resources
 
 
@@ -198,13 +224,13 @@ def load_library_prompts(root, library):
 def load_all_prompts(root):
     """Every library's prompts under ``root``, combined."""
     prompts = []
-    for library in LIBRARY_GLOBS:
+    for library in PLUGIN_TAGS:
         prompts += load_library_prompts(root, library)
     return prompts
 
 
 def make_config(
-    skills_dir=None, prompts_dir=None, libraries=None, refresh=None, folders=None
+    skills_dir=None, prompts_dir=None, libraries=None, refresh=None, nested=None
 ):
     """A ``Config`` whose ``file://`` plugins mirror the fixture trees above.
 
@@ -219,10 +245,11 @@ def make_config(
     that interval instead of the built-in ``file://`` scheme, which carries
     none -- the shape a test of the refresh loop needs.
 
-    ``folders`` maps a plugin name to the skill folders it declares, in place
-    of ``SKILL_FOLDERS``'s; a plugin in neither declares its own root.
+    ``nested`` is deepsource's plugins below its own, in place of one per
+    folder of ``NESTED``: a plugin declared before its folder exists is how a
+    refresh picks up a new one.
     """
-    folders = {**SKILL_FOLDERS, **(folders or {})}
+    nested = tuple(NESTED) if nested is None else tuple(nested)
     plugins = []
     members: dict[str, list[str]] = {}
     for base, is_prompts in ((skills_dir, False), (prompts_dir, True)):
@@ -234,22 +261,28 @@ def make_config(
             path = base / name
             source = f"file://{path}" if refresh is None else f"local://{path.relative_to('/')}"
             if is_prompts:
-                plugin = {
-                    "name": f"{name}-prompts",
-                    "source": source,
-                    "skills": [],
-                    "prompts": ["*.md"],
-                }
+                declared = [
+                    {
+                        "name": f"{name}-prompts",
+                        "source": source,
+                        "skills": [],
+                        "prompts": ["*.md"],
+                    }
+                ]
             else:
-                plugin = {
-                    "name": name,
-                    "source": source,
-                    "tags": list(PLUGIN_TAGS.get(name, ())),
-                    "skills": list(folders.get(name, FLAT_FOLDERS)),
-                    "files": ["**/*"],
-                }
-            plugins.append(plugin)
-            members.setdefault(name, []).append(plugin["name"])
+                declared = [
+                    {
+                        "name": plugin,
+                        "source": source,
+                        "tags": list(PLUGIN_TAGS.get(name, ())),
+                        "skills": list(globs.skills),
+                        **({} if globs.prompts is None else {"prompts": []}),
+                        "files": list(globs.files),
+                    }
+                    for plugin, globs in library_plugins(name, nested).items()
+                ]
+            plugins += declared
+            members.setdefault(name, []).extend(p["name"] for p in declared)
     sources = [] if refresh is None else [
         {"name": "local", "url": "file:///", "refresh": refresh}
     ]

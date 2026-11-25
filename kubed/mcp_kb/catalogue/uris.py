@@ -23,10 +23,11 @@ API::
     skill://<library>/_files.md                   files outside every skill
     skill://<library>/<file>                      one of those
 
-``<folder>`` is the skill's directory below its plugin's skill root, and may
-be empty or several segments deep; the last segment before the file is always
-the skill's name. A skill is found by the longest prefix of the path that
-names one, so a nested skill wins over the skill whose directory holds it.
+``<folder>`` is the skill's plugin's place in the library: empty for the
+library's main plugin, the plugin's name for any other
+(``snapshot.folder_for``). The last segment before the file is always the
+skill's name. A skill is found by the longest prefix of the path that names
+one, so a nested skill wins over the skill whose directory holds it.
 
 An index lists what is *directly* under it: each folder as its own
 ``_index.md``, with how many skills are below it, and each skill in no deeper
