@@ -40,7 +40,7 @@ import contextlib
 import logging
 import threading
 import time
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +102,10 @@ class KnowledgeBase:
         self._records: dict[str, PluginRecord] = {}
         self._plugins: list[Plugin] = []
         self._libraries: list[Library] = []
+        # What serves each snapshot before it is swapped in: the plugin layer's
+        # publisher, once ``serve_through`` is called. It returns the snapshot
+        # to swap in, narrowed to what it serves.
+        self._publish: Callable[[Snapshot], Snapshot] | None = None
         self._cold_start()
         self.snapshot: Snapshot = self._build(generation=0)
         log_changes({}, self.snapshot.status)
@@ -426,12 +430,28 @@ class KnowledgeBase:
             self._fetches, self._plugins = fetches, plugins
             self._libraries, self._records = libraries, records
             snapshot = self._build(generation=self.snapshot.generation + 1)
+            if self._publish is not None:
+                snapshot = self._publish(snapshot)
             log_changes(self.snapshot.status, snapshot.status)
             self.snapshot = snapshot
             # Best-effort and therefore last: a raise here must not leave
             # the records advanced while snapshot still holds the old generation.
             self._write_index()
             return rebuilt
+
+    def serve_through(self, publish: Callable[[Snapshot], Snapshot]) -> None:
+        """Hand every snapshot to ``publish`` before it is swapped in.
+
+        The current one at once, then every rebuilt one, under the lock, so a
+        snapshot is served by the plugin layer before any request reads it and
+        two refreshes publish in the order they swap. ``publish`` returns the
+        snapshot to swap in: the one it was given, narrowed to what it serves.
+        """
+        with self._lock:
+            self._publish = publish
+            published = publish(self.snapshot)
+            log_changes(self.snapshot.status, published.status)
+            self.snapshot = published
 
     def served_tree(self, key: str) -> Path | None:
         """The tree being served for fetch ``key``, or None.

@@ -3,7 +3,9 @@
 > **History.** Proposed for #79 (PR #89, into `issue-80`, epic #80). Not shipped. This is K3's
 > design of record, and [the plan](2026-11-24-k3-skills-through-add-plugin.md) implements it.
 > There was no draft spec on the branch. Its second round follows Dr K's rulings of 2026-11-24
-> (23:01) on PR #89, and his answers of 2026-11-25. Those rulings replaced the first round's staged trees. The cluster
+> (23:01) on PR #89, and his answers of 2026-11-25. Those rulings replaced the first round's staged trees.
+> Revised on 2026-11-25 (05:56) when Task 4 found that kb's agents can't stay kb's beside a served
+> plugin set: K3 hands them to kubed-mcp too (D11), and K5 (#83) shrinks to what is left. The cluster
 > repository's `2026-11-23-kb-onto-the-plugin-layer-design.md` is where K3 started; it couldn't
 > be read from here.
 
@@ -20,7 +22,8 @@ Claude Code doesn't load.
 
 kb keeps collecting plugins from sources and grouping them into libraries, refresh, `/health`,
 `/reindex`, and its kb-only surfaces: library and folder indexes, `_files.md`, library files and
-the plugin-root fallbacks. Prompts and agents stay kb's until K4 (#82) and K5 (#83).
+the plugin-root fallbacks. Prompts stay kb's until K4 (#82). Agents move to kubed-mcp in K3
+(D11), so K5 (#83) keeps only what D11 leaves.
 
 ## Facts this rests on
 
@@ -37,6 +40,10 @@ kubed-mcp is read at tag `v0.2.0-rc.1`, and the two issues the rc2 carries at th
 | `_manifest` is FastMCP's, `{"skill": <name>, …}`. A skill's file with a text-type extension reads as text (quick-mcp#37). | FastMCP `v4.2.5`; #37 |
 | A namespace inside an earlier plugin's skill folder, or the reverse, refuses the later plugin with `<namespace> is inside skill <uri> of plugin <name>` (#37). | #37 |
 | `QuickMCP(..., header_prefix="Kb")` reads `Kb-<Name>` beside `X-MCP-<Name>`, with the prefixed one winning, then the query, then `config.delivery`, then the default. That covers `Resource-Prefix`, `Resources`, `Listed` and `Via` (#21, DLV-16). | #21 |
+| The first non-empty `serve()` registers the plugin layer's agents extension (`io.modelcontextprotocol/agents`), whatever the plugins hold. FastMCP refuses a second explicit registration of an extension id, so a server's own agents extension can't stand beside a served set. | `Plugins._providers`; FastMCP `add_extension` |
+| `read_plugin` counts an empty list as a declared component (`entry.get(field) is not None`), so an entry carrying `"commands": []` beside a `plugin.json`, with `strict: false`, is refused as conflicting manifests. | `read_plugin` |
+| `command_reader(fn)`: a reader that returns a string skips that command, with the warning `prompt <path> is skipped: <reason>` (PLUG-62). | `app.py` |
+| An agent is named `<namespace's first segment>_<folders>_<name>`, a clash in the set renamed `<name>@<plugin>` (PLUG-63, PLUG-64). `agent_meta(fn)` adds keys to `agents/get`'s `_meta` beside `io.kubed/agent` (PLUG-73). Rewriters see an agent's file as `kind == "agent"` (PLUG-56). An agent's file also reads as an unlisted `agents://` resource (#20). | `plugins.py`, `agents.py` |
 | `resources/list` lists every `SKILL.md` unless `listed` leaves out `skills` (DLV-8). The plugin layer's two read-only resource tools arrive with the first plugin, and `mcp.tool` refuses a server tool of the same name (DLV-6, DLV-7). | #21; rc1 already lists them |
 
 ## Design
@@ -70,9 +77,11 @@ the deploy, like the gateway was.
 - **The address** is kb's own `<source>://<path>[//<subdir>][?ref=]`, so no cache path reaches a
   kubed-mcp log line or error.
 - **The entry** is the marketplace entry as published, less `source`. A declared plugin's is
-  `{"name": <name>}`, plus its `skills:` folders when it declares them (D3). Either way, kb adds
-  `"commands": []` and `"agents": []`, so kubed-mcp serves skills and nothing else, and kb's
-  prompts and agents stay kb's.
+  `{"name": <name>}`, plus its `skills:` folders when it declares them (D3). kb adds no empty
+  component lists: kubed-mcp serves the plugin's skills and agents (D11), and kb's
+  `command_reader` skips every command, so kb's prompts stay kb's until K4. That also covers a
+  `plugin.json` that declares `commands` (penpot-ai-kit's seven `./prompts/*.md`), which an
+  entry's `[]` could not empty, and leaves nothing for `read_plugin`'s empty-list check to refuse.
 - **Plugins kb does not add:**
   - a plugin that serves no skills, such as penpot-shared with `skills: []`;
   - a plugin LIB-28 has failed in that library;
@@ -91,9 +100,9 @@ the deploy, like the gateway was.
   that library (rulings 3, 8). A refused add is a `PluginError`, which covers #37's nesting
   guard, or a `ValueError` for a namespace kubed-mcp can't take. kb's LIB-28 claims run first and
   already refuse overlapping skill addresses, so the nesting guard is a backstop.
-- **Notes from kb's own entry stay out of `/health`.** kubed-mcp's `Plugin.skipped` doesn't reach
-  `/health` in K3 (ruling 2). kb reads it only to log, and drops the two "Default commands/ … /
-  agents/ folder is ignored" notes that kb's entry causes.
+- **kubed-mcp's raw notes stay out of `/health`.** kubed-mcp's `Plugin.skipped` doesn't reach
+  `/health` in K3 (ruling 2), and nor do the command skips kb's reader causes (one warning per
+  command). kb reads `skipped` only to log, and to report the agents D11 says it reports.
 
 ### D3. kb discovers skills the way kubed-mcp serves them
 
@@ -147,7 +156,8 @@ library's plugins in its order, then `mcp.serve(set)`.
 
 `mcp.add_rewriter(serving.rewrite)`. On a skill's root `SKILL.md`, it applies
 `Catalogue.instructions(address, text, requested_scope())`: SKL-55, then SKL-25 and SKL-52, as
-today. Every other site is returned as written. `to_mcp_form` isn't registered.
+today. On an agent's file it rewrites the body as D11 says. Every other site is returned as
+written. `to_mcp_form` isn't registered.
 
 The request's scope is safe to read here: a build runs in the request that pinned its key, and
 every scope with that key admits the same plugins. GW-5 writes the prefix after it.
@@ -186,6 +196,41 @@ without blocking: a refresh that holds it is about to publish anyway.
 and never a build. `admits` runs only when a build is made, so neither a refused request nor a
 burst of bogus `Kb-Tag` values fills the LRU. Every scope that admits nothing shares `EMPTY`.
 
+### D11. Agents through kubed-mcp (Dr K, 2026-11-25 05:56)
+
+kb's `AgentsExtension` (`mcp/agents.py`) goes, and kubed-mcp's serves `agents/list` and
+`agents/get` from the plugins of the set, under the request's view. No quick-mcp change is
+needed: a holding knob that keeps kb's extension would exist only to delay adoption.
+
+- **Names.** kubed-mcp names an agent `<library>_<folders>_<name>`, which is kb's AGT-7, and
+  renames a clash `<name>@<plugin name>` (PLUG-64), as kb's AGT-8 does. The claims run across
+  the set in the order kb adds plugins, which is library order, then each library's plugin
+  order. kb's roster is narrowed to the names kubed-mcp serves (the parity guard, as for
+  skills), and `/health`'s `renamed` and `unserved` are read off kubed-mcp's `Plugin.agent_files`
+  and `skipped`, in kb's wording.
+- **`instructions`.** kb's rewriter also takes `site.kind == "agent"`: it rewrites the body after
+  the frontmatter by AGT-17 and PRM-48, and leaves the frontmatter as written, so the file still
+  reads as the same agent. The gateway prefix is kubed-mcp's writer, after kb's.
+- **`_meta`.** `agent_meta` adds kb's `io.kubed.mcp-kb/agent` (`plugin`, `library`, `path`,
+  `frontmatter`, `servers`, `skills`) for the agent's `(namespace, address)`, read off the
+  snapshot the set was published from. kubed-mcp's own `io.kubed/agent` is there beside it.
+  `agent_meta` runs once per set entry, never per view, so it can't see a scope. `skills`
+  therefore resolves only against the agent's own plugin, which every scope that sees the agent
+  also sees: a cross-plugin entry (`<plugin>:<skill>`) would name a skill a pinned client can't
+  see (SCP-24), so it is left out for everyone (N9). The body's qualified names are the
+  rewriter's, which does see the view, so `instructions` keeps them.
+- **A bare plugin** (no `plugin.json` and no marketplace entry) has no agents in kb (AGT-4):
+  its entry gets `"agents": []`. That can't meet `read_plugin`'s empty-list check, which needs a
+  `plugin.json` beside the entry.
+- **Scope.** An agent is in scope when the view admits its plugin, which is AGT-15's rule. Out of
+  scope and absent stay one answer.
+- **Live agents.** A build never reads the disk, so AGT-16's re-read on `agents/get` becomes D9's
+  re-add: a live plugin whose agent file moved is added again, and `agents/list` and
+  `agents/get` both serve the new read.
+- **What K5 keeps:** a scoped `_meta.skills` (N9), which needs `agent_meta` to see the view; kb's own agent parsing (`catalogue/agents.py`), the roster and its
+  `/health` bookkeeping, once kubed-mcp's `Plugin` carries what kb reads from it; one `_meta`
+  key in place of two; and AGT-16's last-good fallback, if Dr K wants it back (N6).
+
 ## The live dump: named changes
 
 - **N1.** A skill's `_manifest` names it by its name (`{"skill": "loki", …}`). Accepted, ruling 5.
@@ -195,7 +240,44 @@ burst of bogus `Kb-Tag` values fills the LRU. Every scope that admits nothing sh
   `skill://n8n/n8n-house/n8n-mcp-instructions/…`. So does the instruction line that names it,
   once the cluster config's note is updated.
 - **N4.** `list_resources` and `read_resource` are kubed-mcp's (D8.2), so their result shape is
-  whatever DLV-6 returns.
+  whatever DLV-6 returns, and so are their descriptions: they no longer teach kb's URI grammar
+  or its scope headers.
+
+- **N5.** `agents/get`'s `_meta` also carries kubed-mcp's `io.kubed/agent` (`frontmatter`, and
+  `skills` as the `SKILL.md` URIs of the agent's own plugin's skills it names), beside kb's
+  `io.kubed.mcp-kb/agent`, which is unchanged.
+- **N6.** A live agent's edit reaches `agents/list` as well as `agents/get`, once kb re-adds its
+  plugin (D9). An edit that no longer parses takes the agent away until it parses again, where
+  AGT-16 served the last good copy.
+- **N7.** An agent's file also reads at `agents://<library>[/<plugin>]/<path below agents/>`, an
+  unlisted resource (#20).
+- **N8.** An agent kubed-mcp's `parse_agent` refuses and kb's accepted is no longer served: one
+  whose frontmatter `description` is empty, or isn't JSON-representable. The dump names any.
+
+- **N9.** `_meta["io.kubed.mcp-kb/agent"].skills` maps only the agent's own plugin's skills.
+  A `<plugin>:<skill>` entry naming another plugin is left out, whatever the scope.
+- **N10.** kubed-mcp's agent reading, where it differs from kb's AGT-6 and AGT-9: an agent with
+  no frontmatter `name` is served under its file's stem; `instructions` is trimmed of leading
+  and trailing whitespace; `modelRoutingHint` splits `model` into letter-and-digit words, so
+  `opus4` gives no hint where kb gave `large`.
+- **N11.** On a cold start from `index.json`, an agent file that no longer parses no longer
+  holds its name (AGT-8), so a later plugin's agent of that name keeps the short name.
+- **N12.** The gateway prefix is written into an agent's card and kubed-mcp's frontmatter copy
+  too, not only into `instructions`.
+- **N13.** A skill whose folder holds a hidden path at any depth (a file or folder whose name
+  starts with `.`) is not served at all, until kubed-mcp skips hidden files: FastMCP reads a
+  skill folder whole, dot files included, so kb fails the skill's `SKILL.md` in its rewriter
+  and drops the skill from its catalogue, logging it once. On the live sources this drops one
+  skill, `skill://grafana/grafana-k6/k6-perf-test-website`, whose `assets/` holds a
+  `.gitignore` and a `.gitkeep`.
+- **N14.** A skill holding a symlink is not served at all: FastMCP refuses the skill whole, and
+  the parity guard drops it from kb's catalogue, logging it once.
+- **N15.** MD-57 per prefix is lost: a skill a build fails under one view alone (PLUG-59), such
+  as a prefix that pushes its description past 1024 characters, doesn't read under that view,
+  and kb's indexes under that view still name it. kb narrows once per generation.
+- **N16.** A skill's file with no extension, or one kubed-mcp doesn't count as text, or bytes
+  that aren't UTF-8, is served as an `application/octet-stream` blob (PLUG-75), where kb served
+  every file as text, `text/markdown` by default.
 
 Everything else stays the same as the before-dump, under all ten scopes, with and without `kb+`.
 
@@ -219,6 +301,9 @@ Everything else stays the same as the before-dump, under all ten scopes, with an
   build per admitted set, `EMPTY` shared, and a refused scope builds nothing.
 - **[http-and-tools.md](../specs/http-and-tools.md):** the TOOL rows for `list_resources` and
   `read_resource` point at kubed-mcp's DLV-6, and their `?resources=` switch at DLV-2.
+- **[agents.md](../specs/agents.md):** AGT-7 to AGT-9 and AGT-17 say kubed-mcp serves them
+  (PLUG-63, PLUG-64, PLUG-73) with kb's `_meta` and rewriter; AGT-16 is reworded to D9's re-add
+  (N6); a new AGT row names the `agents://` file (N7).
 
 ## Settled by Dr K (2026-11-25)
 
@@ -233,3 +318,10 @@ Everything else stays the same as the before-dump, under all ten scopes, with an
    early. There is no holding knob in quick-mcp.
 
 `plan approved` follows once `kubed-mcp==0.2.0rc2` is published.
+
+4. **Agents (2026-11-25 05:56), option 3 of three:** kubed-mcp serves kb's agents in K3 (D11), and
+   kb's `AgentsExtension` goes. The other two options, a quick-mcp switch that lets a server
+   keep its own agents extension or serves skills alone, exist only to stage adoption, the kind
+   of knob ruled out for the resource tools. Commands are skipped with a `command_reader` until
+   K4, and kb passes no empty component lists, so RF4 no longer arises. The pin stays
+   `kubed-mcp==0.2.0rc2` for K3; mcp-kb#92 moves it to rc3 after the merge.

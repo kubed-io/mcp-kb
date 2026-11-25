@@ -115,6 +115,10 @@ class Snapshot:
     # a revalidator that outlived its snapshot would go on writing into the
     # tree nothing is serving.
     live: Revalidator | None = None
+    # What the generation was built from: the libraries in config order and
+    # every resolved plugin. What a publisher walks to serve it.
+    libraries: tuple[Library, ...] = ()
+    plugins: tuple[Plugin, ...] = ()
 
     def revalidate(self, path: Path) -> None:
         """Bring ``path`` level with its server, if a live fetch owns it."""
@@ -763,6 +767,8 @@ def build_snapshot(
             "fetches": status_fetches,
         },
         live=revalidator,
+        libraries=tuple(libraries),
+        plugins=tuple(plugins),
     )
 
 

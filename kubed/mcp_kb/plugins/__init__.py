@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -124,6 +125,21 @@ class Plugin:
     claude_format: bool = False
     servers: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
+    # A marketplace entry as its catalogue publishes it, less ``source``: what
+    # kubed-mcp merges with the plugin's ``plugin.json``. None for a declared
+    # plugin. Not compared or hashed, as a dict cannot be, and everything it
+    # says is in the fields above.
+    manifest_entry: Mapping[str, object] | None = field(
+        default=None, compare=False, repr=False
+    )
+
+    @property
+    def address(self) -> str:
+        """``<scheme>://<path>[//<subdir>][?ref=<ref>]``: kb's own address for
+        the plugin, which kubed-mcp is handed in place of any cache path."""
+        key, mark, ref = self.fetch.key.partition("?")
+        subdir = f"//{self.subdir}" if self.subdir else ""
+        return f"{key}{subdir}{mark}{ref}"
 
     @property
     def labels(self) -> frozenset[str]:

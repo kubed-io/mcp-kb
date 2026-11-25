@@ -2,7 +2,9 @@
 
 > **History.** Proposed for #79 (PR #89, into `issue-80`). Not shipped. Revised to Dr K's rulings
 > of 2026-11-24 (23:01): one library per namespace, with its main plugin on top; each plugin
-> added as itself; no staged trees.
+> added as itself; no staged trees. Revised again on 2026-11-25 (05:56): kb's agents go to kubed-mcp
+> in Task 4 (design D11), commands are skipped with a `command_reader`, and no empty component
+> list is passed.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -13,17 +15,18 @@ rewriting becomes its one rewriter.
 **Architecture:** kb finds skills the way kubed-mcp does: `skills/<name>/`, plus declared
 folders. Each library is a namespace: its main plugin sits at `<library>`, and every other
 plugin at `<library>/<plugin name>`. Each generation, kb adds every plugin to a kubed-mcp plugin
-set through a served-tree loader, with `commands` and `agents` emptied, and serves it. A view
-keyed by the admitted `(library, address)` pairs scopes each build. K1's provider and kb's
-resource mirror tools go. Library indexes, `_files.md`, library files and the fallbacks stay
+set through a served-tree loader and serves it: kubed-mcp serves the skills and the agents, and
+a `command_reader` skips every command until K4. A view keyed by the admitted
+`(library, address)` pairs scopes each build. K1's provider, kb's resource mirror tools and
+kb's agents extension go. Library indexes, `_files.md`, library files and the fallbacks stay
 kb's.
 
 **Tech Stack:** Python ≥3.11, `kubed-mcp==0.2.0rc2` (FastMCP 4 through it), pytest +
 pytest-asyncio, uvicorn, wsgidav.
 
 **Spec:** [the design](2026-11-24-k3-skills-through-add-plugin-design.md): D1–D10, the named
-changes N1–N4, and Dr K's answers of 2026-11-25 (main-plugin rule 2, `listed` none until #86,
-kubed-mcp's resource tools in K3). Also #79's notes in `.issue/`, Dr K's rulings on
+changes N1–N16, and Dr K's answers of 2026-11-25 (main-plugin rule 2, `listed` none until #86,
+kubed-mcp's resource tools in K3, agents in K3). Also #79's notes in `.issue/`, Dr K's rulings on
 PR #89, quick-mcp#37 and #21, and the living spec in [skills.md](../specs/skills.md) and
 [plugins-and-libraries.md](../specs/plugins-and-libraries.md).
 
@@ -40,8 +43,9 @@ PR #89, quick-mcp#37 and #21, and the living spec in [skills.md](../specs/skills
   `n8n-mcp-instructions`. Absent and out of scope stay indistinguishable (SCP-24).
 - Rewrite at build, never on read. Read through a getter (`lambda: knowledge_base.snapshot`),
   never a captured `Catalogue`.
-- No cache path or credential reaches a log line, `/health`, a URI or a body. kubed-mcp is handed
-  kb's own plugin address, never a cache path. A `PluginError` message goes through
+- No cache path or credential reaches kb's log lines, `/health`, a URI or a body. kubed-mcp is
+  handed kb's own plugin address, never a cache path. (kubed-mcp's own warnings, such as a
+  skipped command's, name the file's path on disk; a cache path holds no credential.) A `PluginError` message goes through
   `snapshot.unrooted` and `config.scrub` before it's published.
 - Python 3.11 floor; 88 columns; a glob ending `**` is written `dir/**/*`.
 - The checks every task runs: `ruff check .`, then its tests (`pytest tests/<file>.py -v`). The
@@ -58,14 +62,18 @@ PR #89, quick-mcp#37 and #21, and the living spec in [skills.md](../specs/skills
 2. **A plugin named like one of the main plugin's skills** (`superpowers/tidy` beside a skill
    `tidy`). LIB-28 refuses the later one in that library and reports it, as #37's guard would,
    and the earlier one keeps serving. *(Task 3: `test_a_plugin_named_like_a_main_skill_conflicts`.)*
-3. **A plugin whose `plugin.json` declares `commands` or `agents`.** The entry's `[]` doesn't
-   empty a list `plugin.json` declares (the union), so kubed-mcp would serve those beside kb's.
-   *(Task 4: `test_kubed_mcp_serves_no_prompt_or_agent`. If it fails on such a fixture, stop and
-   report: that needs a quick-mcp answer.)*
-4. **A `strict: false` entry beside a `plugin.json`.** kb's `"commands": []` must not make an
-   entry with no components look like one with them: kubed-mcp would refuse it as conflicting
-   manifests. *(Task 4: `test_a_strict_false_entry_without_components_serves`.)*
-5. **A request carrying `Kb-Resource-Prefix: kb+` and `X-MCP-Resource-Prefix: other+`.**
+3. **A plugin whose `plugin.json` declares `commands`** (penpot-ai-kit's seven `./prompts/*.md`).
+   kb's `command_reader` skips every command, so kubed-mcp serves no prompt beside kb's.
+   *(Task 4: `test_kubed_mcp_serves_no_prompt`.)*
+4. **A `strict: false` entry beside a `plugin.json`.** kb passes no empty component list, so an
+   entry with no components still has none, and kubed-mcp doesn't refuse it as conflicting
+   manifests. *(Task 4: `test_a_strict_false_entry_without_components_serves`.)* Found while
+   planning Task 4: rc2's `read_plugin` counts `[]` as declared. It no longer arises, so it is
+   left there.
+5. **An agent of a plugin in two libraries, or two plugins' agents of one name.** kubed-mcp
+   claims across the set in the order kb adds plugins; kb's AGT-8 claims per library. With every
+   name starting `<library>_`, the two agree. *(Task 4: `test_agent_names_are_kbs`.)*
+6. **A request carrying `Kb-Resource-Prefix: kb+` and `X-MCP-Resource-Prefix: other+`.**
    `kb+` is the prefix in both kb's index and kubed-mcp's `SKILL.md`, as one writer.
    *(Task 4: `test_one_prefix_wins_everywhere`.)*
 
@@ -218,11 +226,12 @@ def served_tree(self, key: str) -> Path | None      # the serving record's root,
 - [ ] **Step 4: Run** `ruff check .` and all of `pytest`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat!: a library is a namespace, with its main plugin on top`.
 
-### Task 4: Serve skills through the plugin set, the view and kb's rewriter
+### Task 4: Serve skills and agents through the plugin set, the view and kb's rewriter
 
 **Files:**
 - Create: `kubed/mcp_kb/mcp/skills.py`
-- Delete: `kubed/mcp_kb/mcp/skill_catalogue.py`
+- Delete: `kubed/mcp_kb/mcp/skill_catalogue.py`, and `kubed/mcp_kb/mcp/agents.py` (kb's
+  `AgentsExtension`, D11)
 - Modify: `kubed/mcp_kb/server.py`: `serve_through`; `refresh` runs the publisher before
   `log_changes` and the swap.
 - Modify: `kubed/mcp_kb/config.py`: `Config.delivery`
@@ -230,19 +239,24 @@ def served_tree(self, key: str) -> Path | None      # the serving record's root,
   - `_instructions` becomes `instructions(address, text, scope)`;
   - `skill_files` stops rewriting;
   - `live_stamp(skill)`;
-  - delete `_text`'s rewriting caller.
+  - delete `_text`'s rewriting caller;
+  - `agent_instructions(library, plugin, body, scope)`: AGT-17 then PRM-48, as
+    `agent_definition` renders today, and `agent_meta(library, plugin, path)`: kb's
+    `io.kubed.mcp-kb/agent` value. `agent_cards`, `agent_definition` and `_agent_parsed` go.
 - Modify: `kubed/mcp_kb/plugins/__init__.py`: `Plugin.address` and `Plugin.manifest_entry`;
   `plugins/marketplace.py` keeps the entry as published.
 - Modify: `kubed/mcp_kb/mcp/tools.py`: delete `list_resources` and `read_resource`.
   `kubed/mcp_kb/mcp/resources.py`'s `HideMirrorTools` keeps only the prompt tools.
-- Modify: `kubed/mcp_kb/app.py`, `mcp/pins.py`, `mcp/agents.py`, `tests/conftest.py:52-67`
+- Modify: `kubed/mcp_kb/app.py` (no `AgentsExtension`, no agents entry in
+  `AdvertiseLegacyExtensions`), `mcp/pins.py`, `tests/conftest.py:52-67`
 - Test: `tests/test_plugin_serving.py` (new); `tests/test_skills_extension.py`,
-  `tests/test_uris.py` and `tests/test_scope_and_prompt_tools.py` are rewritten where they
-  reached K1 or kb's resource tools.
+  `tests/test_uris.py`, `tests/test_scope_and_prompt_tools.py` and `tests/test_agents.py` are
+  rewritten where they reached K1, kb's resource tools or kb's agents extension.
 
 **Interfaces:**
 - Consumes: `ServedTrees` (Task 1), `harvest.skill_dirs` (Task 2), `Library.main` and
-  `namespace_for` (Task 3), `kubed.mcp.plugins` `View`, `Site`, `PluginError`.
+  `namespace_for` (Task 3), `kubed.mcp.plugins` `View`, `Site`, `PluginError`, and
+  `QuickMCP.command_reader` (PLUG-62) and `QuickMCP.agent_meta` (PLUG-73).
 - Produces:
 
 ```python
@@ -252,19 +266,25 @@ Plugin.manifest_entry: Mapping[str, object] | None   # the entry as published, l
 
 # mcp/skills.py
 EMPTY: frozenset[tuple[str, str]] = frozenset()
+COMMANDS_ARE_KBS = "kb serves its prompts itself until K4"
 class SkillServing:
     def __init__(self, mcp: QuickMCP, knowledge_base: KnowledgeBase) -> None
-    def attach(self) -> None          # plugin_view, add_rewriter, kb.serve_through(publish)
+    def attach(self) -> None   # plugin_view, add_rewriter, command_reader, agent_meta,
+                               # kb.serve_through(publish)
     def publish(self, snapshot: Snapshot) -> Snapshot
     def view(self) -> View
     def rewrite(self, site: Site, text: str) -> str
-def entry_for(plugin: Plugin) -> dict[str, object]   # manifest= with commands/agents []
+    def read_command(self, text: str, path: str, name: str, plugin: Plugin) -> str
+    def agent_meta(self, name: str, plugin: Plugin) -> dict | None
+def entry_for(plugin: Plugin) -> dict[str, object]   # manifest=, no empty component list
 
 # server.py
 def serve_through(self, publish: Callable[[Snapshot], Snapshot]) -> None
 
 # catalogue/uris.py
 def instructions(self, address: str, text: str, scope: Scope = EVERYTHING) -> str
+def agent_instructions(self, library: str, plugin: str, body: str, scope: Scope = EVERYTHING) -> str
+def agent_meta(self, library: str, plugin: str, path: str) -> dict
 def live_stamp(self, skill: Skill) -> tuple
 ```
 
@@ -275,10 +295,9 @@ def live_stamp(self, skill: Skill) -> tuple
     raw)`.
   - `test_the_listing_is_index_rows_only`: `resources/list` equals the K2 baseline for the
     fixture, with no `SKILL.md` row; under `Kb-Listing: full`, kb's full rows (SKL-16).
-  - `test_kubed_mcp_serves_no_prompt_or_agent` (Review Focus 3): a fixture plugin with
-    `commands/` and `agents/`, and another whose `plugin.json` declares both. `prompts/list`
-    names equal `[p.name for p in snapshot.prompts]`, and `agents/list` equals
-    `catalogue.agent_cards()`.
+  - `test_kubed_mcp_serves_no_prompt` (Review Focus 3): a fixture plugin with `commands/`, and
+    another whose `plugin.json` declares `commands`. `prompts/list` names equal
+    `[p.name for p in snapshot.prompts]`, and no `prompts://` resource reads.
   - `test_a_strict_false_entry_without_components_serves` (Review Focus 4): its skills read and
     `/health` shows no conflict.
   - `test_skill_md_is_rewritten_by_kb_alone`: `${CLAUDE_PLUGIN_ROOT}/skills/kit/ref.md`, bare
@@ -289,13 +308,13 @@ def live_stamp(self, skill: Skill) -> tuple
     exactly `lib`'s plugins, read the same text and digest for a `SKILL.md` citing `kit:other`,
     and `serving.view().key` is equal under both.
   - `test_an_out_of_scope_skill_reads_as_absent`: the same error as `skill://lib/nope/SKILL.md`.
-  - `test_one_prefix_wins_everywhere` (Review Focus 5): with `Kb-Resource-Prefix: kb+` and
-    `X-MCP-Resource-Prefix: other+`, the `SKILL.md` read and `skill://lib/_index.md` both hold
-    `kb+skill://` and no `other+`.
+  - `test_one_prefix_wins_everywhere` (Review Focus 6): with `Kb-Resource-Prefix: kb+` and
+    `X-MCP-Resource-Prefix: other+`, the `SKILL.md` read, `skill://lib/_index.md` and an agent's
+    `instructions` all hold `kb+skill://` and no `other+`.
   - `test_a_refused_add_is_a_conflict`: monkeypatch `PluginSet.add` to raise
     `PluginError("x is inside skill skill://lib/x/SKILL.md of plugin y")` for one plugin.
     - `/health` `conflicts[pid]` holds `conflict: ` and that text;
-    - that plugin's skills read as absent and are in no index;
+    - that plugin's skills and agents read as absent and are in no index;
     - the rest serve.
   - `test_kb_names_only_what_kubed_mcp_serves`: a skill with `description: ""` doesn't read. It
     is in no index, hint or `skills/list`, and a name citing it is served as written. One log
@@ -304,40 +323,71 @@ def live_stamp(self, skill: Skill) -> tuple
     two tools, and under neither header no resource tool. A call reads `skill://lib/_index.md`
     and a `SKILL.md`. kb's `tools.py` defines no tool of either name.
   - `test_a_refresh_serves_the_new_set`: an edit reads; a deleted skill reads as absent and
-    leaves its index.
+    leaves its index; a deleted agent leaves `agents/list`.
   - `test_a_skill_arriving_after_boot_reads`: boot with no skills, add one and refresh. Its
     `SKILL.md`, `_manifest` and `<skill>/_index.md` read.
   - `test_manifest_names_the_skill_by_its_name` (N1); `test_a_json_file_reads_as_text` (#37).
-- [ ] **Step 2: Run** `pytest tests/test_plugin_serving.py -v`. Expected: FAIL on the import.
+  - **Agents (D11)**, in `tests/test_agents.py` rewritten over the served app:
+    - `test_agent_names_are_kbs` (Review Focus 5): `agents/list` names equal kb's AGT-7/AGT-8
+      names for the fixture, a clash `<name>@<plugin>` included, and `/health` `renamed` and
+      `unserved` are unchanged;
+    - `test_agent_instructions_are_rendered_by_kb`: a qualified skill name and
+      `${CLAUDE_PLUGIN_ROOT}` in a body read as AGT-17 and PRM-48 say; `${CLAUDE_SKILL_DIR}` is
+      left as written; the frontmatter is untouched;
+    - `test_agent_meta_keeps_kbs_key`: `_meta["io.kubed.mcp-kb/agent"]` equals today's value
+      but for `skills` (N9), and `_meta["io.kubed/agent"]` is present (N5);
+    - `test_agent_meta_names_no_skill_of_another_plugin` (SCP-24): an agent whose frontmatter
+      names `other:x` has no `other:x` in `skills`, under every scope;
+    - `test_a_bare_plugin_serves_no_agent` (AGT-4);
+    - `test_an_out_of_scope_agent_is_absent`: its `agents/get` error equals an unknown name's;
+    - `test_kb_has_no_agents_extension`: `kubed.mcp_kb.mcp.agents` doesn't import, and one
+      extension answers `agents/list`.
+- [ ] **Step 2: Run** `pytest tests/test_plugin_serving.py tests/test_agents.py -v`. Expected:
+  FAIL on the import.
 - [ ] **Step 3: Implement.**
   - **`publish`:**
-    - for each library, each plugin in its order that is admitted by LIB-28, `ok`, and has
-      skills: `set.add(plugin.address, namespace=namespace_for(lib, plugin),
-      manifest=entry_for(plugin))`;
+    - for each library, each plugin in its order that is admitted by LIB-28, `ok`, and serves
+      skills or agents. A plugin with `skills: []` is never added, because kubed-mcp scans
+      `skills/` whatever an entry says: its agents, if it has any, are not served, and that is
+      logged once (no live plugin has both):
+      `set.add(plugin.address, namespace=namespace_for(lib, plugin), manifest=entry_for(plugin))`;
     - a `PluginError` or `ValueError` is a conflict (scrubbed, unrooted, logged);
     - then `mcp.serve(set)`;
-    - narrow the catalogue with `without(...)` to the URIs each added `Plugin.skills` serves;
-    - log each skill either side has alone, dropping the two "Default … folder is ignored" notes;
+    - narrow the catalogue with `without(...)` to the URIs each added `Plugin.skills` serves, and
+      kb's agent roster to each added `Plugin.agents`;
+    - log each skill or agent either side has alone; kubed-mcp's command skips are not logged
+      again;
+    - read `/health`'s `renamed` and `unserved` off `Plugin.agent_files` and `skipped`, in kb's
+      AGT-8 wording;
     - rebuild the table keyed by `(library, address)`;
     - return `replace(snapshot, catalogue=…, status=…)`.
-  - **`entry_for`:** `{**(plugin.manifest_entry or {"name": plugin.name}), "commands": [],
-    "agents": []}`, plus the declared `skills:` for a declared plugin. A `strict: false` entry
-    keeps its `strict` as published.
+  - **`entry_for`:** `plugin.manifest_entry or {"name": plugin.name}`, plus the declared
+    `skills:` for a declared plugin. No `commands` key is added, and an `agents` key only for a
+    bare plugin, which has no `plugin.json` and no entry: `"agents": []` (AGT-4). A `strict: false`
+    entry keeps its `strict` as published.
+  - **`read_command`:** returns `COMMANDS_ARE_KBS`, so every command is skipped (PLUG-62).
   - **`view`:** the frozenset of admitted `(library, address)` pairs by `Scope.admits`, else
     `EMPTY`.
-  - **`rewrite`:** on `site.kind == "skill"` and a root `SKILL.md`, return
-    `knowledge_base.snapshot.catalogue.instructions(address, text, requested_scope())`; otherwise
-    return `text`.
+  - **`rewrite`:**
+    - on `site.kind == "skill"` and a root `SKILL.md`, return
+      `knowledge_base.snapshot.catalogue.instructions(address, text, requested_scope())`;
+    - on `site.kind == "agent"`, the frontmatter as written and the body through
+      `catalogue.agent_instructions(library, plugin, body, requested_scope())`;
+    - otherwise return `text`.
+  - **`agent_meta`:** `{"io.kubed.mcp-kb/agent": catalogue.agent_meta(library, plugin, path)}`
+    for the agent's `(namespace, address)`, read off the snapshot being published. Its `skills`
+    resolves against the agent's own plugin only (N9): `agent_meta` never sees a scope.
   - **`Config.delivery`:** `listed` is empty, and `resources` and `via` are unset, in the shape
-    rc2's `Delivery` protocol takes. If rc2 can't express an empty `listed` in config, stop and
-    report.
+    rc2's `Delivery` protocol takes.
   - **`create_app`:** call `SkillServing(mcp, kb).attach()` before `resources.register`. The
     `Catalogue` transient and the other getters become `lambda:
-    knowledge_base.snapshot.catalogue`.
+    knowledge_base.snapshot.catalogue`. No `AgentsExtension`, and no agents entry in kb's
+    `AdvertiseLegacyExtensions`: kubed-mcp advertises its own.
   - **`conftest.served`:** a skill's file is the raw text, `SKILL.md` through `instructions`.
-  - Delete `mcp/skill_catalogue.py`, and kb's two resource tools.
+  - Delete `mcp/skill_catalogue.py`, `mcp/agents.py`, and kb's two resource tools.
 - [ ] **Step 4: Run** `ruff check .` and all of `pytest`. Expected: PASS.
-- [ ] **Step 5: Commit** `feat: serve skills through kubed-mcp's plugin set, view and rewriter`.
+- [ ] **Step 5: Commit** `feat: serve skills and agents through kubed-mcp's plugin set`. The body
+  says what K5 (#83) keeps (design D11).
 
 ### Task 5: A refused or empty scope builds nothing (ruling 8)
 
@@ -362,7 +412,7 @@ def live_stamp(self, skill: Skill) -> tuple
   tests/test_header_scope.py tests/test_scope_and_prompt_tools.py -v`. Expected: PASS.
 - [ ] **Step 5: Commit** `fix: a refused or empty scope builds no skills`.
 
-### Task 6: A live skill's edit is re-read and served (ruling 7)
+### Task 6: A live skill's or agent's edit is re-read and served (ruling 7, N6)
 
 **Files:**
 - Modify: `kubed/mcp_kb/mcp/skills.py`: `view` calls `_reread_live(scope)`
@@ -381,23 +431,27 @@ def live_stamp(self, skill: Skill) -> tuple
     object, and `mcp.generation` moved by one.
   - `test_no_reread_while_a_refresh_publishes`: with the lock held, `mcp.generation` doesn't move.
   - `test_an_out_of_scope_live_skill_is_not_revalidated`: wsgidav logs no request for its files.
+  - `test_a_live_agent_edit_reads_after_trust`: `agents/get` and `agents/list` serve the edit
+    (N6); an edit that no longer parses takes the agent away, and the next good edit brings it
+    back.
 - [ ] **Step 2: Run** `pytest tests/test_live.py -v`. Expected: FAIL.
 - [ ] **Step 3: Implement** D9.
-  - For each admitted live plugin, compare the stamps over its skills with the ones recorded at
-    publish. For those that moved, build a new set: `keep` the rest and `add` the moved address
+  - For each admitted live plugin, compare the stamps over its skills and its agent files with
+    the ones recorded at publish. For those that moved, build a new set: `keep` the rest and `add` the moved address
     again. Then `serve`.
   - **Stop and report** if kubed-mcp pins its state before calling the view function, so the
     edit shows a request late.
 - [ ] **Step 4: Run** `ruff check .` and `pytest tests/test_live.py tests/test_webdav_source.py
   -v`. Expected: PASS.
-- [ ] **Step 5: Commit** `feat: a live skill's edit is re-read and served`.
+- [ ] **Step 5: Commit** `feat: a live skill's or agent's edit is re-read and served`.
 
 ### Task 7: The spec, AGENTS.md, the wiki and the changelog
 
 **Files:**
 - Modify: `docs/superpowers/specs/skills.md`, `plugins-and-libraries.md`,
-  `config-and-sources.md`, `scoping-and-instructions.md` and `http-and-tools.md`
-- Modify: `AGENTS.md` (Layout; the skills section; "Where code goes"; the mirror-tools text);
+  `config-and-sources.md`, `scoping-and-instructions.md`, `http-and-tools.md` and `agents.md`
+- Modify: `AGENTS.md` (Layout; the skills section; "Where code goes"; the mirror-tools text;
+  the Agents-extension paragraph, which becomes kubed-mcp's with kb's rewriter and `_meta`);
   `CONTRIBUTING.md` ("Where things live")
 - Modify: `examples/config.yaml` only if a comment names a removed layout. Modify the hand-written
   wiki pages (Skills, Plugins, Tools notes) on the wiki branch named after this PR's branch.
@@ -423,10 +477,13 @@ def live_stamp(self, skill: Skill) -> tuple
     folders. A declared plugin's `skills:` lists folders."
   - "A library's plugins other than its main one serve under `skill://<library>/<plugin>/`."
   - "A skill's `_manifest` names the skill by its name."
+  - "An agent's file also reads at `agents://`, and `agents/get`'s `_meta` carries
+    `io.kubed/agent` beside kb's key."
+  - "A live agent's edit reaches `agents/list` too."
 - [ ] **Step 4: Run** `python scripts/generate_wiki.py --check`, `ruff check .`, then all of
   `pytest`. Expected: PASS.
 - [ ] **Step 5: Commit** `docs: spec, AGENTS.md and the wiki for skills through kubed-mcp`.
 
 After merge into `issue-80`, QA updates the n8n library's note in the cluster's
 `mcp/mcp-kb/config.yaml` and runs the ten-scope dump with and without `kb+`. It should differ
-from the before-dump only by N1–N4.
+from the before-dump only by N1–N16.

@@ -69,7 +69,10 @@ def _build(base):
         "Traces are in [tempo](../tempo/SKILL.md).\n",
     )
     _write(grafana, "skills/grafana-lgtm/loki/references/LOGQL.md", "logql notes\n")
-    _write(grafana, "skills/grafana-lgtm/loki/.env", "LOKI_SECRET=1\n")
+    # A skill of its own holds the dot file: a skill holding one is not
+    # served at all (N13), so loki keeps serving.
+    _skill(grafana, "skills/grafana-lgtm/vault", "vault", "Holds a secret.")
+    _write(grafana, "skills/grafana-lgtm/vault/.env", "LOKI_SECRET=1\n")
     _skill(
         grafana,
         "skills/grafana-lgtm/tempo",
@@ -235,6 +238,8 @@ async def _rows(url, query="", library=None, tags=None):
 
 LOKI = "skill://grafana/grafana-lgtm/loki"
 
+VAULT = "skill://grafana/grafana-lgtm/vault"
+
 
 # -- the grammar ------------------------------------------------------------------
 
@@ -243,13 +248,29 @@ async def test_a_skill_two_folders_down_is_served_at_its_real_path(url):
     assert "Traces are in" in await _read(url, f"{LOKI}/SKILL.md")
     assert await _read(url, f"{LOKI}/references/LOGQL.md") == "logql notes\n"
     manifest = json.loads(await _read(url, f"{LOKI}/_manifest"))
-    assert manifest["skill"] == "grafana/grafana-lgtm/loki"
+    # N1: FastMCP's _manifest names the skill by its name.
+    assert manifest["skill"] == "loki"
     assert {f["path"] for f in manifest["files"]} == {"SKILL.md", "references/LOGQL.md"}
     assert await _read(url, "skill://grafana/grafana-k6/k6/SETUP.md") == "k6 setup\n"
     assert "Start here." in await _read(url, "skill://grafana/overview/SKILL.md")
     assert "Build a plugin." in await _read(
         url, "skill://grafana/grafana-plugins/sdk/SKILL.md"
     )
+
+
+async def test_a_skill_holding_a_hidden_file_is_absent(url):
+    """SKL-3, N13: kubed-mcp would serve a skill's dot file, so kb serves none
+    of a skill holding one, and names it nowhere; the rest serve."""
+    for uri in (f"{VAULT}/.env", f"{VAULT}/SKILL.md", f"{VAULT}/_manifest"):
+        assert "not found" in await _read_error(url, uri)
+        assert "LOKI_SECRET" not in await _tool(url, uri)
+    for index in (
+        "skill://grafana/_index.md",
+        "skill://grafana/grafana-lgtm/_index.md",
+        "skill://grafana/grafana-lgtm/_index.json",
+    ):
+        assert "vault" not in await _read(url, index)
+    assert "Query logs." in await _read(url, f"{LOKI}/SKILL.md")
 
 
 async def test_a_sibling_reference_resolves_to_the_siblings_uri(url):
@@ -378,10 +399,10 @@ async def test_a_dot_segment_past_the_root_reads_nothing(url):
     assert "Query logs." not in raw
     across = "skill://other/../grafana/grafana-lgtm/loki/SKILL.md"
     assert "Query logs." in await _raw(url, across)
-    # The mirror tool is kb's own and does not go through kubed-mcp's
-    # middleware, so it still clamps at the library; Task 4 retires it.
-    assert "Another loki." in await _tool(url, escape)
-    assert "Query logs." not in await _tool(url, across)
+    # The mirror tool is kubed-mcp's (N4), and reads through the server's
+    # middleware, so it resolves dots exactly as resources/read does.
+    assert "Another loki." not in await _tool(url, escape)
+    assert "Query logs." in await _tool(url, across)
     # Scope applies to the resolved address: `extra` admits grafana-ops alone, which has no loki.
     assert "Query logs." not in await _raw(url, across, tags="extra")
     assert "Query logs." not in await _tool(url, across, tags="extra")
@@ -428,7 +449,11 @@ async def test_a_dot_segment_read_out_of_scope_reads_as_a_missing_one(url):
 
 
 async def test_a_hidden_file_reached_through_dot_segments_is_still_refused(url):
-    for uri in (f"{LOKI}/../loki/.env", f"{LOKI}/references/../.env"):
+    for uri in (
+        f"{LOKI}/../vault/.env",
+        f"{VAULT}/references/../.env",
+        f"{LOKI}/../loki/.env",
+    ):
         assert "LOKI_SECRET" not in await _raw(url, uri)
         assert "LOKI_SECRET" not in await _tool(url, uri)
 
@@ -438,8 +463,8 @@ async def test_a_dot_segment_address_of_a_directory_names_the_file_to_read(url):
     hinted = f"{uri}/SKILL.md"
     assert hinted in await _raw(url, uri)
     assert "Query logs." in await _raw(url, hinted)
-    # The mirror tool resolves dots itself and names the canonical spelling.
-    assert f"{LOKI}/SKILL.md" in await _tool(url, uri)
+    # The mirror tool is kubed-mcp's (N4): it answers as resources/read does.
+    assert hinted in await _tool(url, uri)
 
 
 # -- directories ----------------------------------------------------------------
@@ -464,8 +489,9 @@ async def test_a_directory_is_not_found_and_names_the_file_to_read(url, uri, ins
         mirrored = await client.call_tool(
             "read_resource", {"uri": uri}, raise_on_error=False
         )
+    # N4: kubed-mcp's tool says what resources/read says.
     assert mirrored.is_error
-    assert mirrored.content[0].text.startswith(f"No resource at '{uri}'.")
+    assert mirrored.content[0].text == error
     assert instead in mirrored.content[0].text
 
 
@@ -493,7 +519,8 @@ async def test_a_skill_root_names_its_manifest_too(url):
 async def test_a_missing_address_names_no_file(url):
     error = await _read_error(url, "skill://grafana/nope")
     assert "not found" in error and "_index.md" not in error
-    assert "list_resources" in await _tool(url, "skill://grafana/nope")
+    # N4: kubed-mcp's tool says what resources/read says, and no more.
+    assert await _tool(url, "skill://grafana/nope") == error
 
 
 OUT_OF_SCOPE = [

@@ -15,6 +15,8 @@ Across two plugins of one library the rule is the one in ``test_conflicts.py``:
 the later plugin fails in that library.
 """
 
+import logging
+
 import httpx
 import pytest
 from fastmcp import Client
@@ -200,18 +202,25 @@ async def test_a_skill_that_cannot_be_one_address_segment_is_skipped(tmp_path):
         assert await _read(kb, uri) is None, uri
 
 
-async def test_a_plugin_that_is_one_skill_need_not_match_its_cache_directory(tmp_path):
-    """A git fetch's root is a directory named for a commit, not for the skill."""
+async def test_a_plugin_that_is_one_skill_is_not_served(tmp_path, caplog):
+    """A git fetch's root is a directory named for a commit, not for the skill.
+
+    kb harvests it, but kubed-mcp names a declared ``.`` skill after its root
+    folder, which FastMCP refuses for not matching its ``name``: the parity
+    guard takes it out of every index, and says so once.
+    """
     kb = _kb(
         tmp_path,
         lambda r: _skill(r, ".", "whole", "The whole plugin."),
         {"skills": ["."]},
     )
-    health = await _health(kb)
+    with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.mcp.skills"):
+        health = await _health(kb)
 
     assert health["plugins"]["src"]["skills"] == 1
-    assert "skipped" not in health["plugins"]["src"]
-    assert "The whole plugin." in await _read(kb, "skill://lib/src/whole/SKILL.md")
+    assert health["libraries"]["lib"]["skills"] == 0
+    assert await _read(kb, "skill://lib/src/whole/SKILL.md") is None
+    assert [r for r in caplog.records if "lib/src/whole" in r.getMessage()]
 
 
 @pytest.mark.parametrize(

@@ -174,9 +174,10 @@ async def test_listing_descriptions_are_addressed(server_url):
     async with _client(server_url, plain) as client:
         rows = {str(r.uri): r.description for r in await client.list_resources()}
     assert "kb+" not in rows["skill://flatsource/alpha/SKILL.md"]
+    # N4: kubed-mcp's list_resources answers {"resources": rows}.
     tools = json.loads(
         await tool(server_url, "list_resources", headers={**headers, "X-MCP-Resources": "off"})
-    )
+    )["resources"]
     by_uri = {r["uri"]: r["description"] for r in tools}
     assert by_uri["kb+skill://flatsource/alpha/SKILL.md"] == ALPHA_DESCRIPTION
 
@@ -190,8 +191,9 @@ async def tool(url, name, args=None, headers=None):
 @pytest.mark.integration
 async def test_tools_mode_with_the_prefix(server_url):
     headers = {**BOTH, "X-MCP-Resources": "off"}
+    # N4: kubed-mcp's list_resources answers {"resources": rows}.
     rows = json.loads(await tool(server_url, "list_resources", headers=headers))
-    assert [r["uri"] for r in rows] == ["kb+skill://flatsource/_index.md"]
+    assert [r["uri"] for r in rows["resources"]] == ["kb+skill://flatsource/_index.md"]
     bodies = {
         await tool(server_url, "read_resource", {"uri": uri}, headers)
         for uri in (

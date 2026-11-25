@@ -223,6 +223,7 @@ async def test_a_missing_required_argument_is_refused(skills_dir, prompts_dir, c
     from kubed.mcp.protocol import INVALID_PARAMS, MCPError
 
     server = KnowledgeBase(make_config(skills_dir, prompts_dir), skills_dir / "_cache")
+    server_of(server)  # publishing logs what the plugin layer notes; not a call
     caplog.clear()
     with caplog.at_level(logging.INFO):
         async with Client(server_of(server)) as client:

@@ -1,5 +1,6 @@
 """Shared fixtures: a synthetic skills tree covering both nesting depths."""
 
+import contextlib
 import weakref
 from pathlib import Path
 
@@ -70,22 +71,109 @@ def server_of(knowledge_base):
     return _APPS[knowledge_base].server
 
 
+def serving_of(knowledge_base):
+    """The ``SkillServing`` publishing ``knowledge_base``'s plugin set."""
+    from kubed.mcp_kb.mcp.skills import SkillServing
+
+    server_of(knowledge_base)
+    return _APPS[knowledge_base]._container.values[SkillServing]
+
+
 def served(catalogue, uri: str, scope=None) -> str | None:
     """``uri`` as the server serves it from ``catalogue``, under ``scope``.
 
-    A skill's file comes from the skills provider's build, as production serves
-    it; anything else from ``Catalogue.read``. For a test below MCP.
+    A skill's file is its raw text, its ``SKILL.md`` through
+    ``Catalogue.instructions`` as kb's rewriter renders it; anything else from
+    ``Catalogue.read``. For a test below MCP.
+
+    It diverges from production, which kubed-mcp's plugin layer serves: there is
+    no gateway prefix, no CRLF normalisation (SKL-22), no media type or blob
+    (N16), and none of FastMCP's refusals (a misnamed folder, a symlink, N14)
+    or of kb's parity guard. It does follow N13: a skill holding a hidden path
+    serves nothing.
     """
     from kubed.mcp_kb.mcp.scope import EVERYTHING
-    from kubed.mcp_kb.mcp.skill_catalogue import SkillCatalogue
+    from kubed.mcp_kb.mcp.skills import holds_hidden
 
     scope = EVERYTHING if scope is None else scope
-    for address, skill in SkillCatalogue(lambda: catalogue).skills(scope).items():
-        root = f"skill://{address}/"
-        if uri.startswith(root):
-            data = skill.files.get(uri[len(root) :])
-            return None if data is None else data.decode("utf-8")
+    for skill in catalogue.visible_skills(scope):
+        root = f"skill://{skill.address}/"
+        if not uri.startswith(root):
+            continue
+        if holds_hidden(skill.path):
+            return None
+        rel = uri[len(root) :]
+        target = skill.path / rel
+        if rel.startswith(".") or "/." in rel or not target.is_file():
+            break
+        text = target.read_text(encoding="utf-8", errors="replace")
+        if rel == "SKILL.md":
+            return catalogue.instructions(skill.address, text, scope)
+        return text
     return catalogue.read(uri, scope)
+
+
+async def ext_request(client, method, **params):
+    """An extension method (``skills/*``, ``agents/*``) sent as is."""
+    from kubed.mcp.protocol import RequestParams, types
+    from pydantic import ConfigDict, TypeAdapter
+
+    class Params(RequestParams):
+        model_config = ConfigDict(extra="allow")
+
+    return await client.session.send_request(
+        types.Request(method=method, params=Params(**params)), TypeAdapter(dict)
+    )
+
+
+def run_client(knowledge_base, fn):
+    """``await fn(client)`` over an in-memory client, from sync or async code."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    from fastmcp import Client
+
+    async def go():
+        async with Client(server_of(knowledge_base)) as client:
+            return await fn(client)
+
+    with ThreadPoolExecutor(1) as pool:
+        return pool.submit(asyncio.run, go()).result()
+
+
+@contextlib.contextmanager
+def serve_http(knowledge_base):
+    """``knowledge_base``'s app on a loopback port; yields its MCP URL."""
+    import socket
+    import threading
+
+    import uvicorn
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    app = server_of(knowledge_base).http_app()
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.started:
+            break
+        threading.Event().wait(0.05)
+    try:
+        yield f"http://127.0.0.1:{port}/mcp"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def http_client(url, headers=None):
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+
+    return Client(StreamableHttpTransport(url, headers=headers or {}))
 
 
 def read_served(knowledge_base, uri: str) -> str | None:

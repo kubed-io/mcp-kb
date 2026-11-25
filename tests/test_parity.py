@@ -624,8 +624,8 @@ def test_a_listed_agent_is_a_path_not_a_glob(tmp_path):
 
     knowledge_base = _declared(tmp_path, root)
 
-    cards = knowledge_base.catalogue.agent_cards()
-    assert [card["name"] for card in cards] == ["kit_draft"]
+    cards = knowledge_base.catalogue.agents.visible()
+    assert [card.name for card in cards] == ["kit_draft"]
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [
         "agents entry 'agents/*.md' is not in the plugin"
     ]
@@ -643,8 +643,8 @@ def test_a_listed_agent_in_a_dot_folder_is_served_and_one_outside_is_not(tmp_pat
 
     knowledge_base = _declared(tmp_path, root)
 
-    cards = knowledge_base.catalogue.agent_cards()
-    assert [card["name"] for card in cards] == ["kit_wip"]
+    cards = knowledge_base.catalogue.agents.visible()
+    assert [card.name for card in cards] == ["kit_wip"]
     assert knowledge_base.status["plugins"]["kit"]["notes"] == [
         "agents entry 'agents/out.md' is not in the plugin"
     ]
@@ -834,8 +834,8 @@ def test_a_component_glob_python_refuses_matches_nothing(
     assert knowledge_base.status["plugins"]["kit"]["status"] == "ok"
     assert "a" in _served(knowledge_base)
     if key == "agents":
-        cards = knowledge_base.catalogue.agent_cards()
-        assert [card["name"] for card in cards] == ["kit_good"]
+        cards = knowledge_base.catalogue.agents.visible()
+        assert [card.name for card in cards] == ["kit_good"]
     if key == "commands":
         assert _names(knowledge_base) == ["kit_ok"]
     if key == "skills":

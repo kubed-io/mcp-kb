@@ -168,7 +168,7 @@ def _serving(
         return True
     if PromptProvider(lambda: snapshot).visible(scope):
         return True
-    return bool(served.agent_cards(scope))
+    return bool(served.agents.visible(scope))
 
 
 class RefuseEmptyScope(Middleware):

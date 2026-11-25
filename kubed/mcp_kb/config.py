@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
@@ -489,6 +490,29 @@ class Config(Strict):
             s.refresh_seconds for s in self.sources if s.refresh_seconds is not None
         ]
         return min(seconds) if seconds else None
+
+    @property
+    def delivery(self) -> Delivery:
+        """The defaults kubed-mcp's request inputs fall back to (DLV-4).
+
+        ``listed`` is none, so ``resources/list`` stays kb's index rows (SKL-14)
+        and never gains a row per ``SKILL.md`` until #86 replaces
+        ``Kb-Listing``. ``resources`` and ``via`` are unset, so the built-in
+        defaults answer. Not a config field: an operator has nothing to set.
+        """
+        return DELIVERY
+
+
+@dataclass(frozen=True)
+class Delivery:
+    """The shape of kubed-mcp's ``Delivery`` protocol: None is its default."""
+
+    resources: str | None = None
+    listed: tuple[str, ...] = ()
+    via: str | None = None
+
+
+DELIVERY = Delivery()
 
 
 def _unique(kind: str, names: list[str]) -> None:

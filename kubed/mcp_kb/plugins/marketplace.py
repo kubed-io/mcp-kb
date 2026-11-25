@@ -168,6 +168,7 @@ def _plugin(
         marketplace=library.name,
         entry=_components(raw),
         strict=raw.get("strict") is not False,
+        manifest_entry={k: v for k, v in raw.items() if k != "source"},
     )
 
 

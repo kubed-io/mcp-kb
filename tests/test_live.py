@@ -15,6 +15,7 @@ Two quirks of the server under test:
   microseconds. The one test about the TTL turns it back on.
 """
 
+import json
 import logging
 import socket
 import threading
@@ -26,7 +27,6 @@ import pytest
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import BasicAuth, Config, EnvRef
 from kubed.mcp_kb.mcp.prompts import PromptProvider
-from kubed.mcp_kb.mcp.skill_catalogue import SkillCatalogue
 from kubed.mcp_kb.plugins import Fetch
 from kubed.mcp_kb.sources import live
 from tests.conftest import DEEP_YAML, read_served, server_of
@@ -40,6 +40,8 @@ SKILL = "skill://notes/x"
 URI = f"{SKILL}/SKILL.md"
 GUIDE = "skill://notes/docs/guide.md"
 PROMPT = "---\ndescription: A prompt.\n---\n\n{body}\n"
+
+TASK_6 = pytest.mark.xfail(strict=True, reason="re-read on view: Task 6 (D9)")
 
 
 @pytest.fixture(autouse=True)
@@ -97,6 +99,7 @@ def _knowledge_base(webdav, tmp_path, cache="live"):
 # -- what live mode buys -------------------------------------------------------
 
 
+@TASK_6
 def test_an_edit_upstream_is_visible_on_the_next_read_without_a_refresh(
     webdav, tmp_path
 ):
@@ -109,6 +112,7 @@ def test_an_edit_upstream_is_visible_on_the_next_read_without_a_refresh(
     assert knowledge_base.generation == 0, "no refresh happened; the read did the work"
 
 
+@TASK_6
 def test_an_edit_upstream_fastmcp_refuses_unlists_the_skill(webdav, tmp_path):
     """MD-57 for a live skill: once it no longer builds, nothing names it."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
@@ -201,6 +205,7 @@ async def test_a_live_prompt_saved_too_deep_serves_the_last_good_body(
 # -- and what it does not ------------------------------------------------------
 
 
+@TASK_6
 def test_a_manifest_is_priced_against_the_server_before_it_is_served(
     webdav, tmp_path
 ):
@@ -208,14 +213,16 @@ def test_a_manifest_is_priced_against_the_server_before_it_is_served(
     they describe the copy on disk and the very next read serves something
     else."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    skills = SkillCatalogue(lambda: knowledge_base.snapshot.catalogue)
-    before = skills.skills()["notes/x"].manifest.files["SKILL.md"]
+    manifest = "skill://notes/x/_manifest"
 
+    def size() -> int:
+        files = json.loads(read_served(knowledge_base, manifest))["files"]
+        return next(f["size"] for f in files if f["path"] == "SKILL.md")
+
+    before = size()
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
-    after = skills.skills()["notes/x"].manifest.files["SKILL.md"]
 
-    assert after != before
-    assert after.size > before.size
+    assert size() > before
 
 
 def test_a_new_upstream_file_needs_a_refresh(webdav, tmp_path):
@@ -281,6 +288,7 @@ def test_a_flaky_server_degrades_to_the_cached_copy(webdav, tmp_path):
     assert read_served(knowledge_base, GUIDE) == "library-level guidance\n"
 
 
+@TASK_6
 def test_a_failed_revalidation_says_nothing_about_the_credentials(
     webdav, tmp_path, caplog
 ):
@@ -296,6 +304,7 @@ def test_a_failed_revalidation_says_nothing_about_the_credentials(
     assert USERNAME not in caplog.text
 
 
+@TASK_6
 def test_a_failed_revalidation_names_the_source_once(webdav, tmp_path, caplog):
     """fetch_file's error already carries the fetch, and the log line adds it:
     `notes://kb: revalidating … failed: notes://kb: …` reads as two fetches."""
@@ -310,6 +319,7 @@ def test_a_failed_revalidation_names_the_source_once(webdav, tmp_path, caplog):
     assert caplog.text.count("skills/x/SKILL.md") == 1
 
 
+@TASK_6
 def test_a_server_that_hangs_is_asked_once_and_then_left_alone(
     tmp_path, black_hole, monkeypatch, caplog
 ):
@@ -336,6 +346,7 @@ def test_a_server_that_hangs_is_asked_once_and_then_left_alone(
     assert caplog.text.count("revalidating") == 1
 
 
+@TASK_6
 async def test_health_says_a_live_source_is_cooling_after_a_failure(
     webdav, tmp_path, monkeypatch
 ):
@@ -353,6 +364,7 @@ async def test_health_says_a_live_source_is_cooling_after_a_failure(
     assert body["fetches"][KEY]["cooling"] is True
 
 
+@TASK_6
 def test_a_source_that_answers_again_stops_cooling(webdav, tmp_path, monkeypatch):
     """The cooldown is a pause, not a verdict: a folder comes back by itself."""
     monkeypatch.setattr(live, "COOLDOWN_SECONDS", 0.05)
@@ -398,6 +410,7 @@ def test_the_ttl_runs_from_the_answer_and_not_from_the_question(
 # -- the machinery ------------------------------------------------------------
 
 
+@TASK_6
 def test_the_revalidator_follows_the_export_a_refresh_created(webdav, tmp_path):
     """A refresh moves the source to a new directory; live reads must follow it.
 
@@ -436,6 +449,7 @@ def test_one_client_serves_every_live_read(webdav, tmp_path, monkeypatch):
     assert built == [KEY]
 
 
+@TASK_6
 async def test_health_reports_what_a_live_source_revalidated(webdav, tmp_path):
     knowledge_base = _knowledge_base(webdav, tmp_path)
     read_served(knowledge_base, URI)
