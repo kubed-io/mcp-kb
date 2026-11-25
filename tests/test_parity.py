@@ -110,28 +110,6 @@ def penpot_root(tmp_path: Path) -> Path:
     return root
 
 
-def object_map_root(tmp_path: Path) -> Path:
-    root = tmp_path / "kit"
-    _skill(root, "skills/a")
-    _command(root, "cmds/brief.md")
-    _command(root, "commands/two.md")
-    _command(root, "prompts/three.md")
-    _manifest(
-        root,
-        name="kit",
-        commands={
-            "brief": {
-                "source": "./cmds/brief.md",
-                "description": "Write a brief.",
-                "argumentHint": "<topic>",
-            },
-            "about": {"content": "Say what this plugin does."},
-            "bad": {"source": "./x.md", "content": "y"},
-        },
-    )
-    return root
-
-
 def _marketplace(tmp_path: Path, root: Path, name: str = "lib") -> KnowledgeBase:
     config = Config.model_validate(
         {"libraries": [{"name": name, "source": f"file://{root}"}]}
@@ -493,102 +471,18 @@ def test_a_manifest_too_deep_to_parse_fails_the_plugin_and_quotes_nothing(
     assert _served(knowledge_base) == set()
 
 
-def test_a_map_only_commands_replaces_the_conventions(tmp_path):
-    """The map is all it serves: the conventions it replaces serve nothing."""
-    root = object_map_root(tmp_path)
-
-    knowledge_base = _declared(tmp_path, root)
-    globs = effective_globs(knowledge_base._plugins[0], root)
-
-    assert _names(knowledge_base) == ["kit_brief", "kit_about"]
-    assert globs.prompts == ()
-    assert [entry.name for entry in globs.command_map] == ["brief", "about"]
-    brief = globs.command_map[0]
-    assert (brief.source, brief.description, brief.argument_hint) == (
-        "cmds/brief.md", "Write a brief.", "<topic>",
-    )
-    assert knowledge_base.status["plugins"]["kit"]["notes"] == [
-        "commands entry 'bad' needs exactly one of source and content",
-        COMMANDS_NOTE,
-    ]
-
-
-def test_an_object_map_plugin_loads(tmp_path):
-    knowledge_base = _declared(tmp_path, object_map_root(tmp_path), library="lib")
-
-    brief = _prompt(knowledge_base, "lib_brief")
-    assert brief.description == "Write a brief."
-    assert [(a.name, a.description) for a in brief.arguments] == [
-        ("arguments", "<topic>")
-    ]
-    about = _prompt(knowledge_base, "lib_about")
-    assert about.render() == "Say what this plugin does."
-    assert {brief.dialect, about.dialect} == {"claude"}
-    assert not about.live
-    notes = knowledge_base.status["plugins"]["kit"]["notes"]
-    assert any("'bad'" in note for note in notes)
-
-
-def test_an_inline_prompt_clashing_with_a_file_is_skipped_at_its_manifest(tmp_path):
+def test_an_object_map_serves_no_prompt_and_still_replaces_the_conventions(tmp_path):
     root = tmp_path / "kit"
-    _command(root, "cmds/about.md")
-    _manifest(
-        root,
-        name="kit",
-        commands={
-            "about": {"content": "Inline."},
-            "again": {"source": "./cmds/about.md"},
-            "first": {"source": "./cmds/about.md"},
-        },
-    )
-    _catalog(root, {"name": "kit", "source": "./", "commands": "./cmds"})
-
-    knowledge_base = _marketplace(tmp_path, root)
-    status = knowledge_base.status["plugins"]["kit@lib"]
-
-    assert _names(knowledge_base) == ["lib_about", "lib_again", "lib_first"]
-    assert _prompt(knowledge_base, "lib_about").path.name == "about.md"
-    assert status["skipped"] == [
-        {
-            "path": ".claude-plugin/plugin.json",
-            "reason": "prompt about is already served by cmds/about.md",
-        }
-    ]
-
-
-def test_a_map_source_outside_the_plugin_is_skipped(tmp_path):
-    root = tmp_path / "kit"
-    _command(tmp_path / "away", "x.md")
-    (root / "cmds").mkdir(parents=True)
-    (root / "cmds" / "x.md").symlink_to(tmp_path / "away" / "x.md")
-    _manifest(root, name="kit", commands={"x": {"source": "./cmds/x.md"}})
+    _skill(root, "skills/a")
+    _command(root, "prompts/x.md")
+    _manifest(root, name="kit", commands={"brief": {"content": "Hi."}})
 
     knowledge_base = _declared(tmp_path, root)
 
     assert knowledge_base.prompts == ()
-    assert knowledge_base.status["plugins"]["kit"]["skipped"] == [
-        {"path": "cmds/x.md", "reason": "not a file in the plugin"}
+    assert knowledge_base.status["plugins"]["kit"]["notes"] == [
+        "commands object map is not served"
     ]
-
-
-def test_an_inline_prompt_survives_a_cold_start(tmp_path, monkeypatch):
-    from kubed.mcp_kb import server
-
-    root = object_map_root(tmp_path)
-    config = _config(root, "lib")
-    first = KnowledgeBase(config, tmp_path / "cache")
-    body = _prompt(first, "lib_about").render()
-
-    def must_not_run(*args, **kwargs):
-        raise AssertionError("a cold start over a good index harvests nothing")
-
-    monkeypatch.setattr(server, "build_plugin", must_not_run)
-    del first
-    second = KnowledgeBase(config, tmp_path / "cache")
-
-    about = _prompt(second, "lib_about")
-    assert about.render() == body == "Say what this plugin does."
-    assert _prompt(second, "lib_brief").arguments[0].description == "<topic>"
 
 
 def test_a_bare_declared_plugin_has_no_agents(tmp_path):
@@ -800,7 +694,6 @@ def test_a_listed_command_outside_the_plugin_or_a_folder_is_noted(tmp_path):
         ("commands", ["./commands/deploy.md"]),
         ("commands", "./commands/"),
         ("commands", "./"),
-        ("commands", {"ship": {"source": "./commands/deploy.md"}}),
     ],
 )
 def test_a_key_naming_its_default_folder_earns_no_note(tmp_path, key, value):
@@ -929,25 +822,6 @@ def test_a_command_file_with_a_key_that_is_not_text_is_skipped(tmp_path):
     assert status["skipped"] == [{"path": "cmds/bad.md", "reason": KEY_REASON}]
 
 
-def test_inline_content_with_a_key_that_is_not_text_is_skipped(tmp_path):
-    root = tmp_path / "kit"
-    _skill(root, "skills/a")
-    _manifest(
-        root,
-        name="kit",
-        commands={"bad": {"content": NOT_TEXT_KEY}, "ok": {"content": "Ok."}},
-    )
-
-    knowledge_base = _declared(tmp_path, root)
-    status = knowledge_base.status["plugins"]["kit"]
-
-    assert status["status"] == "ok"
-    assert _names(knowledge_base) == ["kit_ok"]
-    assert status["skipped"] == [
-        {"path": ".claude-plugin/plugin.json", "reason": KEY_REASON}
-    ]
-
-
 def test_a_skill_with_a_key_that_is_not_text_is_read_as_no_frontmatter(tmp_path):
     root = tmp_path / "kit"
     _skill(root, "skills/a")
@@ -978,27 +852,6 @@ def test_a_prompt_file_too_deep_to_parse_is_skipped_and_quotes_nothing(
     assert status["status"] == "ok"
     assert _names(knowledge_base) == ["kit_ok"]
     assert status["skipped"] == [{"path": "prompts/bad.md", "reason": DEEP_REASON}]
-
-
-def test_inline_content_too_deep_to_parse_is_skipped(
-    tmp_path, frontmatter_out_of_stack
-):
-    root = tmp_path / "kit"
-    _skill(root, "skills/a")
-    _manifest(
-        root,
-        name="kit",
-        commands={"bad": {"content": DEEP}, "ok": {"content": "Ok."}},
-    )
-
-    knowledge_base = _declared(tmp_path, root)
-    status = knowledge_base.status["plugins"]["kit"]
-
-    assert status["status"] == "ok"
-    assert _names(knowledge_base) == ["kit_ok"]
-    assert status["skipped"] == [
-        {"path": ".claude-plugin/plugin.json", "reason": DEEP_REASON}
-    ]
 
 
 def test_a_prompt_gone_too_deep_under_a_good_index_does_not_stop_a_cold_start(
@@ -1032,27 +885,6 @@ def test_a_skill_too_deep_to_parse_is_read_as_no_frontmatter(
     assert knowledge_base.status["plugins"]["kit"]["status"] == "ok"
     # As a frontmatter block that does not parse: named by its folder.
     assert _served(knowledge_base) == {"a", "odd"}
-
-
-@pytest.mark.parametrize(
-    "key", ["", "a\nb", "x/y", "sp ace", "tab\there", "a\x07b", "../../etc", "d@x"]
-)
-def test_a_commands_map_key_that_is_not_a_name_is_dropped(tmp_path, key):
-    root = tmp_path / "kit"
-    _skill(root, "skills/a")
-    _manifest(
-        root,
-        name="kit",
-        commands={key: {"content": "Bad."}, "ok": {"content": "Ok."}},
-    )
-
-    knowledge_base = _declared(tmp_path, root)
-    status = knowledge_base.status["plugins"]["kit"]
-
-    assert status["status"] == "ok"
-    assert _names(knowledge_base) == ["kit_ok"]
-    assert status["notes"] == [f"commands entry {key!r} is not a usable name"]
-    assert "skipped" not in status
 
 
 @pytest.mark.parametrize(

@@ -21,7 +21,6 @@ from kubed.mcp_kb.catalogue.index import (
 from kubed.mcp_kb.catalogue.skills import Skill
 from kubed.mcp_kb.config import load_config
 from kubed.mcp_kb.plugins import Globs
-from kubed.mcp_kb.plugins.manifest import CommandEntry
 
 FETCH = "file:///skills/flatsource"
 
@@ -163,23 +162,6 @@ def test_a_v4_index_on_disk_is_discarded_whole(tmp_path):
 
 
 @pytest.mark.unit
-def test_an_inline_prompt_row_round_trips(tmp_path):
-    """A map command's body lives in the row: there is no file to re-read."""
-    row = PromptRow(
-        path="/skills/flatsource/.claude-plugin/plugin.json",
-        dialect="claude",
-        name="about",
-        content="Say what this plugin does.",
-        description="About.",
-        argument_hint="<topic>",
-    )
-    path = tmp_path / "index.json"
-    written = _index(plugins={"flatsource": _plugin_record(prompts=(row,))})
-    written.write(path)
-    assert Index.read(path) == written
-
-
-@pytest.mark.unit
 def test_a_v5_index_on_disk_is_discarded_whole(tmp_path):
     """Its prompt rows name no prompt: the name was the file stem, re-derived."""
     path = tmp_path / "index.json"
@@ -187,7 +169,7 @@ def test_a_v5_index_on_disk_is_discarded_whole(tmp_path):
     raw = json.loads(path.read_text(encoding="utf-8"))
     raw["version"] = 5
     for row in raw["plugins"]["flatsource"]["prompts"]:
-        for key in ("name", "content", "description", "argument_hint"):
+        for key in ("name",):
             del row[key]
     path.write_text(json.dumps(raw), encoding="utf-8")
     assert Index.read(path) is None
@@ -355,15 +337,6 @@ def test_a_record_keeps_the_globs_it_was_harvested_with(tmp_path):
         agents=None,
         command_dirs=("commands",),
         command_files=("extra/run.md",),
-        command_map=(
-            CommandEntry(
-                name="about",
-                source=None,
-                content="Say what this plugin does.",
-                description=None,
-                argument_hint=None,
-            ),
-        ),
     )
     written = _index(plugins={"flatsource": _plugin_record(globs=globs)})
     written.write(path)

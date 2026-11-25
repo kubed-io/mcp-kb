@@ -39,10 +39,7 @@ from pathlib import Path, PurePosixPath
 from ..config import Config, scrub
 from ..plugins import Fetch, Globs, Plugin
 from ..plugins.manifest import (
-    MANIFEST_FILES,
-    CommandEntry,
     Components,
-    manifest_file,
     read_manifest,
 )
 from ..plugins.select import select
@@ -224,14 +221,11 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
     commands: tuple[str, ...] = ()
     command_files: tuple[str, ...] = ()
     command_dirs: tuple[str, ...] = ()
-    command_map: tuple[CommandEntry, ...] = ()
     if prompts is None and (found.commands is not None or listed.commands is not None):
         prompts = commands = _joined(found.commands, listed.commands)
         command_files = _joined(found.command_files, listed.command_files)
         command_dirs = _joined(found.command_dirs, listed.command_dirs)
-        command_map = (*found.command_map, *listed.command_map)
-        mapped = (item.source for item in command_map if item.source)
-        notes += _ignored(root, "commands", (*command_files, *command_dirs, *mapped))
+        notes += _ignored(root, "commands", (*command_files, *command_dirs))
         notes += [
             f"commands entry '{rel}' is not in the plugin"
             for rel in command_files
@@ -279,7 +273,6 @@ def with_manifest(plugin: Plugin, root: Path) -> tuple[Plugin, Globs]:
         agents=agents,
         command_dirs=command_dirs,
         command_files=command_files,
-        command_map=command_map,
     )
     return completed, globs
 
@@ -379,7 +372,6 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
             )
             for path in harvest.prompt_files(root, globs)
         ]
-        sources += _mapped(root, globs.command_map, skipped=unloadable)
         prompts = _load_prompts(plugin, sources, skipped=unloadable)
         agents: list[AgentRow] = []
         for path, segments in harvest.agent_files(root, globs):
@@ -426,42 +418,6 @@ def build_plugin(plugin: Plugin, root: Path, *, globs: Globs) -> PluginRecord:
     )
 
 
-def _mapped(
-    root: Path, entries: Sequence[CommandEntry], *, skipped: list[tuple[Path, str]]
-) -> list[tuple[str, PromptSource]]:
-    """An object map's commands, every one of them Claude's (PLG-21).
-
-    A ``source`` is read through the guard every read shares, so a link out of
-    the root is skipped, not served. A ``content`` is the body itself, and is
-    named by the manifest that carries it: the one ``read_manifest`` read, or
-    for an entry with none, the name a manifest would have (LIB-31: without a
-    ``plugin.json`` the entry is the manifest).
-    """
-    manifest = root / (manifest_file(root) or MANIFEST_FILES[0])
-    sources: list[tuple[str, PromptSource]] = []
-    for entry in entries:
-        path = manifest
-        if entry.source is not None:
-            found = harvest.readable(root, entry.source)
-            if found is None:
-                skipped.append((root / entry.source, "not a file in the plugin"))
-                continue
-            path = found
-        sources.append(
-            (
-                "claude",
-                PromptSource(
-                    path,
-                    entry.name,
-                    content=entry.content,
-                    description=entry.description,
-                    argument_hint=entry.argument_hint,
-                ),
-            )
-        )
-    return sources
-
-
 def _load_prompts(
     plugin: Plugin,
     sources: Sequence[tuple[str, PromptSource]],
@@ -474,7 +430,7 @@ def _load_prompts(
     """``load_prompts`` for each ``(dialect, source)``, in order, beside its source.
 
     At harvest the dialects come from ``_dialect`` and the order is the files
-    by path, then the object map's commands; at snapshot time both come from
+    by path; at snapshot time both come from
     the rows, whose recorded dialect is the authority -- the same file is read
     the same way on every rebuild and every restart, whatever the path rule
     would say today. The order is kept because it is the order ``_admit``
@@ -644,8 +600,7 @@ def build_snapshot(
     re-parsed from the paths their rows name, in the dialect and under the name
     their rows record -- a handful of small files, and parsing them is far less
     code than serialising a rendered template and its arguments into the
-    index. An inline object-map command has no file, so its row carries the
-    body and it is parsed from that. A prompt file that vanished since the
+    index. A prompt file that vanished since the
     record was written is logged and skipped by ``load_prompts``, so it simply
     stops being served rather than taking the plugin down.
 
@@ -1076,8 +1031,8 @@ def _admit(record: PluginRecord) -> _Admitted:
     older ``index.json`` still holds is held to it on a cold start.
 
     A prompt is left out when a prompt before it has its name (PLG-25), as
-    ``prompts/debug.md`` and ``prompts/sub/debug.md`` both would, or a file and
-    an object-map command of one name. ``commands/a/x.md`` and
+    ``prompts/debug.md`` and ``prompts/sub/debug.md`` both would.
+    ``commands/a/x.md`` and
     ``commands/b/x.md`` are ``a_x`` and ``b_x``, and both serve.
 
     An agent is left out when an agent before it, in path order, has its name

@@ -11,7 +11,6 @@ from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import harvest
 from kubed.mcp_kb.catalogue.prompts import (
     FilePrompt,
-    PromptSource,
     load_prompt,
     load_prompts,
     prompt_name,
@@ -112,44 +111,6 @@ def test_a_resolved_path_under_an_unresolved_root_is_still_below_it(tmp_path):
     link.symlink_to(real)
     path = (link / "commands" / "db" / "x.md").resolve()
     assert prompt_name(path, link, ()) == "db_x"
-
-
-def test_an_inline_source_is_a_body_with_optional_frontmatter(tmp_path):
-    manifest = tmp_path / "plugin.json"
-    bare = load_prompt(
-        PromptSource(path=manifest, name="about", content="Say !`ls` $ARGUMENTS."),
-        "lib",
-        dialect="claude",
-        live=True,
-    )
-    assert bare.name == "lib_about"
-    assert bare.path == manifest
-    assert not bare.live
-    assert bare.render({"arguments": "it"}) == "Say !`ls` it."
-
-    fronted = load_prompt(
-        PromptSource(
-            path=manifest,
-            name="brief",
-            content="---\ndescription: Own.\nargument-hint: own\n---\nDo it.\n",
-            description="Mapped.",
-            argument_hint="<topic>",
-        ),
-        "lib",
-        dialect="claude",
-    )
-    assert fronted.description == "Mapped."
-    assert [a.description for a in fronted.arguments] == ["<topic>"]
-    assert fronted.template == "Do it.\n"
-
-
-def test_a_sources_description_replaces_the_files_own(tmp_path):
-    path = tmp_path / "brief.md"
-    path.write_text("---\ndescription: Own.\n---\nDo $ARGUMENTS.\n")
-    prompt = load_prompt(
-        PromptSource(path=path, name="x", description="Mapped."), "lib"
-    )
-    assert (prompt.name, prompt.description) == ("lib_x", "Mapped.")
 
 
 def test_a_missing_directory_is_no_prompts(tmp_path):

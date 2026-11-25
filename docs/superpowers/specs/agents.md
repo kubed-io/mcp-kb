@@ -52,7 +52,7 @@ the name.
 
 **AGT-6.** An agent file is YAML frontmatter and a Markdown body. Its frontmatter MUST parse into
 a non-empty mapping with string keys, convert to JSON, and carry `name` and `description` as
-non-empty strings. The `name` MUST be a usable name, as a `commands` map key is (PLG-21): no
+non-empty strings. The `name` MUST be a usable name, as a name PLG-25 builds is: no
 whitespace, control or other invisible character, `/` or `@`, so no file can take the
 `<name>@<plugin name>` a rename gives (AGT-8); one that is not is skipped with
 `agent frontmatter name is not a usable name`. A file that breaks any of these, that cannot be read, or that is not UTF-8 is

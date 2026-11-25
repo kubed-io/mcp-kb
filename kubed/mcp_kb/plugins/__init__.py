@@ -25,7 +25,7 @@ from .address import Address, parse_address
 
 if TYPE_CHECKING:
     from ..config import BasicAuth, Config, LibraryConfig, PluginConfig, SourceConfig
-    from .manifest import CommandEntry, Components
+    from .manifest import Components
 
 
 @dataclass(frozen=True)
@@ -83,8 +83,7 @@ class Globs:
     ``prompts:`` glob is not a command declaration and leaves it empty.
     Only a declared *folder* is a pattern; ``command_files`` are the ``.md``
     files those declarations list, read as paths and served beside
-    ``prompts`` (PLG-21). ``command_dirs`` are the folders as written, and
-    ``command_map`` the object-map commands, which name no pattern at all.
+    ``prompts`` (PLG-21). ``command_dirs`` are the folders as written.
 
     ``agents`` is ``None`` for the default ``agents/`` scan, as the other kinds
     are, and ``()`` for a plugin that is not Claude-format and so has none.
@@ -97,7 +96,6 @@ class Globs:
     agents: tuple[str, ...] | None = None
     command_dirs: tuple[str, ...] = ()
     command_files: tuple[str, ...] = ()
-    command_map: tuple[CommandEntry, ...] = ()
 
 
 @dataclass(frozen=True)

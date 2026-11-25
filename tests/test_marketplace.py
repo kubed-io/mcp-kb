@@ -459,8 +459,8 @@ def test_an_entrys_agents_and_object_commands_are_read(tmp_path):
     plugin = only(read(tmp_path, entry(agents=["./agents/a.md"], commands=commands)))
 
     assert plugin.entry.agents == ("agents/a.md",)
-    assert [c.name for c in plugin.entry.command_map] == ["ship"]
     assert plugin.entry.commands == ()
+    assert plugin.entry.notes == ("commands object map is not served",)
 
     catalog = read(tmp_path, entry(agents=3))
     assert skip_reason(catalog) == "agents must be a string or a list of strings"

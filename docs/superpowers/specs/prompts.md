@@ -31,9 +31,9 @@ block (`---` then `---`) is valid.
 
 **PRM-7.** A file that cannot be read, whose YAML does not parse, or whose frontmatter breaks a rule
 below is skipped with a reason. A frontmatter key that is not a string (`1:`, `true:`) is skipped
-with `frontmatter has a key that is not a string`, and so is an inline command's (PLG-21).
+with `frontmatter has a key that is not a string`.
 Frontmatter nested too deeply for the parser is skipped with `frontmatter is nested too deeply to
-read`, and so is an inline command's. The plugin's other prompts, skills and files still serve.
+read`. The plugin's other prompts, skills and files still serve.
 
 **PRM-8.** A frontmatter field of the wrong type (a mapping or a list where text is expected, a
 non-list where a list is expected) skips the file with a reason naming the field. It MUST NOT stop
@@ -73,8 +73,7 @@ reference are text and render as written.
 | 11 | The body has `$ARGUMENTS`, `$ARGUMENTS[N]` or `$N` | `claude` |
 | 12 | Nothing above answered | `mcp-kb` |
 
-**PRM-15.** Rule 1 holds whatever the plugin declares and wherever the file sits. A `commands` map
-item that passes rule 1 is `claude`, whatever rules 2 and 3 say (PLG-12, PLG-21).
+**PRM-15.** Rule 1 holds whatever the plugin declares and wherever the file sits.
 
 **PRM-16.** A config's own `prompts:` glob is not a `commands` declaration. A file it selects gets
 no help from rule 5.

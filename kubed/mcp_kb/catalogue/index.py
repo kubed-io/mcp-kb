@@ -39,11 +39,10 @@ from typing import Literal
 
 from ..config import Config
 from ..plugins import Globs
-from ..plugins.manifest import CommandEntry
 from .prompts import PromptSource
 from .skills import Skill
 
-INDEX_VERSION = 8
+INDEX_VERSION = 9
 
 
 @dataclass(frozen=True)
@@ -106,18 +105,11 @@ class PromptRow:
     row records, so every rebuild and restart reads it the same way. The
     name is recorded for the same reason: it was decided by where the file
     was found (PLG-25), which the path alone no longer says.
-
-    ``content``, ``description`` and ``argument_hint`` are an object-map
-    command's (PLG-21). An inline body has no file to re-parse, so it rides in
-    the row, and ``path`` is the manifest it came from.
     """
 
     path: str
     dialect: str
     name: str
-    content: str | None = None
-    description: str | None = None
-    argument_hint: str | None = None
 
     @classmethod
     def from_source(cls, source: PromptSource, dialect: str) -> PromptRow:
@@ -125,19 +117,10 @@ class PromptRow:
             path=str(source.path),
             dialect=dialect,
             name=source.name,
-            content=source.content,
-            description=source.description,
-            argument_hint=source.argument_hint,
         )
 
     def to_source(self) -> PromptSource:
-        return PromptSource(
-            path=Path(self.path),
-            name=self.name,
-            content=self.content,
-            description=self.description,
-            argument_hint=self.argument_hint,
-        )
+        return PromptSource(path=Path(self.path), name=self.name)
 
 
 @dataclass(frozen=True)
@@ -258,7 +241,6 @@ def _globs_from_dict(raw: dict | None) -> Globs | None:
         agents=kind("agents"),
         command_dirs=tuple(raw["command_dirs"]),
         command_files=tuple(raw["command_files"]),
-        command_map=tuple(CommandEntry(**entry) for entry in raw["command_map"]),
     )
 
 

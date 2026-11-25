@@ -400,7 +400,7 @@ git commit -m "Prompts parse from their text: parse_prompt and dialect_of"
 - Produces: `Components(commands=(), …)` with `notes` holding `commands object map is not served`
   for a map, so the map still replaces the conventions (PLG-21).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 def test_an_object_map_serves_nothing_and_says_so(tmp_path):
@@ -414,19 +414,19 @@ In `tests/test_parity.py`, the end-to-end map tests become one test. A `plugin.j
 plugin's `/health` `notes` hold the note. Delete `CommandEntry`'s round trip from
 `tests/test_index.py` and the map cases from `tests/test_plugins.py`.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_plugins.py -k object_map -v`
 Expected: FAIL, because `_command_map` still reads the map.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `_commands(value, notes)`: for a dict it appends the note and returns `((), (), ())`; the rest is
 as now, without the map. Remove every `command_map` and `_mapped` use.
 `grep -rn "command_map\|CommandEntry\|_mapped\|_inline\|argument_hint" kubed tests` returns
 nothing.
 
-- [ ] **Step 4: Update the spec and AGENTS.md**
+- [x] **Step 4: Update the spec and AGENTS.md**
 
 - PLG-21: a `commands` may be a path or a list of paths. An object map serves nothing. It still
   replaces the conventions, and the plugin notes `commands object map is not served` (PLG-26).
@@ -442,12 +442,12 @@ nothing.
 - agents.md line 55: "as a `commands` map key is (PLG-21)" becomes "as a name PLG-25 builds is".
 - AGENTS.md "Adding a prompt": drop ", a `commands` map's key".
 
-- [ ] **Step 5: Run the checks**
+- [x] **Step 5: Run the checks**
 
 Run: `ruff check .` then `pytest tests/test_plugins.py tests/test_index.py tests/test_parity.py tests/test_marketplace.py tests/test_prompts.py -v`
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A kubed/mcp_kb tests docs/superpowers/specs AGENTS.md

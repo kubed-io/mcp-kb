@@ -22,14 +22,13 @@ target is the MCP prompt itself (§C1.34).
 
 The exposed name is ``<library>_<name>``, and the name below the library is
 decided where the prompt was found (PLG-25, ``prompt_name``): the folders below
-a commands directory and the file stem, an object map's key, or the stem
+a commands directory and the file stem, or the stem
 alone. Prompt names are one flat namespace per server, and two libraries
 shipping a ``debug.md`` must not collide the way two skills named ``testing``
 otherwise would.
 
 A ``PromptSource`` is what is loaded: a file and the name it was found under,
-or -- for a manifest's object-map command -- a body written inline in the
-manifest, which is fetched text like any file and never run.
+and the name it is served under below its library.
 
 ``FilePrompt`` here is a plain dataclass -- the catalogue's own parsed form,
 with no pydantic and no FastMCP base class -- so ``catalogue/snapshot.py`` and
@@ -82,19 +81,10 @@ __all__ = [
 
 @dataclass(frozen=True)
 class PromptSource:
-    """One prompt to load: where it is, and what it is called below its library.
-
-    ``path`` is the file; for an inline body (``content``, PLG-21) it is the
-    manifest the body came from, which is what ``/health`` names it by and is
-    never read for it. ``description`` and ``argument_hint`` are a manifest's
-    word on the prompt, and replace the body's own frontmatter keys.
-    """
+    """One prompt to load: where it is, and what it is called below its library."""
 
     path: Path
     name: str
-    content: str | None = None
-    description: str | None = None
-    argument_hint: str | None = None
 
 
 @dataclass
@@ -232,7 +222,7 @@ TOO_DEEP = "frontmatter is nested too deeply to read"
 
 
 class _NoFrontmatter(ValueError):
-    """No frontmatter block at all: a file's failure, an inline body's choice."""
+    """No frontmatter block at all: a file's failure."""
 
 
 def _split(text: str) -> tuple[dict, str]:
@@ -324,18 +314,6 @@ def _source(source: Path | PromptSource) -> PromptSource:
     return PromptSource(path=source, name=stem(source))
 
 
-def _inline(content: str) -> tuple[dict, str]:
-    """An inline body's frontmatter and body: unlike a file's, the block is optional.
-
-    Only an absent block is forgiven. One that does not parse raises, as a
-    file's does, and the command is skipped.
-    """
-    try:
-        return _split(content)
-    except _NoFrontmatter:
-        return {}, content
-
-
 def load_prompt(
     source: Path | PromptSource,
     library: str,
@@ -354,24 +332,10 @@ def load_prompt(
     ``category`` are the plugin's, carried as given -- nothing is added to
     them. ``dialect`` is what the config says the file is written in, and
     ``"auto"`` -- the usual answer -- leaves it to ``detect``.
-
-    An inline body is never live, whatever ``live`` says: there is no file of
-    its own to revalidate, and re-reading the manifest would serve JSON.
     """
     source = _source(source)
     path = source.path
-    if source.content is None:
-        meta, body = _split(path.read_text(encoding="utf-8"))
-    else:
-        meta, body = _inline(source.content)
-        live = False
-    # The manifest's later word on the prompt, put where the dialect reads it,
-    # so its hint becomes the free-text argument's description the same way
-    # the file's own would (PLG-21).
-    if source.description is not None:
-        meta = {**meta, "description": source.description}
-    if source.argument_hint is not None:
-        meta = {**meta, "argument-hint": source.argument_hint}
+    meta, body = _split(path.read_text(encoding="utf-8"))
     return _build(
         meta,
         body,

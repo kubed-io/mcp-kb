@@ -277,8 +277,6 @@ class PromptProvider(Provider):
         if not isinstance(prompt, MCPFilePrompt):
             return prompt
         snapshot = self._snapshot()
-        # An inline map command is never live: its path is the manifest it
-        # came from, and revalidating that would be a round trip for nothing.
         if prompt.file.live:
             snapshot.revalidate(prompt.file.path)
         catalogue = snapshot.catalogue if self._catalogue is None else self._catalogue()

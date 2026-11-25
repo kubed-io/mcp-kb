@@ -350,22 +350,6 @@ def test_a_cross_repository_entry_whose_subdir_changed_is_harvested_again(
     assert _served(knowledge_base, "tools@up") == ["beta"]
 
 
-@pytest.mark.unit
-def test_a_cross_repository_entrys_changed_inline_command_is_served(
-    cross_repo, tmp_path
-):
-    """An object-map command's body rides in the entry, not in either tree."""
-    market, config = cross_repo
-    _publish(market, commands={"about": {"content": "Before."}})
-    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
-
-    _publish(market, commands={"about": {"content": "After."}})
-    knowledge_base.refresh()
-
-    (prompt,) = [p for p in knowledge_base.prompts if p.name == "up_about"]
-    assert "After." in prompt.body()
-
-
 # -- refresh ------------------------------------------------------------------
 
 

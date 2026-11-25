@@ -68,8 +68,7 @@ names them.
 **PLG-11.** A `prompts` or `files` pattern whose last component is `**` is read as `**/*`, so it
 matches files on every Python version.
 
-**PLG-12.** A `dialect` other than `auto` reads every prompt file of the plugin in that dialect, and
-an object-map command is `claude` whatever the plugin's `dialect` says (PLG-21). With `auto`, a file
+**PLG-12.** A `dialect` other than `auto` reads every prompt file of the plugin in that dialect. With `auto`, a file
 ending `.prompt.md` is left to detection; a file under `commands/` or `.claude/commands/` (relative
 to the plugin root), or one matched by a `commands` declaration from a manifest or a marketplace
 entry, is read as `claude`; every other file is left to detection. A config's own `prompts:` list is
@@ -85,7 +84,7 @@ under its root. A manifest that is a symlink resolving outside the root is not r
 
 **PLG-15.** A manifest that is not readable JSON, or not a JSON object, fails the plugin.
 `keywords`, `skills` and `agents` each take one string or a list of strings, and `commands` takes
-one string, a list of strings or an object map (PLG-21); any other type fails the plugin, naming
+one string, a list of strings or an object map, which PLG-21 serves as nothing; any other type fails the plugin, naming
 the field. A non-string `description` or `version` is ignored.
 
 **PLG-16.** A component path (`skills`, `commands`, `agents`, `mcpServers`) loses a leading `./`,
@@ -308,18 +307,9 @@ serves.
 SKL-1 reads a declared folder. `"."` and `"./"` name the plugin root.
 
 **PLG-21.** A manifest `commands` **replaces** the default prompt scan, across all of kb's prompt
-conventions. It may be a path, a list of paths, or an **object map**. In a map, the key is the
-prompt's name, `source` names a file or `content` holds an inline body (exactly one of the two),
-and `description` and `argumentHint`, when set, are the prompt's description and its free-text
-argument's hint, ahead of any the body's own frontmatter gives. `model` and `allowedTools` are
-dropped like the other client-only keys. A map item that is not an object, that has both or
-neither of `source` and `content`, whose `source` is not a path inside the plugin, or whose
-`content` is not text, is dropped with a note (PLG-26), and the rest of the map serves. So is one
-whose key is not a usable name: empty, or holding whitespace, a control or other invisible
-character, `/` or `@`, noted `commands entry <key> is not a usable name` with the key quoted
-escaped. A `source`
-that is not a file in the plugin is skipped with `not a file in the plugin`. An inline command's
-path in `/health` is the manifest's. Every map command is read in the `claude` dialect.
+conventions. It may be a path or a list of paths. An **object map** serves nothing: it still
+replaces the conventions, as any declared `commands` does, and the plugin notes
+`commands object map is not served` (PLG-26).
 A path in a `commands` list, from a manifest or an entry, is a path and not a glob, as in Claude
 Code: `./cmds/[draft].md` is that file and never `cmds/d.md`, `./stars/*.md` names no file, and
 `./v[1]` is that folder and not `v1/`. A listed file is served in a dot folder too
@@ -337,8 +327,8 @@ Code reads both; this is a known difference. Every file a `commands` list select
 folder is read only for what the key names. When no path the key declares names the folder, a
 path inside it or the plugin root, the plugin notes
 `Default <folder>/ folder is ignored because the manifest sets "<key>"`, whether the manifest or
-the entry set it. As in Claude Code, `"agents": ["./agents/reviewer.md"]`, `"commands": "./commands/"`,
-a `commands` map item whose `source` is in `commands/`, and `"commands": "./"` earn no note.
+the entry set it. As in Claude Code, `"agents": ["./agents/reviewer.md"]`, `"commands": "./commands/"`
+and `"commands": "./"` earn no note.
 
 **PLG-24.** A component path that doesn't start with `./` is still served, and the plugin notes it.
 This is a deliberate deviation: `claude plugin validate` refuses such a path, and kb serves rather
@@ -349,12 +339,12 @@ than validates.
 | Found | Name |
 |---|---|
 | under `commands/` or `.claude/commands/`, or under a directory a `commands` declaration names | each folder between that directory and the file, then the file stem, joined with `_`: `commands/db/migrate.md` is `<library>_db_migrate` |
-| as a key of a `commands` object map | the key |
 | anywhere else | the file stem (PRM-42) |
 
 The `commands/` convention reads its subfolders (`commands/**/*.md`), and so does a directory
-named in a `commands` list. Files come in path order, then the map's commands. A name built from a
-path, the folders and the stem together, MUST be a usable name, as a map key is (PLG-21): a file
+named in a `commands` list. Files come in path order. A name built from a
+path, the folders and the stem together, MUST be a usable name: no whitespace, control or other
+invisible character, `/` or `@`. A file
 whose name is not, `commands/my db/x.md` or `prompts/a b.md`, is skipped with
 `prompt name <name> is not a usable name`, the name quoted escaped, and never claims the name. A
 later prompt of the plugin with an earlier one's name is skipped with
@@ -365,8 +355,8 @@ got wrong without failing it:
 
 - a component path dropped for leaving the plugin root (PLG-16), and one served without `./`
   (PLG-24);
-- an object-map item dropped (PLG-21), for its key as for its value, an `agents` item dropped
-  (PLG-22), and an `agents` item that names no file in the plugin,
+- a `commands` object map, `commands object map is not served` (PLG-21), an `agents` item
+  dropped (PLG-22), and an `agents` item that names no file in the plugin,
   `agents entry '<path>' is not in the plugin` (AGT-5);
 - a listed `commands` file that names no file in the plugin,
   `commands entry '<path>' is not in the plugin` (PLG-21);
