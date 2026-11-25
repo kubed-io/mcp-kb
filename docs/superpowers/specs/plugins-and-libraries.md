@@ -138,7 +138,7 @@ errors. A failed plugin serves nothing in any library and carries `status: faile
 
 | Key | Type | Default |
 |---|---|---|
-| `name` | string, same pattern as a plugin name, unique among libraries | required |
+| `name` | string, same pattern as a plugin name, unique among libraries, and not `mcp-kb` (the server's own name, whose prompts the plugin layer would not prefix) | required |
 | `description` | string | `""` |
 | `notes` | string | `""` |
 | `listSkills` | boolean | `true` |

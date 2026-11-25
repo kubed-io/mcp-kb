@@ -876,7 +876,7 @@ git commit -m "A live prompt's edit re-reads its plugin, and a broken one keeps 
 **Interfaces:**
 - Produces: `config.SERVER_NAME`, which `create_app` passes to `QuickMCP`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 def test_a_library_named_like_the_server_is_refused():
@@ -884,23 +884,23 @@ def test_a_library_named_like_the_server_is_refused():
         Config.model_validate({"libraries": [{"name": "mcp-kb", "source": "file:///x"}]})
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `pytest tests/test_config.py -k server -v`
 Expected: FAIL, because the config loads.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 The validator refuses `SERVER_NAME` with
 `library name 'mcp-kb' is the server's own name, whose prompts the plugin layer would not prefix`.
 
-- [ ] **Step 4: Run the checks**
+- [x] **Step 4: Run the checks**
 
 Run: `ruff check .`, then `pytest tests/test_config.py tests/test_wiki.py -v`, then
 `python -c "import json,kubed.mcp_kb.config as c; assert json.load(open('config.schema.json')) == c.schema()"`
 Expected: all pass, and the committed schema still matches.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add kubed/mcp_kb/config.py kubed/mcp_kb/app.py tests/test_config.py docs/superpowers/specs

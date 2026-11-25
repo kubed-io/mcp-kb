@@ -21,7 +21,7 @@ from kubed.mcp.skills import SkillsExtension
 
 from . import routes
 from .catalogue.uris import Catalogue
-from .config import BUILTIN_SCHEMES
+from .config import BUILTIN_SCHEMES, SERVER_NAME
 from .mcp import prompts, resources
 from .mcp.announce import AnnounceChanges
 from .mcp.instructions import ScopedInstructions
@@ -38,7 +38,7 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
     config = knowledge_base.config
     ttl = config.min_refresh_seconds
     mcp = QuickMCP(
-        "mcp-kb",
+        SERVER_NAME,
         config=config,
         header_prefix="Kb",
         version=package_version(),
