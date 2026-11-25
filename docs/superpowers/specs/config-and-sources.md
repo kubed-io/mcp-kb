@@ -69,6 +69,25 @@ load time.
 
 **CFG-13.** No credential is written under the cache directory, a clone's remote URL included.
 
+## Telemetry
+
+**CFG-14.** *(proposed; rewords CFG-2, CFG-4 and SRC-36)* The optional `telemetry` mapping is
+kubed-mcp's `TelemetrySettings`, which the server kubed-mcp builds reads off the config: `profiles`
+(a Pyroscope address; setting it turns profiles on), `profile_cpu` and `profile_memory` (both
+`true` by default), `otel` (`false` by default; OpenTelemetry traces and call metrics, configured
+by the standard `OTEL_*` variables) and `tags` (a string map of labels). Absent, every signal is
+off. An unknown key in it is a config error (CFG-5), and so is a `profiles` address carrying
+userinfo, as a source URL is (SRC-3). Profiles and traces carry the service name
+`OTEL_SERVICE_NAME`, else `mcp-kb`. Metrics leave as `OTEL_METRICS_EXPORTER` says: pushed over
+OTLP, or scraped from the exporter's own port with `prometheus`. The server adds no metrics route.
+
+```yaml
+telemetry:
+  profiles: http://pyroscope.example.com:4040
+  otel: true
+  tags: {team: platform}
+```
+
 ## Sources
 
 **SRC-1.** A source is `name`, `url`, and optionally `auth`, `cache` (`snapshot`, the default, or

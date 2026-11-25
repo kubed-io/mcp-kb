@@ -161,6 +161,11 @@ config JSON Schema and exits.
 config mounted. It bakes in no skills; everything served is read from the config's sources at
 start.
 
+**HTTP-42.** *(proposed)* The image installs kb's `telemetry` extra, so the profiler and the
+OpenTelemetry packages import in it. A plain install of the package carries neither; with a
+telemetry signal on (CFG-14), such an install logs one warning naming the extra and serves without
+that signal.
+
 **HTTP-38.** The process writes only under the cache directory, so the root filesystem MAY be
 read-only when the cache directory is a writable mount.
 
