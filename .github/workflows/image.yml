@@ -125,6 +125,8 @@ jobs:
     - name: Build and Push
       uses: kubed-io/actions/build-image@main
       with:
+        # a kubed-mcp release reinstalls the dependency layer
+        fresh: kubed-mcp
         push: ${{ env.PUSH }}
         # Short-circuit before fromJson when not pushing (secrets step skipped →
         # empty output), so the expression never parses an empty string.

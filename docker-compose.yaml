@@ -9,6 +9,8 @@ services:
       target: runner
       args:
         PY_VERSION: ${PY_VERSION:-3.14}
+        # build-image's `fresh` lookup: a kubed-mcp release reinstalls the dependency layer
+        DEPS_FRESH: ${DEPS_FRESH:-}
       tags:
       - *image
       - kubed/mcp-kb:${GIT_SHA:-latest}
