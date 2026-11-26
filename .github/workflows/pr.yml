@@ -28,16 +28,15 @@ on:
   pull_request:
     # main, and a sub-issue's change into its family's branch (issue-<parent>)
     branches: [main, 'issue-*']
-    # labeled/unlabeled so applying the `no changelog` label (e.g. Dependabot,
-    # or a late add) re-runs the gate with a fresh payload. A draft runs
-    # nothing; ready_for_review starts the checks.
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    # No label events: those are pr-labels.yml's. The merge box reads only the latest run of
+    # each workflow, so a label run here, its checks skipped, hid their passes and left
+    # them Expected for good (quick-mcp #65).
+    types: [opened, synchronize, reopened, ready_for_review]
 
-# a push cancels the checks it outdates; a label run is apart, so it never cancels them, and
-# so is a draft's: a push and Mark Ready land together, and the push's draft payload must
-# not cancel the checks ready_for_review started
+# a push cancels the checks it outdates; a draft's run is apart, so a draft's payload never
+# cancels the checks ready_for_review started
 concurrency:
-  group: pr-${{ github.event.pull_request.number }}-${{ contains(fromJSON('["labeled","unlabeled"]'), github.event.action) && 'labels' || github.event.pull_request.draft && 'draft' || 'checks' }}
+  group: pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.draft && 'draft' || 'checks' }}
   cancel-in-progress: true
 
 permissions: {}
@@ -76,12 +75,10 @@ jobs:
       with:
         changelog: CHANGELOG.md
 
-  # The checks. A label event runs PR Tasks alone: these skip at the caller, which
-  # reports the caller's name only, so a skip never stands in for a required check.
-  # A draft runs none of them either.
+  # The checks. A draft runs none of them.
   test:
     name: Test
-    if: ${{ !github.event.pull_request.draft && !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) }}
+    if: ${{ !github.event.pull_request.draft }}
     uses: ./.github/workflows/test.yml
     secrets: inherit
     permissions:
@@ -89,7 +86,7 @@ jobs:
 
   lint:
     name: Lint
-    if: ${{ !github.event.pull_request.draft && !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) }}
+    if: ${{ !github.event.pull_request.draft }}
     uses: ./.github/workflows/lint.yml
     secrets: inherit
     permissions:
@@ -97,7 +94,7 @@ jobs:
 
   package:
     name: Package
-    if: ${{ !github.event.pull_request.draft && !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) }}
+    if: ${{ !github.event.pull_request.draft }}
     uses: ./.github/workflows/package.yml
     secrets: inherit
     permissions:
@@ -109,8 +106,7 @@ jobs:
     name: Checks
     needs: [pr-tasks, test, lint, package]
     if: >-
-      always() && !github.event.pull_request.draft &&
-      !contains(fromJSON('["labeled","unlabeled"]'), github.event.action)
+      always() && !github.event.pull_request.draft
     runs-on: ubuntu-26.04
     permissions:
       actions: read
