@@ -83,7 +83,7 @@ reason one of the table's. For a name that is not usable, that reason quotes the
 or else the stem, with no library prefix or folders. An agent file the plugin layer
 finds that kb's harvest did not is not served either, and is not listed under `skipped`: kb logs
 `agent file <path> of plugin <id> is not served: kb's harvest did not find it` once, and the plugin
-layer logs its own refusal each time the plugin is added.
+layer's own line for the refusal is dropped (HTTP-45).
 
 ## The roster: `agents/list`
 
@@ -228,7 +228,7 @@ are not tags and narrow nothing. A scope reaching only agents is served, not ref
 - `agents` at the top level: the agents currently served, across libraries;
 - `agents` for each plugin and each library: what the plugin layer reports serving for each plugin
   added, its agent files (PLUG-74). A plugin's count is library-independent, from the first library
-  that serves it, and a plugin no library serves counts the agent files found (AGT-5);
+  that serves it, and a plugin no library adds counts `0`;
 - each agent file found that the plugin layer skipped (its plugin's skipped files, PLUG-74) under
   its plugin's `skipped`, with the layer's reason (AGT-6), and each dropped or missing `agents`
   entry under its `notes` (AGT-5);

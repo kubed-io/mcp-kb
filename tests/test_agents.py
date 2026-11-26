@@ -222,7 +222,7 @@ def test_the_routing_hint_is_agt9s(tmp_path, model, hint):
 
 
 def _record(tree: AgentsTree, tmp_path: Path, plugin: str):
-    return tree.knowledge_base(tmp_path / "cache")._records[plugin]
+    return tree.knowledge_base(tmp_path / "cache")._harvests[plugin]
 
 
 def test_the_harvest_records_paths_and_parses_nothing(tmp_path):
@@ -230,7 +230,7 @@ def test_the_harvest_records_paths_and_parses_nothing(tmp_path):
     plugin layer is the one reader of them."""
     kb = agents_tree(tmp_path).knowledge_base(tmp_path / "cache")
 
-    record = kb._records["extra@drawio"]
+    record = kb._harvests["extra@drawio"]
     assert record.agents == (
         "agents/broken.md",
         "agents/db/migrate.md",
@@ -239,7 +239,8 @@ def test_the_harvest_records_paths_and_parses_nothing(tmp_path):
         "agents/twin-b.md",
     )
     assert record.agent_paths == ("agents",)
-    assert record.skipped == ()
+    # What the layer skips is the layer's to say: the harvest keeps no rows.
+    assert not hasattr(record, "skipped")
 
 
 def test_agent_skip_rows_are_the_layers(tmp_path):
@@ -291,7 +292,7 @@ def test_an_agent_only_the_layer_finds_is_not_served(tmp_path, monkeypatch, capl
     # The kit plugin is the config's only one: kb's harvest finds no agent in it.
     monkeypatch.setattr(harvest, "agent_files", lambda root, globs: [])
     kb = _kit_agent(tmp_path, _agent("a"))
-    assert kb._records["kit"].agents == ()
+    assert kb._harvests["kit"].agents == ()
 
     with caplog.at_level(logging.WARNING):
         served = _served(kb)
@@ -301,8 +302,9 @@ def test_an_agent_only_the_layer_finds_is_not_served(tmp_path, monkeypatch, capl
     assert read_served(kb, "skill://kit/draw/SKILL.md")
     # Not a path kb found, so not one of the plugin's rows (D3).
     assert _rows(kb, "kit", "agents/a.md") == []
-    # The layer logs its own refusal on every add; kb notes it once (A5).
-    assert caplog.text.count("agent file agents/a.md is not one kb found") >= 1
+    # kb notes it once (A5); the layer's own refusal line is kept out (D6).
+    assert "agent file agents/a.md is not one kb found" not in caplog.text
+    assert "agent_meta failed" not in caplog.text
     kbs = [
         r.getMessage() for r in caplog.records if r.name == "kubed.mcp_kb.mcp.skills"
     ]
@@ -315,18 +317,15 @@ def test_an_agent_only_the_layer_finds_is_not_served(tmp_path, monkeypatch, capl
 
 def test_a_v10_index_is_rebuilt(tmp_path):
     """Review Focus 5, A4: a v10 ``index.json``, its agents rows of a path and a
-    name, is ignored; the sources are fetched and the index written at v11."""
+    name, is ignored; the sources are fetched and the index written at v12."""
     tree = agents_tree(tmp_path)
     tree.knowledge_base(tmp_path / "cache")
     index_path = tmp_path / "cache/index.json"
     raw = json.loads(index_path.read_text())
     raw["version"] = 10
-    for record in raw["plugins"].values():
-        # v10's rows: each agent file's path and the name its harvest parsed.
-        record["agents"] = [
-            {"path": row, "name": Path(row).stem} if isinstance(row, str) else row
-            for row in record["agents"]
-        ]
+    # v10's rows: each agent file's path and the name its harvest parsed.
+    row = {"path": "agents/broken.md", "name": "broken"}
+    raw["plugins"] = {"extra@drawio": {"id": "extra@drawio", "agents": [row]}}
     index_path.write_text(json.dumps(raw))
 
     kb = tree.knowledge_base(tmp_path / "cache")
@@ -337,8 +336,8 @@ def test_a_v10_index_is_rebuilt(tmp_path):
         "drawio_diagrammer@extra",
         "drawio_twin",
     ]
-    assert kb._records["extra@drawio"].agents[0] == "agents/broken.md"
-    assert json.loads(index_path.read_text())["version"] == 11
+    assert kb._harvests["extra@drawio"].agents[0] == "agents/broken.md"
+    assert json.loads(index_path.read_text())["version"] == 12
 
 
 def test_a_manifest_plugin_records_its_agent(tmp_path):
@@ -365,7 +364,7 @@ def test_a_listed_agent_has_no_folder_segment(tmp_path):
 
     knowledge_base = KnowledgeBase(config, tmp_path / "cache")
 
-    record = knowledge_base._records["kit"]
+    record = knowledge_base._harvests["kit"]
     assert record.agents == ("agents/db/migrate.md",)
     assert record.agent_paths == ("agents", "agents/db/migrate.md")
     assert sorted(_served(knowledge_base)) == ["kit_migrator"]
@@ -392,7 +391,7 @@ def test_a_symlinked_agent_out_of_the_root_is_not_harvested(tmp_path):
         }
     )
 
-    record = KnowledgeBase(config, tmp_path / "cache")._records["kit"]
+    record = KnowledgeBase(config, tmp_path / "cache")._harvests["kit"]
 
     assert record.agents == ()
 
@@ -435,9 +434,12 @@ def test_one_bad_agent_file_skips_itself_and_not_the_plugin(tmp_path):
     assert status["agents"] == 1
 
 
-def test_an_unreadable_agent_file_is_skipped_without_its_error(tmp_path, monkeypatch):
+def test_an_unreadable_agent_file_is_skipped_without_its_error(
+    tmp_path, monkeypatch, caplog
+):
     """A file kb cannot read for its ``_meta`` key is refused in ``agent_meta``
-    (PLUG-73): skipped with kb's reason, which quotes no errno and no path."""
+    (PLUG-73): skipped with kb's reason, which quotes no errno and no path,
+    and logged once, by kb (D6)."""
     real = Path.read_text
 
     def read_text(self, *args, **kwargs):
@@ -449,9 +451,13 @@ def test_an_unreadable_agent_file_is_skipped_without_its_error(tmp_path, monkeyp
     _write(root, "agents/bad.md", _agent("bad"))
     monkeypatch.setattr(Path, "read_text", read_text)
 
-    knowledge_base = _kit(tmp_path)
+    with caplog.at_level(logging.WARNING):
+        knowledge_base = _kit(tmp_path)
+        assert sorted(_served(knowledge_base)) == ["kit_good"]
 
-    assert sorted(_served(knowledge_base)) == ["kit_good"]
+    reason = "agent_meta failed: kb cannot read agent file agents/bad.md"
+    lines = [r.getMessage() for r in caplog.records if "bad" in r.getMessage()]
+    assert lines == [f"plugin kit skips 'agents/bad.md': {reason}"]
     status = knowledge_base.status["plugins"]["kit"]
     assert status["status"] == "ok"
     assert status["skipped"] == [
@@ -471,7 +477,7 @@ def test_a_listed_agent_that_is_not_there_is_a_note(tmp_path):
     status = knowledge_base.status["plugins"]["kit"]
     assert status["status"] == "ok"
     assert "agents entry 'agents/gone.md' is not in the plugin" in status["notes"]
-    assert knowledge_base._records["kit"].agents == ("agents/good.md",)
+    assert knowledge_base._harvests["kit"].agents == ("agents/good.md",)
 
 
 # -- Task 7: names claimed per library, and the roster in the catalogue --------
@@ -726,6 +732,8 @@ def test_a_prepended_plugin_takes_the_short_name(tmp_path):
 
 
 def test_a_conflicting_plugin_serves_no_agents(tmp_path):
+    """I4: the plugin layer refuses `copy` (LIB-29), so it serves no agent and
+    counts none, where AGT-14's fallback counted the agent file it found."""
     tree = agents_tree(tmp_path)
     # A skill of `copy` sits in its own folder (SKL-59), so what it collides on
     # is a prompt name an earlier plugin of the library already serves.
@@ -747,7 +755,7 @@ def test_a_conflicting_plugin_serves_no_agents(tmp_path):
     assert "copy@drawio" in library["conflicts"]
     assert "drawio_clone" not in _names(knowledge_base, "drawio")
     assert library["agents"] == 4
-    assert knowledge_base.status["plugins"]["copy@drawio"]["agents"] == 1
+    assert knowledge_base.status["plugins"]["copy@drawio"]["agents"] == 0
 
 
 def test_counts(tmp_path):

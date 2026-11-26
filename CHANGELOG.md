@@ -69,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A command, prompt or agent whose folder or file name makes an unusable name (a space, a newline, an `@`) is now skipped and reported in `/health`.
 - A marketplace entry on another repository now serves its edited `skills`, `commands`, `agents` or `path` on the next refresh.
 - A marketplace plugin's version is now its `plugin.json`'s when both declare one, as in Claude Code.
+- `/health` lists the skill folders a plugin cannot serve, and counts no skills, prompts or agents for a plugin that is not served.
 
 ## [0.1.0] - 2026-09-18
 

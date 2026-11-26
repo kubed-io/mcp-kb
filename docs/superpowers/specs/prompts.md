@@ -86,10 +86,10 @@ no help from rule 5.
 **PRM-17.** When rule 7 is reached, an `arguments` list that mixes strings and mappings skips the
 file. An empty `arguments` list counts as absent.
 
-**PRM-18.** The dialect is decided by PRM-14 each time the plugin is read, and nothing but the
-file's path is recorded in the index. A build of that read reads the file in that same dialect, so
-a body rewritten for a build never changes a file's dialect. A configured dialect kb does not know
-skips the file with the reason `unknown dialect '<name>'`.
+**PRM-18.** The dialect is decided by PRM-14 each time the plugin is read. Nothing about a
+prompt is kept on disk, so a boot decides it afresh. A build of that read reads the file in that
+same dialect, so a body rewritten for a build never changes a file's dialect. A configured dialect
+kb does not know skips the file with the reason `unknown dialect '<name>'`.
 
 ## The `mcp-kb` dialect
 

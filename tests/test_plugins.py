@@ -568,7 +568,7 @@ def test_a_root_skills_path_is_the_plugin_root(tmp_path):
 
     assert globs.skills == (".",)
     assert record.status == "ok"
-    assert [row.name for row in record.skills] == ["a"]
+    assert [(s.name, s.path) for s in record.skills] == [("a", root / "a")]
 
 
 @pytest.mark.unit
@@ -588,4 +588,4 @@ def test_a_root_entry_skills_path_builds_without_raising(tmp_path):
 
     assert globs.skills == (".",)
     assert record.status == "ok"
-    assert [row.name for row in record.skills] == ["a"]
+    assert [(s.name, s.path) for s in record.skills] == [("a", tmp_path / "a")]

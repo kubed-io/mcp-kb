@@ -49,6 +49,47 @@ def library_plugins(library: str, nested=tuple(NESTED)) -> dict[str, Globs]:
     }
 
 
+# One plugin row of index.json exactly as v11 wrote it: flatsource's, as a boot
+# over ``make_config`` recorded it. Index v12 holds no plugin rows, and reads a
+# v11 file for its ``fetches`` alone (SRC-37), so nothing here is ever read; it
+# is what a real upgrade finds on disk, and what proves the row is never looked at.
+V11_PLUGIN_ROW = {
+    "id": "flatsource",
+    "fetch": "file:///skills/flatsource",
+    "root": "/skills/flatsource",
+    "status": "ok",
+    "error": None,
+    "built": "2026-11-25T00:00:00Z",
+    "skills": [
+        {
+            "name": "alpha",
+            "description": "First skill.",
+            "path": "/skills/flatsource/alpha",
+        },
+        {
+            "name": "beta",
+            "description": "Second skill.",
+            "path": "/skills/flatsource/beta",
+        },
+    ],
+    "prompts": [],
+    "files": [],
+    "skill_dirs": ["/skills/flatsource/alpha", "/skills/flatsource/beta"],
+    "skipped": [],
+    "agents": [],
+    "agent_paths": [],
+    "globs": {
+        "skills": ["."],
+        "prompts": None,
+        "files": ["**/*"],
+        "commands": [],
+        "agents": [],
+        "command_dirs": [],
+        "command_files": [],
+    },
+    "claude_prompts": [],
+}
+
 # What each synthetic library's plugins declare about themselves. A tag per
 # library, so a tag scope can tell the two apart the way a library scope can.
 PLUGIN_TAGS = {"flatsource": ("flat",), "deepsource": ("deep",)}

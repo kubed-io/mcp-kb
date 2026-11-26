@@ -214,6 +214,8 @@ async def test_a_real_health_response_matches_the_documented_fields(every_status
     assert {info["status"] for info in body["plugins"].values()} == {"ok", "failed"}
     assert body["plugins"]["deepsource"]["skipped"]
     assert body["plugins"]["clash"]["version"] == "1"
+    # I4: `clash` is declared `skills: []`, so the plugin layer never adds it.
+    assert body["plugins"]["clash"]["prompts"] == 0
     assert body["libraries"]["flatsource"]["conflicts"]
     assert body["libraries"]["ghost"]["error"]
     validate("Health", body)
@@ -253,6 +255,31 @@ async def test_a_health_response_with_plugin_notes_validates(tmp_path):
     validate("Health", body)
     documented = build_spec()["components"]["schemas"]["PluginStatus"]["properties"]
     assert set(body["plugins"]["kit"]) <= set(documented)
+
+
+async def test_a_health_response_with_layer_rows_validates(tmp_path):
+    """I3: a skill folder the plugin layer does not load is a `skipped` row,
+    which the healthy body above never carries: a skill of 513 files is the
+    smallest tree that has one."""
+    from tests.test_skipped import BIG_REASON, _big
+
+    root = tmp_path / "kit"
+    _big(root)
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "kit", "source": f"file://{root}"}],
+            "libraries": [{"name": "kit", "plugins": ["kit"]}],
+        }
+    )
+    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
+        body = (await http.get("/health")).json()
+
+    assert body["plugins"]["kit"]["skipped"] == [
+        {"path": "skills/big", "reason": BIG_REASON}
+    ]
+    validate("Health", body)
 
 
 async def test_a_failed_fetch_carries_only_its_status_and_error(every_status):

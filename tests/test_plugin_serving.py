@@ -344,8 +344,14 @@ async def test_kb_names_only_what_kubed_mcp_serves(tmp_path, caplog):
     assert "empty" not in index
     assert "skill://lib/empty/SKILL.md" not in [e["uri"] for e in listing["skills"]]
     assert "SKILL.md" not in hint.value.message
-    lines = [r for r in caplog.records if "lib/empty" in r.getMessage()]
-    assert len(lines) == 1
+    # I3: one line, kb's skipped row; the parity note and the layer's own line,
+    # which quotes the cache path, are not said beside it.
+    lines = [r.getMessage() for r in caplog.records if "skills/empty" in r.getMessage()]
+    assert lines == [
+        "plugin kit@lib skips 'skills/empty': description must contain 1-1024"
+        " characters"
+    ]
+    assert not [r for r in caplog.records if "lib/empty" in r.getMessage()]
 
 
 async def test_the_resource_tools_are_kubed_mcps(tmp_path):
@@ -502,7 +508,8 @@ async def test_a_skill_holding_a_hidden_path_is_not_served(tmp_path, caplog, hid
 
 async def test_a_skill_holding_a_symlink_is_not_served(tmp_path, caplog):
     """N14: FastMCP refuses a skill holding a symlink whole; the parity guard
-    takes it out of kb's catalogue, and says so once."""
+    takes it out of kb's catalogue, and the plugin's ``skipped`` row says so
+    once, with the layer's reason (I3)."""
     root = tmp_path / "lib"
     _write(root, {"elsewhere.md": "linked\n"})
     with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.mcp.skills"):
@@ -523,8 +530,11 @@ async def test_a_skill_holding_a_symlink_is_not_served(tmp_path, caplog):
         index = await _text(client, "skill://lib/_index.md")
         assert "The kit" in await _text(client, "skill://lib/kit/SKILL.md")
     assert "skill://lib/other/" not in index
-    lines = [r.getMessage() for r in caplog.records if r.name == "kubed.mcp_kb.mcp.skills"]
-    assert lines == ["skill lib/other is not served: the plugin layer refused it"]
+    lines = [r.getMessage() for r in caplog.records if "skills/other" in r.getMessage()]
+    assert lines == [
+        "plugin kit@lib skips 'skills/other': skill contains a symlink: ref.md"
+    ]
+    assert not [r for r in caplog.records if r.name == "kubed.mcp_kb.mcp.skills"]
 
 
 async def test_a_skill_kb_did_not_find_is_not_served(tmp_path, caplog, monkeypatch):
@@ -559,7 +569,8 @@ async def test_a_skill_kb_did_not_find_is_not_served(tmp_path, caplog, monkeypat
 async def test_a_misnamed_folder_claimed_first_takes_the_address(tmp_path, caplog):
     """Brief fact 2: ``skills/x`` names itself ``y``, so kb skips it and serves
     the declared ``extra/x``; kubed-mcp's first claim of ``x`` wins and is
-    refused, so neither serves, and kb names neither."""
+    refused, so neither serves, and kb names neither. The plugin lists both,
+    each with its first reason, and logs each once (I3)."""
     root = tmp_path / "kit"
     _write(
         root,
@@ -585,8 +596,20 @@ async def test_a_misnamed_folder_claimed_first_takes_the_address(tmp_path, caplo
         index = await _text(client, "skill://lib/_index.md")
         assert "Fine" in await _text(client, "skill://lib/ok/SKILL.md")
     assert "skill://lib/x/" not in index
-    lines = [r.getMessage() for r in caplog.records if r.name == "kubed.mcp_kb.mcp.skills"]
-    assert lines == ["skill lib/x is not served: the plugin layer refused it"]
+    assert knowledge_base.status["plugins"]["lib"]["skipped"] == [
+        {"path": "skills/x", "reason": "name 'y' differs from its directory 'x'"},
+        {
+            "path": "extra/x",
+            "reason": "skill://lib/x/SKILL.md is already served by skills/x",
+        },
+    ]
+    lines = [r.getMessage() for r in caplog.records if "x'" in r.getMessage()]
+    assert lines == [
+        "plugin lib skips 'skills/x': name 'y' differs from its directory 'x'",
+        "plugin lib skips 'extra/x': skill://lib/x/SKILL.md is already served"
+        " by skills/x",
+    ]
+    assert not [r for r in caplog.records if r.name == "kubed.mcp_kb.mcp.skills"]
 
 
 # -- publishing ----------------------------------------------------------------

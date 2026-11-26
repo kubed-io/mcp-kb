@@ -120,6 +120,7 @@ plugin serves.
 | a skill | its `name` breaks the naming rule in [skills.md](skills.md) |
 | a skill | its `name` differs from its directory's name, unless the skill is the plugin root |
 | a skill | an earlier skill of the plugin has its address |
+| a skill | the plugin layer does not load its folder; the plugin layer's row, with its reason |
 | a library file | its name is `_index.md`, `_index.json` or `_files.md` |
 | a library file | its address is a served skill's, lies inside one, or contains one |
 | a prompt | the name its path builds is not a usable name (PLG-25); the plugin layer's row |
@@ -392,4 +393,5 @@ never connects to, starts or forwards a server.
 **LIB-33.** A declared plugin's own `skills:` folders **add** to `skills/` and to its manifest's
 folders, after them, as an entry's do. `skills: []` serves no skill: the plugin is never added to
 the plugin layer, so none of its agents and none of its prompts is served either, and kb logs that
-once. Its own `prompts:` overrides its manifest and the conventions completely.
+once. `/health` counts it `0` skills, prompts and agents. Its own `prompts:` overrides its manifest
+and the conventions completely.
