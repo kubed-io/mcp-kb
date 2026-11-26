@@ -8,6 +8,7 @@ say, and what the layer exports for parsing an agent.
 
 from pathlib import Path
 
+import pytest
 from fastmcp import Client
 from kubed.mcp import QuickMCP
 from kubed.mcp.agents import META_KEY, parse_agent
@@ -127,3 +128,59 @@ async def test_the_layers_skip_reasons(tmp_path):
         ),
         "agents/colon.md": "agent name 'lib_a:b' is not a usable name",
     }
+
+
+def _agent(folder: Path, rel: str) -> Path:
+    path = folder / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_NAMED.format(name=path.stem, model="x"))
+    return folder
+
+
+async def _text(mcp: QuickMCP, uri: str) -> str:
+    """The first content's text at ``uri``."""
+    return (await mcp.server.read_resource(uri)).contents[0].content
+
+
+def _nested(tmp_path: Path, *, main: bool) -> QuickMCP:
+    """``lib/sub`` serving ``agents/other.md``, and ``lib`` ``agents/helper.md`` if ``main``."""
+    mcp = QuickMCP("mcp-kb")
+    staging = mcp.plugin_set()
+    if main:
+        staging.add(
+            _agent(tmp_path / "main", "agents/helper.md"),
+            namespace="lib",
+            manifest={"name": "m"},
+        )
+    staging.add(
+        _agent(tmp_path / "sub", "agents/other.md"),
+        namespace="lib/sub",
+        manifest={"name": "sub"},
+    )
+    mcp.serve(staging)
+    return mcp
+
+
+async def test_the_agents_namespace_folder_needs_an_agent_of_its_own(tmp_path):
+    """PLUG-68 for ``agents://`` under 0.3.0 (observed, #85 Task 0).
+
+    As for ``prompts://``: ``agents://lib`` is a folder only when ``lib`` itself
+    serves an agent, and then ``agents://lib/sub`` is a row in it.
+    """
+    both = _nested(tmp_path / "a", main=True)
+    index = (await _text(both, "agents://lib/_index.md")).splitlines()
+    assert "agents://lib/helper.md: D." in index
+    assert "agents://lib/sub: A folder of agents in lib/sub" in index
+    assert (
+        await _text(both, "agents://lib/sub/_index.md")
+        == "agents://lib/sub/other.md: D.\n"
+    )
+
+    only = _nested(tmp_path / "b", main=False)
+    with pytest.raises(Exception) as miss:
+        await only.server.read_resource("agents://lib/_index.md")
+    assert type(miss.value).__name__ == "NotFoundError"
+    assert (
+        await _text(only, "agents://lib/sub/_index.md")
+        == "agents://lib/sub/other.md: D.\n"
+    )

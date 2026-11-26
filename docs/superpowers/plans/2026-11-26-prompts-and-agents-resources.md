@@ -12,6 +12,16 @@
 > `prompts://<library>/_index.md` exists only when the library's **main plugin** serves a prompt in
 > the request's scope. When only its other plugins serve one, the folder is not there. D2 says
 > where the pointer goes then, as ruling (a) asked.
+>
+> **Task 0 ran 2026-11-26**, and D2's fallback stands. Against 0.3.0, `prompts://lib/_index.md`
+> and `agents://lib/_index.md` are `NotFoundError` when only `lib/sub` serves that kind. When
+> `lib` serves one too, its index has the row `prompts://lib/sub: A folder of prompts in lib/sub`.
+> In a place collision the manifest's first entry wins. kb lists entries in path order
+> (`harvest.command_entries`), so `commands/prompts/x.md` (`lib_prompts_x`) beats `prompts/x.md`
+> (`lib_x`). The skip lands in `Plugin.skipped` as `prompts://lib/prompts/x.md is already served
+> by commands/prompts/x.md`. Dr K's approval of 01:23 adds a test to Task 1: a refresh that lands
+> between the pin and the instructions. If the snapshot cannot be tied to the pinned build, the
+> instructions read through `_reading()`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -161,7 +171,7 @@ tell Dr K in the PR.
   `serve`, `server.read_resource` (as the files already use them).
 - Produces: the observed facts Task 1 and Task 2 rely on, written in each test's docstring.
 
-- [ ] **Step 1: Write the tests** (they describe 0.3.0 and are expected to pass at once; a failure
+- [x] **Step 1: Write the tests** (they describe 0.3.0 and are expected to pass at once; a failure
   is a finding, not a bug to fix)
 
 `tests/test_command_layer.py`:
@@ -195,12 +205,12 @@ first test above for `agents://`, with `agents/helper.md` at `lib` and `agents/o
 `_text(mcp, uri)` returns the first content's text. Each docstring records what was seen,
 including which of the two colliding names 0.3.0 keeps.
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `pytest tests/test_command_layer.py tests/test_agent_layer.py -v`
 Expected: PASS. On a failure, stop and record the finding (see above).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/test_command_layer.py tests/test_agent_layer.py

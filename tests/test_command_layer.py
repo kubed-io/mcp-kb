@@ -88,3 +88,109 @@ async def test_a_served_commands_prompts_address(tmp_path):
 
     result = await mcp.server.read_resource("prompts://lib/top.md")
     assert [item.content for item in result.contents] == [_FILE]
+
+
+def _write(folder: Path, *rels: str) -> Path:
+    for rel in rels:
+        path = folder / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_FILE)
+    return folder
+
+
+async def _text(mcp: QuickMCP, uri: str) -> str:
+    """The first content's text at ``uri``."""
+    return (await mcp.server.read_resource(uri)).contents[0].content
+
+
+def _nested(tmp_path: Path, *, main: bool) -> QuickMCP:
+    """``lib/sub`` serving ``commands/x.md``, and ``lib`` ``commands/top.md`` if ``main``."""
+    mcp = QuickMCP("mcp-kb")
+    staging = mcp.plugin_set()
+    if main:
+        staging.add(
+            _write(tmp_path / "main", "commands/top.md"),
+            namespace="lib",
+            manifest={"name": "m", "commands": ["./commands"]},
+        )
+    staging.add(
+        _write(tmp_path / "sub", "commands/x.md"),
+        namespace="lib/sub",
+        manifest={"name": "sub", "commands": ["./commands"]},
+    )
+    mcp.serve(staging)
+    return mcp
+
+
+async def test_the_namespace_folder_needs_a_prompt_of_its_own(tmp_path):
+    """PLUG-68 under 0.3.0 (observed, #85 Task 0).
+
+    ``prompts://lib`` is a folder only when the namespace ``lib`` itself serves a
+    prompt; then each served ``lib/<plugin>`` is a row in it, as
+    ``prompts://lib/sub: A folder of prompts in lib/sub``. With only ``lib/sub``
+    serving, ``prompts://lib/_index.md`` is a miss like any absent address, and
+    ``prompts://lib/sub/_index.md`` reads. So INS-19 falls back to each plugin
+    folder (D2).
+    """
+    both = _nested(tmp_path / "a", main=True)
+    index = await _text(both, "prompts://lib/_index.md")
+    assert "prompts://lib/top.md: D." in index.splitlines()
+    assert "prompts://lib/sub: A folder of prompts in lib/sub" in index.splitlines()
+    assert (
+        await _text(both, "prompts://lib/sub/_index.md")
+        == "prompts://lib/sub/x.md: D.\n"
+    )
+
+    only = _nested(tmp_path / "b", main=False)
+    with pytest.raises(Exception) as miss:
+        await only.server.read_resource("prompts://lib/_index.md")
+    assert type(miss.value).__name__ == "NotFoundError"
+    assert (
+        await _text(only, "prompts://lib/sub/_index.md")
+        == "prompts://lib/sub/x.md: D.\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("commands", "kept", "skipped", "first"),
+    [
+        (
+            ["./commands", "./prompts/x.md"],
+            "lib_prompts_x",
+            "prompts/x.md",
+            "commands/prompts/x.md",
+        ),
+        (
+            ["./prompts/x.md", "./commands"],
+            "lib_x",
+            "commands/prompts/x.md",
+            "prompts/x.md",
+        ),
+    ],
+)
+async def test_two_commands_at_one_place(tmp_path, commands, kept, skipped, first):
+    """The ``prompts://`` place collision under 0.3.0 (observed, #85 Task 0; D4).
+
+    ``commands/prompts/x.md`` (by the ``./commands`` entry) and ``prompts/x.md`` (by
+    its own) are both ``prompts://lib/prompts/x.md``. The file the manifest lists
+    first keeps the address and its prompt; the other is skipped whole, its prompt
+    included, and the plugin's ``skipped`` says why. kb hands the layer its entries
+    at their first file in path order (``harvest.command_entries``), so under kb the
+    earlier path wins: ``commands/prompts/x.md``, ``lib_prompts_x``.
+    """
+    mcp = QuickMCP("mcp-kb")
+    staging = mcp.plugin_set()
+    staging.add(
+        _write(tmp_path / "p", "commands/prompts/x.md", "prompts/x.md"),
+        namespace="lib",
+        manifest={"name": "p", "commands": commands},
+    )
+    mcp.serve(staging)
+
+    assert [prompt.name for prompt in await mcp.server.list_prompts()] == [kept]
+    index = await _text(mcp, "prompts://lib/prompts/_index.md")
+    assert index == "prompts://lib/prompts/x.md: D.\n"
+    (plugin,) = mcp.plugins
+    assert dict(plugin.skipped) == {
+        skipped: f"prompts://lib/prompts/x.md is already served by {first}"
+    }
