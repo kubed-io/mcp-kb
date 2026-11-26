@@ -140,11 +140,15 @@ class Index:
 def config_hash(config: Config) -> str:
     """A stable fingerprint of the config, independent of key order.
 
-    The telemetry section is left out (SRC-36): it says what the process reports,
-    not what it serves, so changing it must not discard a warm index.
+    It reads the three lists alone (SRC-36): ``serving``, ``cache_dir``,
+    ``telemetry`` and ``delivery`` say how the process runs and reports, not
+    what it serves, so changing one must not discard a warm index. The bytes
+    are the ones the root alone dumped before it was composed, so an index
+    written then is still this config's.
     """
     payload = json.dumps(
-        config.model_dump(mode="json", exclude={"telemetry"}), sort_keys=True
+        config.model_dump(mode="json", include={"sources", "plugins", "libraries"}),
+        sort_keys=True,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

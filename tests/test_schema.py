@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from kubed.mcp_kb.config import schema
-from kubed.mcp_kb.main import build_parser, main
+from kubed.mcp_kb.main import main, split_command
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,25 +23,13 @@ def test_the_schema_subcommand_prints_the_model(capsys):
     assert json.loads(capsys.readouterr().out) == schema()
 
 
-def test_serve_is_the_default_command():
-    assert build_parser().parse_args([]).command == "serve"
-
-
 def test_serve_with_a_missing_config_exits_2_with_a_message_on_stderr(capsys):
     """A bad config must fail loudly at boot, not silently serve nothing."""
     with pytest.raises(SystemExit) as raised:
-        main(["serve", "--config", "/nope"])
+        main(["serve", "--config-file", "/nope"])
     assert raised.value.code == 2
     err = capsys.readouterr().err
     assert "mcp-kb:" in err and "/nope" in err
-
-
-def test_log_level_comes_from_the_environment_and_a_flag_beats_it(monkeypatch):
-    monkeypatch.setenv("LOG_LEVEL", "debug")
-    assert build_parser().parse_args([]).log_level == "DEBUG"
-    assert build_parser().parse_args(["--log-level", "error"]).log_level == "ERROR"
-    monkeypatch.delenv("LOG_LEVEL")
-    assert build_parser().parse_args([]).log_level == "INFO"
 
 
 def test_one_level_and_one_handler_reach_fastmcp_and_uvicorn_too():
@@ -110,7 +98,54 @@ def test_a_typod_telemetry_key_exits_2(tmp_path, capsys):
     path = tmp_path / "config.yaml"
     path.write_text("telemetry:\n  profile: http://pyroscope.example.com:4040\n")
     with pytest.raises(SystemExit) as raised:
-        main(["serve", "--config", str(path)])
+        main(["serve", "--config-file", str(path)])
     assert raised.value.code == 2
     err = capsys.readouterr().err
     assert "mcp-kb:" in err and "profile" in err
+
+
+def test_split_command():
+    assert split_command([]) == ("serve", [])
+    assert split_command(["schema"]) == ("schema", [])
+    assert split_command(["serve", "--port", "9000"]) == ("serve", ["--port", "9000"])
+    assert split_command(["--port", "9000"]) == ("serve", ["--port", "9000"])
+
+
+def test_schema_reads_no_config(monkeypatch, capsys):
+    monkeypatch.setenv("CONFIG_FILE", "/nope")
+    main(["schema", "--port", "not-a-port"])
+    assert json.loads(capsys.readouterr().out) == schema()
+
+
+def test_help_names_every_item_and_exits_0(capsys):
+    main(["--help"])
+    out = capsys.readouterr().out
+    assert out.startswith("usage: mcp-kb")
+    for flag, env in [
+        ("--config-file", "CONFIG_FILE"),
+        ("--sources", "KB_SOURCES"),
+        ("--cache-dir", "CACHE_DIR"),
+        ("--port", "PORT"),
+        ("--telemetry-profiles", "TELEMETRY_PROFILES"),
+        ("--delivery-via", "DELIVERY_VIA"),
+    ]:
+        assert flag in out and env in out
+
+
+def test_an_unknown_flag_or_a_positional_exits_2(monkeypatch, capsys):
+    monkeypatch.delenv("CONFIG", raising=False)
+    for argv in (["serve", "--config", "x.yaml"], ["serve", "extra"]):
+        with pytest.raises(SystemExit) as raised:
+            main(argv)
+        assert raised.value.code == 2
+        assert "mcp-kb: the config did not load" in capsys.readouterr().err
+
+
+def test_a_leftover_config_variable_exits_2(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "config.yaml"
+    path.write_text("")
+    monkeypatch.setenv("CONFIG", str(path))
+    with pytest.raises(SystemExit) as raised:
+        main(["serve", "--config-file", str(path)])
+    assert raised.value.code == 2
+    assert "CONFIG is no longer read" in capsys.readouterr().err

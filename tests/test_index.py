@@ -8,6 +8,7 @@ from dataclasses import asdict, fields
 from pathlib import Path
 
 import pytest
+from kubed.mcp import load_config
 
 from kubed.mcp_kb.catalogue.index import (
     INDEX_VERSION,
@@ -17,13 +18,17 @@ from kubed.mcp_kb.catalogue.index import (
     config_hash,
     now,
 )
-from kubed.mcp_kb.config import load_config
+from kubed.mcp_kb.config import SECTIONS, load
 from kubed.mcp_kb.sources import SourceLoader
 from tests.conftest import V11_PLUGIN_ROW, key_of, make_config
 
 FETCH = "file:///skills/flatsource"
 # A fetch record's fields, in the order v11 wrote them and v12 still does.
 FIELDS = ["key", "status", "root", "fingerprint", "built", "error"]
+
+
+def _load_file(path: Path):
+    return load(["--config-file", str(path)], environ={}).config
 
 
 def _fetch_record(**overrides):
@@ -270,8 +275,8 @@ def test_config_hash_ignores_key_order_and_changes_with_content(tmp_path):
         "libraries:\n- plugins: [lib]\n  name: lib\n"
         "plugins:\n- tags: [x, y]\n  source: file:///skills/lib\n  name: lib\n"
     )
-    a = load_config(forward)
-    b = load_config(reordered)
+    a = _load_file(forward)
+    b = _load_file(reordered)
     assert config_hash(a) == config_hash(b)
 
     changed = tmp_path / "changed.yaml"
@@ -279,7 +284,7 @@ def test_config_hash_ignores_key_order_and_changes_with_content(tmp_path):
         "plugins:\n- name: lib\n  source: file:///skills/lib\n  tags: [x, y, z]\n"
         "libraries:\n- name: lib\n  plugins: [lib]\n"
     )
-    c = load_config(changed)
+    c = _load_file(changed)
     assert config_hash(a) != config_hash(c)
 
 
@@ -290,5 +295,25 @@ def test_config_hash_leaves_the_telemetry_section_out(tmp_path):
     watched = tmp_path / "watched.yaml"
     watched.write_text("telemetry:\n  profiles: http://pyroscope.example.com:4040\n")
     before = json.dumps({"libraries": [], "plugins": [], "sources": []}, sort_keys=True)
-    assert config_hash(load_config(empty)) == hashlib.sha256(before.encode()).hexdigest()
-    assert config_hash(load_config(watched)) == config_hash(load_config(empty))
+    assert config_hash(_load_file(empty)) == hashlib.sha256(before.encode()).hexdigest()
+    assert config_hash(_load_file(watched)) == config_hash(_load_file(empty))
+
+
+@pytest.mark.unit
+def test_config_hash_reads_the_three_lists_alone(skills_dir):
+    empty = load([], environ={}).config
+    before = json.dumps({"libraries": [], "plugins": [], "sources": []}, sort_keys=True)
+    assert config_hash(empty) == hashlib.sha256(before.encode()).hexdigest()
+    busy = load(
+        [],
+        environ={
+            "PORT": "9001",
+            "CACHE_DIR": "/tmp/elsewhere",
+            "TELEMETRY_PROFILE_CPU": "false",
+            "DELIVERY_VIA": "local",
+        },
+    ).config
+    assert config_hash(busy) == config_hash(empty)
+    root = make_config(skills_dir)
+    composed = load_config(sections=SECTIONS, config=root).config
+    assert config_hash(composed) == config_hash(root)

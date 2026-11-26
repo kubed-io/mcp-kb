@@ -101,6 +101,7 @@ async def test_a_declined_or_cancelled_answer_is_the_refusal_it_started_as(
     caplog.clear()
     with caplog.at_level(logging.INFO):
         async with Client(server_of(server), elicitation_handler=handler) as client:
+            caplog.clear()  # serving start logs the boot line (0.4.0); not a call
             with pytest.raises(MCPError) as caught:
                 await client.get_prompt("kit_debug", {})
     assert caught.value.error.code == INVALID_PARAMS

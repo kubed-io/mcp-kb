@@ -195,6 +195,7 @@ async def test_a_missing_required_argument_is_refused(skills_dir, prompts_dir, c
     caplog.clear()
     with caplog.at_level(logging.INFO):
         async with Client(server_of(server)) as client:
+            caplog.clear()  # serving start logs the boot line (0.4.0); not a call
             with pytest.raises(MCPError) as caught:
                 await client.get_prompt("flatsource_hello", {})
     assert caught.value.error.code == INVALID_PARAMS

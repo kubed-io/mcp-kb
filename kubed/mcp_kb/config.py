@@ -1,13 +1,37 @@
-"""The config file: sources, plugins and libraries, validated before anything is read.
+"""The config: sources, plugins and libraries, validated before anything is read.
 
-The file says *what* to serve. Environment variables and flags say *how* to
-run (transport, port, cache directory) and never overlap with it. A typo'd key
-is an error rather than silently ignored, because a config that serves nothing
-is the worst failure a config file has. The models are also the published
-schema: ``config.schema.json`` is ``Config.model_json_schema()`` and a test
-fails when the two drift.
+One composed config, loaded once by kubed-mcp's ``load_config``. Its root is
+this module's ``Config``; its sections are kubed-mcp's ``serving``,
+``telemetry`` and ``delivery``, the first two as ``Serving`` and ``Telemetry``
+with kb's defaults and kb's guard. Every item is set from the YAML file named
+by ``CONFIG_FILE`` or ``--config-file``, from its environment variable or with
+its flag; a flag beats the variable, which beats the file, which beats the
+default. A typo'd key is an error rather than silently ignored, because a
+config that serves nothing is the worst failure a config file has. The
+composition is also the published schema: ``config.schema.json`` is
+``schema()`` and a test fails when the two drift.
 
-Three lists and a section, each answering one question:
+=====================  ================  =================  =====================
+Item                   Env               Flag               Default
+=====================  ================  =================  =====================
+the file               ``CONFIG_FILE``   ``--config-file``  none
+``sources``            ``KB_SOURCES``    ``--sources``      ``[]``
+``plugins``            ``KB_PLUGINS``    ``--plugins``      ``[]``
+``libraries``          ``KB_LIBRARIES``  ``--libraries``    ``[]``
+``cache_dir``          ``CACHE_DIR``     ``--cache-dir``    ``/var/cache/mcp-kb``
+``serving.transport``  ``TRANSPORT``     ``--transport``    ``http``
+``serving.host``       ``HOST``          ``--host``         ``0.0.0.0``
+``serving.port``       ``PORT``          ``--port``         ``8000``
+``serving.log_level``  ``LOG_LEVEL``     ``--log-level``    ``INFO``
+``telemetry.*``        ``TELEMETRY_*``   ``--telemetry-*``  kubed-mcp's
+``delivery.*``         ``DELIVERY_*``    ``--delivery-*``   none
+=====================  ================  =================  =====================
+
+A list read from an env var or a flag is JSON, and replaces the file's list
+whole. The image names its file with ``CONFIG_FILE=/etc/mcp-kb/config.yaml``;
+outside it, no file is read unless one is named.
+
+Three lists and two sections of kb's own, each answering one question:
 
 - a **source** is a backend, named once: where bytes come from and how to log
   in. A plugin never carries a credential, so a token is declared in exactly
@@ -19,9 +43,11 @@ Three lists and a section, each answering one question:
   the same kind of thing.
 - a **library** is a saved query over plugins, and the first segment of every
   URI served: a marketplace, a list of plugin names, or a ``pluginSelector``.
-- the **telemetry** section is kubed-mcp's ``TelemetrySettings``, as it is: what
-  the process reports, never what it serves. A setting for it is added
-  upstream, never here.
+- the **serving** section is kubed-mcp's ``ServingSettings`` with kb's
+  defaults: ``http`` on ``0.0.0.0``, and ``stdio`` or ``http`` alone.
+- the **telemetry** section is kubed-mcp's ``TelemetrySettings`` with one guard
+  of kb's: what the process reports, never what it serves. A setting for it is
+  added upstream, never here.
 
 The shape of a source follows PEP 610's direct-URL data structure: a URL and a
 credential that is a *reference* (``{env: NAME}``) rather than a value, so the
@@ -35,18 +61,25 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 
-import yaml
-from kubed.mcp import TelemetrySettings
+from kubed.mcp import Field as Item
+from kubed.mcp import (
+    LoadedConfig,
+    ServingSettings,
+    TelemetrySettings,
+    config,
+    config_schema,
+    load_config,
+)
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     SecretStr,
-    ValidationError,
     field_validator,
     model_validator,
 )
@@ -107,7 +140,7 @@ CREDENTIAL_REFUSAL = "telemetry.profiles must not embed a credential"
 
 
 class ConfigError(ValueError):
-    """The config file is unreadable or invalid."""
+    """The config did not load: a file that cannot be read, or an invalid item."""
 
 
 class Strict(BaseModel):
@@ -403,39 +436,35 @@ class LibraryConfig(Strict):
         return self
 
 
+@config()
 class Config(Strict):
-    """The whole config file: the sources, the plugins under them, the libraries,
-    and the process's telemetry."""
+    """The config's root: the sources, the plugins under them, the libraries,
+    and where a fetched source is kept."""
 
-    sources: list[SourceConfig] = Field(default_factory=list)
-    plugins: list[PluginConfig] = Field(default_factory=list)
-    libraries: list[LibraryConfig] = Field(default_factory=list)
-    telemetry: TelemetrySettings = Field(
-        default_factory=TelemetrySettings,
-        description=(
-            "What the process reports: kubed-mcp's profiles, traces and metrics. "
-            "Absent, every signal is off."
-        ),
+    sources: list[SourceConfig] = Item(
+        default_factory=list,
+        doc="Backends, named once: where bytes come from and how to log in.",
+        env="KB_SOURCES",
+        arg="--sources",
     )
-
-    @model_validator(mode="after")
-    def _telemetry_carries_no_credential(self) -> Config:
-        """The profiles address is published, so it may not carry a login.
-
-        The message does not quote the address back: it is the credential. One
-        urlsplit cannot parse (an unclosed or misplaced bracket) is refused the
-        same way when it holds an ``@``, or its error would quote it instead.
-        """
-        profiles = self.telemetry.profiles or ""
-        try:
-            parts = urlsplit(profiles)
-        except ValueError:
-            if "@" in profiles:
-                raise ValueError(CREDENTIAL_REFUSAL) from None
-            raise
-        if parts.username or parts.password:
-            raise ValueError(CREDENTIAL_REFUSAL)
-        return self
+    plugins: list[PluginConfig] = Item(
+        default_factory=list,
+        doc="Folders of skills, agents and prompts under a source.",
+        env="KB_PLUGINS",
+        arg="--plugins",
+    )
+    libraries: list[LibraryConfig] = Item(
+        default_factory=list,
+        doc="Saved queries over plugins: the first segment of every address served.",
+        env="KB_LIBRARIES",
+        arg="--libraries",
+    )
+    cache_dir: Path = Item(
+        Path("/var/cache/mcp-kb"),
+        doc="Where a non-file:// source materialises, and where index.json lives.",
+        env="CACHE_DIR",
+        arg="--cache-dir",
+    )
 
     @model_validator(mode="after")
     def _names_are_unique(self) -> Config:
@@ -565,23 +594,82 @@ def _groups(items: list[str]) -> frozenset[frozenset[str]]:
     return parse_groups(items)
 
 
-def load_config(path: Path) -> Config:
+@config("serving")
+class Serving(ServingSettings):
+    """How kb serves: kubed-mcp's ``serving`` section, with kb's defaults.
+
+    kb serves ``http`` on every address by default, as a container does, and
+    serves ``stdio`` or ``http`` alone: ``sse`` and ``streamable-http`` are a
+    config error. ``port`` and ``log_level`` are kubed-mcp's as they are.
+    """
+
+    transport: Literal["stdio", "http"] = Item(
+        "http",
+        doc="The transport kb serves on: http or stdio.",
+        env="TRANSPORT",
+        arg="--transport",
+    )
+    host: str = Item(
+        "0.0.0.0",
+        doc="The address the http transport binds.",
+        env="HOST",
+        arg="--host",
+    )
+
+
+@config("telemetry")
+class Telemetry(TelemetrySettings):
+    """What the process reports: kubed-mcp's ``telemetry`` section, profiles,
+    traces and metrics, with kb's one guard on the profiles address. Absent,
+    every signal is off."""
+
+    @field_validator("profiles")
+    @classmethod
+    def _profiles_carry_no_credential(
+        cls, profiles: SecretStr | None
+    ) -> SecretStr | None:
+        """The profiles address is published, so it may not carry a login.
+
+        The message does not quote the address back: it is the credential. One
+        urlsplit cannot parse (an unclosed or misplaced bracket) is refused the
+        same way when it holds an ``@``, or its error would quote it instead.
+        """
+        address = "" if profiles is None else profiles.get_secret_value()
+        try:
+            parts = urlsplit(address)
+        except ValueError:
+            if "@" in address:
+                raise ValueError(CREDENTIAL_REFUSAL) from None
+            raise
+        if parts.username or parts.password:
+            raise ValueError(CREDENTIAL_REFUSAL)
+        return profiles
+
+
+SECTIONS: tuple[type[BaseModel], ...] = (Config, Serving, Telemetry)
+"""kb's sections, composed after kubed-mcp's built-ins: the root, then the two
+built-ins kb changes. ``delivery`` is kubed-mcp's as it is."""
+
+
+def load(
+    argv: Sequence[str], environ: Mapping[str, str] | None = None
+) -> LoadedConfig:
+    """The config, loaded once from the file, ``environ`` and ``argv``.
+
+    ``environ`` is ``os.environ`` when None. kubed-mcp's error names each item
+    and where its value came from, and never the value; ``scrub`` is a belt for
+    a message of kb's own that quotes an address.
+
+    Raises:
+        ConfigError: the config did not load.
+    """
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        return Config.model_validate(raw)
-    except OSError as exc:
-        raise ConfigError(f"cannot read {path}: {exc}") from exc
-    except yaml.YAMLError as exc:
-        raise ConfigError(f"{path} is not YAML: {exc}") from exc
-    except ValidationError as exc:
-        if any(CREDENTIAL_REFUSAL in e["msg"] for e in exc.errors()):
-            # That validator runs on the whole Config, so pydantic echoes the whole
-            # input, truncated, and the cut can drop the "://" the mask keys on.
-            # Hiding inputs on Config would also hide the nested ones the other
-            # refusals quote, so only this one is reported without its input.
-            raise ConfigError(f"{path}: {CREDENTIAL_REFUSAL}") from None
-        raise ConfigError(f"{path}: {USERINFO.sub('***@', str(exc))}") from exc
+        return load_config(sections=SECTIONS, argv=list(argv), environ=environ)
+    except ValueError as exc:
+        message = scrub(str(exc))
+    raise ConfigError(message)
 
 
 def schema() -> dict:
-    return Config.model_json_schema()
+    """The composed config's JSON Schema, with each item's env var and flag."""
+    return config_schema(*SECTIONS)

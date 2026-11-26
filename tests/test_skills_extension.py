@@ -131,6 +131,19 @@ async def test_direct_get_needs_no_listing_and_follows_refresh(skills_dir):
         assert before["resources"] != after["resources"]
 
 
+async def test_skills_get_resolves_a_dot_segment_once(skills_dir):
+    """kubed-mcp resolves ``.`` and ``..`` before kb's ``uris.parse`` resolves
+    them again (0.4.1): the second pass is a no-op, so a dotted address gets
+    the plain one's entry."""
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    async with Client(server_of(server)) as client:
+        plain = await request(client, "skills/get", uri=ALPHA)
+        dotted = await request(
+            client, "skills/get", uri="skill://flatsource/./alpha/SKILL.md"
+        )
+        assert dotted["skill"] == plain["skill"]
+
+
 async def test_an_unknown_skill_is_fastmcps_error(skills_dir):
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
     async with Client(server_of(server)) as client:
@@ -513,20 +526,20 @@ def test_a_scope_whose_only_skills_are_refused_names_nothing(tmp_path):
 async def test_dot_segments_resolve_for_reads_and_escaped_slashes_for_nothing(
     skills_dir,
 ):
-    """SKL-13: ".." resolves for every resources/read; a skill's directories match as
-    sent (G1); an escaped "/" names nothing anywhere."""
+    """SKL-13: ".." resolves for every resources/read, and for a skill's
+    directories too since kubed-mcp 0.4.1; an escaped "/" names nothing
+    anywhere."""
     (skills_dir / "flatsource" / "alpha" / "references").mkdir()
     (skills_dir / "flatsource" / "alpha" / "references" / "a.md").write_text("# A\n")
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
     root = "skill://flatsource/alpha"
     async with Client(server_of(server)) as client:
-        with pytest.raises(MCPError, match="Directory not found"):  # G1
-            await request(
-                client, "resources/directory/read", uri=f"{root}/references/.."
-            )
-        assert (await request(client, "resources/directory/read", uri=root))[
-            "resources"
-        ]
+        listed = await request(client, "resources/directory/read", uri=root)
+        assert listed["resources"]
+        dotted = await request(
+            client, "resources/directory/read", uri=f"{root}/references/.."
+        )
+        assert dotted["resources"] == listed["resources"]
         sibling = f"{root}/references/../../beta/SKILL.md"
         assert (await client.read_resource(sibling))[0].text
         for escaped in ("skill://flatsource%2Falpha/SKILL.md", f"{root}%2fSKILL.md"):

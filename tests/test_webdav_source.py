@@ -595,7 +595,7 @@ def test_main_exits_naming_the_source_whose_credentials_were_refused(
     )
 
     with pytest.raises(SystemExit) as raised:
-        main(["serve", "--config", str(config), "--cache-dir", str(tmp_path / "c")])
+        main(["serve", "--config-file", str(config), "--cache-dir", str(tmp_path / "c")])
 
     assert raised.value.code == 3
     err = capsys.readouterr().err

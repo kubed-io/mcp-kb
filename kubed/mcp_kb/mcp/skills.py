@@ -64,8 +64,9 @@ the swap in ``KnowledgeBase`` must already see the generation it is a build of.
 One window is left. kb swaps its state before ``serve()`` and kubed-mcp swaps
 its own inside it, so a request that reads kubed-mcp's state before kubed-mcp
 swaps it and kb's after kb swaps it pins N and N+1, and builds N against N+1.
-That includes a publish on a worker thread that makes both swaps between
-kubed-mcp pinning its state and the view reading kb's. If that
+The other way round is a publish on a worker thread that makes both swaps
+between the view reading kb's state and kubed-mcp taking its own, which it does
+after the view (0.4.2), and builds N+1 against N. If that
 ``serve()`` then raises, kubed-mcp keeps the build until the next publish that
 serves. Either order of the swaps leaves such a window. Closing it needs
 kubed-mcp to hand the pinned generation to the view and on ``Site``.
@@ -75,8 +76,9 @@ prompt files held on disk is stamped as it enters the set. The view revalidates 
 live plugins its request's scope admits and stamps them again; a plugin whose
 stamp moved is added again, every other one is kept as served, and the set is
 served and kb's catalogue narrowed afresh, under the generation it already had.
-kubed-mcp pins a request's state before it calls the view, so the request that
-re-adds still reads the copy it pinned and the next one reads the edit (N6).
+The view re-reads before it pins kb's state, and kubed-mcp takes its own state
+after the view (0.4.2), so the request whose view re-reads a moved plugin reads
+the re-read, its pin for the rewriter included (SKL-37, N6).
 """
 
 from __future__ import annotations
@@ -1116,13 +1118,14 @@ class SkillServing:
         """The plugins the request's scope admits, which is also the build key.
 
         The live ones among them are revalidated first, and re-read when they
-        moved (D9). The request builds against the state taken before that
-        re-read, and pins it for the rewriter; the next request reads the
-        re-read (N6).
+        moved (D9). The published state is read after that re-read and pinned
+        for the rewriter, and kubed-mcp takes its own state after the view
+        (0.4.2), so the request that re-reads builds the re-read and serves the
+        edit (SKL-37, N6).
         """
         scope = requested_scope()
-        published = self._published
         self._reread_live(scope)
+        published = self._published
         table = published.table
         admitted = frozenset(key for key, row in table.items() if row.admitted(scope))
         key = admitted or EMPTY
@@ -1140,8 +1143,9 @@ class SkillServing:
         Under the serving lock, taken without blocking: a publish holding it
         serves a new set anyway, so this request reads what is served. Never
         takes the knowledge base's lock, which a refresh holds while it waits
-        for this one. kubed-mcp has pinned the request's state already, so the
-        edit reads from the next request on (N6).
+        for this one. It runs before the view pins kb's state and before
+        kubed-mcp takes its own (0.4.2), so the request that re-reads serves the
+        edit (SKL-37, N6).
         """
         if not self._published.live:
             return
@@ -1348,7 +1352,7 @@ class SkillServing:
                 # kb cannot say what this agent is, so the set skips it (PLUG-73).
                 raise ValueError(f"kb cannot read agent file {path}")
         else:
-            # Added: what the file says now, which a live re-read is for (N6).
+            # Added: what the file says now, which a live re-read is for (SKL-37).
             # A file kb cannot read raises, so the set skips it (PLUG-73).
             read = _frontmatter(Path(plugin.root), path)
             self._reads.setdefault(key, {})[path] = read
