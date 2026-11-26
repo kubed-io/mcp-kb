@@ -851,6 +851,7 @@ VIA_INPUTS = [
     ({"X-MCP-Via": "extension"}, "", "extension"),
     ({}, "?via=local", "local"),
     ({"Kb-Via": "extension", "X-MCP-Via": "local"}, "", "extension"),  # Kb- first (DLV-16)
+    ({"Kb-Via": "EXTENSION"}, "", "extension"),  # case-insensitive (SCP-3)
     ({"Kb-Via": "nonsense"}, "", "mcp"),
     ({}, "", "mcp"),
 ]
@@ -883,6 +884,80 @@ async def test_via_presets_list_no_plugin_prompts(tmp_path, via):
         async with _via_client(url, "default") as client:
             names = sorted(p.name for p in await client.list_prompts())
     assert names == ["lib_hello", "lib_top"]
+
+
+def _skill_rows(resources):
+    return sorted(str(r.uri) for r in resources if str(r.uri).endswith("/SKILL.md"))
+
+
+SKILL_ROWS = [
+    "skill://lib/a/sa/SKILL.md",
+    "skill://lib/b/sb/SKILL.md",
+    "skill://lib/m/SKILL.md",
+]
+
+
+@pytest.mark.integration
+async def test_via_presets_list_no_skill_rows(tmp_path):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    rows = {}
+    with served(kb) as url:
+        for via in ("mcp", "extension", "local"):
+            async with _via_client(url, "default", {"Kb-Via": via}) as client:
+                rows[via] = _skill_rows(await client.list_resources())
+    assert rows == {"mcp": SKILL_ROWS, "extension": [], "local": []}
+
+
+LISTED_OVER_VIA = [
+    ({"Kb-Via": "extension", "Kb-Listed": "skills"}, "", SKILL_ROWS),
+    ({"Kb-Via": "local", "Kb-Listed": "skills"}, "", SKILL_ROWS),
+    ({"Kb-Listed": "skills"}, "?via=extension", SKILL_ROWS),  # an earlier level
+    ({"Kb-Via": "extension", "X-MCP-Listed": "skills"}, "", []),  # a later one
+    ({"Kb-Via": "local"}, "?listed=skills", []),
+]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("headers", "query", "rows"), LISTED_OVER_VIA)
+async def test_a_listed_at_vias_level_or_before_overrides_the_preset(
+    tmp_path, headers, query, rows
+):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    with served(kb) as url:
+        async with _via_client(url + query, "default", headers) as client:
+            assert _skill_rows(await client.list_resources()) == rows
+
+
+@pytest.mark.integration
+async def test_local_unlists_skills_and_agents_and_extension_does_not(tmp_path):
+    from tests.test_skills_extension import request
+
+    cases = {
+        "mcp": {"Kb-Via": "mcp"},
+        "extension": {"Kb-Via": "extension"},
+        "local": {"Kb-Via": "local"},
+        "local, listed": {"Kb-Via": "local", "Kb-Listed": "skills,agents"},
+    }
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    listed = {}
+    with served(kb) as url:
+        for case, headers in cases.items():
+            async with _via_client(url, "default", headers) as client:
+                skills = await request(client, "skills/list")
+                agents = await request(client, "agents/list")
+                skill = await request(client, "skills/get", uri=SKILL_ROWS[0])
+                agent = await request(client, "agents/get", name="lib_helper")
+            listed[case] = (
+                sorted(s["uri"] for s in skills["skills"]),
+                [a["name"] for a in agents["agents"]],
+                skill["skill"]["uri"],
+                agent["agent"],
+            )
+    found = (SKILL_ROWS[0], "lib_helper")
+    assert listed["mcp"] == (SKILL_ROWS, ["lib_helper"], *found)
+    assert listed["extension"] == listed["mcp"]
+    assert listed["local"] == ([], [], *found)
+    assert listed["local, listed"] == listed["local"]
 
 
 # -- the three shapes (INS-20 to INS-22) --------------------------------------
@@ -1045,7 +1120,7 @@ async def test_extension_text_carries_the_prefix_once(tmp_path, mode):
 async def test_local_with_nothing_to_say_is_empty(tmp_path, mode):
     kb = KnowledgeBase(make_config(), tmp_path / "cache")
     with served(kb) as url:
-        assert not await told(url, mode, {"Kb-Via": "local"})
+        assert await told(url, mode, {"Kb-Via": "local"}) == ""
 
 
 @pytest.mark.integration

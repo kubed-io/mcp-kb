@@ -101,10 +101,14 @@ percent-escapes are never decoded. A URI that does not start with `skill://` res
 ## The listing
 
 **SKL-14.** `resources/list` holds what the plugin layer lists for the request's `Listed` setting
-(`Kb-Listed`, `X-MCP-Listed` or `?listed=`, DLV-8). By default that is one row per served skill in
-scope: the URI `skill://<namespace>/<skill>/SKILL.md`, the name `<namespace>/<skill>/SKILL.md`, the
-skill's own `description` and the `mimeType` `text/markdown`. `prompts` lists the prompt files and
-`agents` the agent files instead, and `none` lists none. Then, under every setting, one row per
+(`Kb-Listed`, `X-MCP-Listed` or `?listed=`, DLV-8). By default under Via `mcp` that is one row per
+served skill in scope: the URI `skill://<namespace>/<skill>/SKILL.md`, the name
+`<namespace>/<skill>/SKILL.md`, the skill's own `description` and the `mimeType` `text/markdown`.
+Under Via `extension` and `local` the default lists none (DLV-9). A `Listed` setting read from the
+level Via was read from, or an earlier one (the `Kb-` header, then `X-MCP-`, then the query),
+replaces the default under every Via; one from a later level is ignored (DLV-9). `skills` lists the
+skills, `prompts` the prompt files and `agents` the agent files, and `none` lists none. Then, under
+every setting, one row per
 library with a library file in scope, in library name order: `skill://<library>/_files.md`, with the
 description `Files the <library> library ships outside any skill, which its skills reference.` No
 `_index.md` is listed, and each one still reads (SKL-17).
@@ -391,10 +395,14 @@ file a read of the skill serves (SKL-21), `SKILL.md` included, by URI.
 under the same request headers, and equal the skill's `_manifest` (SKL-24). An entry is offered
 only when every file it names reads as listed (F59).
 
-**SKL-48.** `skills/list` returns every in-scope skill's entry, by URI, as
+**SKL-48.** `skills/list` returns every in-scope skill's entry, except under SKL-62, by URI, as
 `{"resultType": "complete", "ttlMs": 0, "cacheScope": "private", "skills": [...]}`. It pages by the
 server's page size, and kb sets none, so one page holds every entry and a `cursor` the server never
 issued is ignored.
+
+**SKL-62.** Under Via `local`, `skills/list` lists no skill, and `skills/get` still serves each one
+in scope (DLV-9, DLV-10). Under `mcp` and `extension` it lists them all. `Listed` does not change
+it. kb adds no filter of its own.
 
 **SKL-49.** `skills/get` takes `uri`, which MUST be exactly a skill's `SKILL.md` address (after
 SKL-42), and returns the same envelope with `skill`. Anything else, and an out-of-scope skill, fail

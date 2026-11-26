@@ -198,18 +198,19 @@ library with only prompts or library files in scope is not selected.
 ### A library's section
 
 **INS-8.** A section is, in order: the library's resolved description, its `notes`, and a
-pointer line. The description and the notes are each left out when empty. What the resolved
-description is: [plugins-and-libraries.md](plugins-and-libraries.md).
+pointer line. The description and the notes are each left out when empty. Under Via `local` there
+is no pointer line (INS-20). What the resolved description is:
+[plugins-and-libraries.md](plugins-and-libraries.md).
 
 **INS-9.** Blank lines and trailing whitespace are removed from the description and the notes, so
 neither can open a new section.
 
-**INS-10.** The pointer names the library's index: `Skills: skill://<library>/_index.md`. INS-19
-adds the prompt and agent pointers after it.
+**INS-10.** Under Via `mcp` and `extension`, the pointer names the library's index:
+`Skills: skill://<library>/_index.md`. INS-19 adds the prompt and agent pointers after it.
 
-**INS-11.** The pointer also lists skill names when all of these hold: exactly one library is
-selected, that library's `listSkills` is true, and the client has not declared the Skills
-extension. It then reads `Skills (skill://<library>/_index.md): <names>`.
+**INS-11.** The pointer also lists skill names when all of these hold: the request's Via is `mcp`
+(INS-20), exactly one library is selected, that library's `listSkills` is true, and the client has
+not declared the Skills extension. It then reads `Skills (skill://<library>/_index.md): <names>`.
 
 **INS-12.** The names are the paths below the library of the skills in scope, sorted, joined by
 `, `. A scope narrowed by tag lists only the skills it admits.
@@ -227,8 +228,8 @@ else the one it serves now.
   the scope one of that kind. Only then is that folder there (kubed-mcp's PLUG-68).
 - Otherwise the line names the `_index.md` of each plugin namespace that serves one, in the
   library's plugin order, joined by `, `.
-- The lines are written under `mcp` and `extension` (INS-20), whether or not the client declared an extension, and in
-  the INS-11 form. INS-6 still decides which libraries have a section.
+- The lines are written under `mcp` and `extension` (INS-20), whether or not the client declared
+  an extension, and in the INS-11 form. INS-6 still decides which libraries have a section.
 - The prefix is written as INS-16 says.
 
 ```
@@ -281,9 +282,10 @@ empty under `local` (INS-22).
 
 INS-21 gives the footer under `extension`, and `local` has none.
 
-**INS-16.** With a resource prefix, every address in the description, the notes, the pointer and
-the resources footer is written with the prefix in front (`kb+skill://…`). kubed-mcp writes the prefix
-over the whole text kb's instructions hook returns (DLV-11), by SKL-40 and SKL-41
+**INS-16.** With a resource prefix, every address in the description, the notes, the pointer, the
+`Prompts:` and `Agents:` lines and the footer is written with the prefix in front (`kb+skill://…`):
+the resources footer (INS-15) and the extension footer (INS-21) each carry one. kubed-mcp writes the
+prefix over the whole text kb's instructions hook returns (DLV-11), by SKL-40 and SKL-41
 ([skills.md](skills.md)).
 
 **INS-17.** One library selected, names listed, a prefix of `kb+`:

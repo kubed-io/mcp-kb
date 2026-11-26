@@ -91,7 +91,7 @@ layer's own line for the refusal is dropped (HTTP-45).
 **AGT-7.** `agents/list` belongs to kubed-mcp's agents extension, which declares
 `io.modelcontextprotocol/agents` and binds `agents/list` and `agents/get` (kubed-mcp's PLUG-27).
 The list (kubed-mcp's PLUG-30) serves the plugins kb adds to its plugin set (SKL-58) under kb's
-view (PLUG-53). It takes no params but an optional `cursor`, and returns a card for every agent in the caller's scope (AGT-15), in name order:
+view (PLUG-53). It takes no params but an optional `cursor`, and returns a card for every agent in the caller's scope (AGT-15), in name order, except under AGT-20:
 
 | Card field | Value |
 |---|---|
@@ -101,6 +101,10 @@ view (PLUG-53). It takes no params but an optional `cursor`, and returns a card 
 
 It does not paginate: one page holds every card, and any `cursor` fails with `-32602`
 `Invalid agents cursor` (PLUG-30), as SKL-48 does.
+
+**AGT-20.** Under Via `local`, `agents/list` returns no card, and `agents/get` still serves each
+agent in scope (DLV-9, DLV-10). Under `mcp` and `extension` it returns them all. `Listed` does not
+change it. kb adds no filter of its own.
 
 **AGT-8.** An agent name is unique within a library, so within anything one client
 sees. The plugin layer claims names across the set in the order kb adds plugins: library by

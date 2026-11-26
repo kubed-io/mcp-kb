@@ -131,6 +131,7 @@ def test_installing_documents_every_url_parameter_and_header():
         request.TAG_PARAM,
         tools.RESOURCES_PARAM,
         tools.LISTED_PARAM,
+        tools.VIA_PARAM,
     ]
     headers = [
         request.LIBRARY_HEADER,
@@ -139,6 +140,8 @@ def test_installing_documents_every_url_parameter_and_header():
         tools.RESOURCES_HEADER,
         "x-mcp-resources",
         tools.LISTED_HEADER,
+        tools.VIA_HEADER,
+        "x-mcp-via",
     ]
     for name in parameters:
         assert f"?{name}=" in page, f"?{name}= is missing from Installing.md"
