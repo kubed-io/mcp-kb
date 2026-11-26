@@ -40,8 +40,8 @@ same leak. **Flag any real name or homelab hostname in a diff as a blocker.**
 
 | Path | Holds |
 |---|---|
-| `kubed/mcp_kb/` | `server.py` composes it and owns which snapshot is current, `main.py` starts it, `routes.py` is the plain-HTTP surface, `config.py` is the config model and the published schema |
-| `kubed/mcp_kb/catalogue/` | what is served: `harvest.py` decides what counts, `skills.py` is the domain, `uris.py` is the `skill://` address space, `prompts.py` parses a prompt file with no FastMCP in it, `index.py` persists it, `snapshot.py` builds one immutable view, `refresh.py` decides when to look again |
+| `kubed/mcp_kb/` | `app.py` composes it, `server.py` owns which snapshot is current, `main.py` starts it, `routes.py` is the plain-HTTP surface, `config.py` is the config model and the published schema |
+| `kubed/mcp_kb/catalogue/` | what is served: `harvest.py` decides what counts, `skills.py` is the domain, `uris.py` is the `skill://` address space, `prompts/` parses a prompt file with no FastMCP in it, `index.py` persists it, `snapshot.py` builds one immutable view, `refresh.py` decides when to look again |
 | `kubed/mcp_kb/sources/` | where bytes come from: `file.py`, `git.py`, `webdav.py`, the shared `export.py`, `errors.py`, and `live.py` because revalidation is a source concern |
 | `kubed/mcp_kb/mcp/` | what an agent sees: `resources.py` is the interface, `tools.py` names kubed-mcp's resource pair and defines no tool, `prompts.py` reads commands for kubed-mcp's plugin layer, `request.py` and `scope.py` the per-request scope, `announce.py` the list-changed notification |
 | `kubed/mcp_kb/spec/` | the OpenAPI document for the HTTP surface |
@@ -100,8 +100,10 @@ to ignore you.
    reachable by anyone who can spell it. Absent and out-of-scope must stay
    indistinguishable: knowing a skill's name must not confirm it exists.
 2. **No tool in kb** — the section above.
-3. **Tool schema quality** — see below. On this project a weak schema is a
-   functional defect, not a style nit.
+3. **Nothing fetched runs, and no cache path or credential leaks** — a `!` line
+   or `!{…}` block in a prompt is text, and no cache path, clone path, WebDAV URL
+   or credential reaches a served body, an error, a log or `/health`. A kubed-mcp
+   message kb passes on goes through `SkillServing._clean` first.
 4. **Path safety** — a model supplies the path inside a URI. Reads resolve before
    comparing, so `../` and a symlink pointing out of a skill are refused. A new
    read that skips that is a finding.
