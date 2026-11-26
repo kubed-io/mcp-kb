@@ -22,11 +22,13 @@ Each is read per MCP request from an HTTP header or a query parameter on the MCP
 | Tag | `Kb-Tag` | `tag` | `X-Skill-Tags` | `tags` |
 | Resource prefix | `Kb-Resource-Prefix` | `prefix` | `X-MCP-Resource-Prefix` | — |
 | Resources | `Kb-Resources` | `resources` | `X-MCP-Resources` | — |
+| Via | `Kb-Via` | `via` | `X-MCP-Via` | — |
 
 **SCP-3.** The resource prefix and the resources setting are read by the same rules as the
-scope (SCP-4 to SCP-7). The resource prefix, the resources setting and the listed setting are
-kubed-mcp's own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its
-`X-MCP-` alias (DLV-16). What the listed setting and the
+scope (SCP-4 to SCP-7). The resource prefix, the resources setting, the listed setting and Via
+are kubed-mcp's own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its
+`X-MCP-` alias (DLV-16). Via is `mcp` (the default), `extension` or `local`, matched without
+regard to case; any other value resolves to `mcp`. What the listed setting and the
 prefix do is specified in [skills.md](skills.md), and the resources setting in
 [http-and-tools.md](http-and-tools.md).
 
@@ -174,8 +176,9 @@ are built for that request. The same request gets the same text from either.
 
 **INS-2.** The text is built from the current catalogue, the request's scope, whether the client
 reads resources, which is kubed-mcp's resolved `resources` setting for the request (DLV-2,
-DLV-15; see [http-and-tools.md](http-and-tools.md)), whether the client declared the Skills
-extension, and the request's resource prefix.
+DLV-15; see [http-and-tools.md](http-and-tools.md)), its resolved `via` and `extensions`
+(whether the client declared the Skills extension), and the request's resource prefix, which is
+INS-16's.
 
 **INS-3.** The client declared the Skills extension when `io.modelcontextprotocol/skills` is
 among the extensions kubed-mcp resolved for the request (DLV-11).
@@ -258,6 +261,10 @@ It is written with the prefix as INS-16 says.
 **INS-22.** Under `local` a library whose description and notes are both empty has no section, and
 no heading either. A `local` text is therefore empty when no library is selected, and can be empty
 when libraries are selected.
+
+**INS-23.** Building the text never fails a handshake. When the build fails, the traceback is
+logged at ERROR with credentials masked, and the text is the footer of the request's Via (INS-15
+or INS-21), or empty under `local`.
 
 ### Layout and footer
 

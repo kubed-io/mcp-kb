@@ -142,7 +142,8 @@ clients, which open with `initialize` and may hold a session (`mcp-session-id`),
 (MCP `2026-07-28`), which are sessionless and use `server/discover`.
 
 **HTTP-26.** Both `initialize` and `server/discover` answers carry the server `instructions` built
-for the caller, as in [scoping-and-instructions.md](scoping-and-instructions.md).
+for the caller, as in [scoping-and-instructions.md](scoping-and-instructions.md), in the shape
+the request's Via gives (INS-20).
 
 **HTTP-27.** Both answers advertise the `io.modelcontextprotocol/skills` and
 `io.modelcontextprotocol/agents` extensions: the first once a plugin with a skill is served
@@ -160,7 +161,7 @@ entry FastMCP stamps in a modern-era result's `_meta`. It is never FastMCP's own
 resolved for the request, from the `Kb-` and `X-MCP-` headers, their query parameters, kb's
 defaults and its table of known clients. Its `resources` is the setting that lists the resource
 pair (TOOL-2), and its `prefix` is the resource prefix every served address carries (GW-4, GW-11),
-or `null`.
+or `null`. Its `via` is the mode the instructions were written for.
 
 **HTTP-29.** Every cacheable result (`tools/list`, `prompts/list`, `resources/list`,
 `resources/templates/list`, `resources/read`, `server/discover`) carries `ttlMs` equal to the
