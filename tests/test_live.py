@@ -1220,6 +1220,67 @@ def test_a_reread_that_reads_a_new_export_is_abandoned(
     assert knowledge_base.snapshot is snapshot
 
 
+async def test_a_reread_in_a_refreshs_window_names_no_cache_path(
+    webdav, tmp_path, monkeypatch, caplog
+):
+    """HTTP-11: a re-read that reads its plugin from one export while a refresh
+    points the fetch at the next has the layer's reasons quoting the export it
+    read, not the one ``served_tree`` now answers. Both are cleaned, so neither
+    ``/health`` nor the log names a cache path."""
+    import dataclasses
+    import shutil
+
+    from kubed.mcp_kb.mcp import skills
+    from kubed.mcp_kb.sources import ServedTrees
+
+    webdav.write("prompts/bad.md", PROMPT.format(body="a prompt kb cannot read"))
+    real_parse = skills.parse_prompt
+
+    def parse_prompt(text, path, **kwargs):
+        # A malformed file's reason, quoting the file at the root it was read at.
+        if path.name == "bad.md":
+            raise ValueError(f"{path} cannot be read")
+        return real_parse(text, path, **kwargs)
+
+    monkeypatch.setattr(skills, "parse_prompt", parse_prompt)
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+    read_served(knowledge_base, URI)
+    new = tmp_path / "next-export"
+    shutil.copytree(knowledge_base.served_tree(KEY), new)
+    real = ServedTrees.materialise
+    switched = []
+
+    def materialise(self, address):
+        root = real(self, address)
+        if not switched:
+            # A refresh's assignment, landing just after the plugin was read.
+            record = knowledge_base._fetches[KEY]
+            knowledge_base._fetches = {
+                **knowledge_base._fetches,
+                KEY: dataclasses.replace(record, root=str(new)),
+            }
+            switched.append(address)
+        return root
+
+    monkeypatch.setattr(ServedTrees, "materialise", materialise)
+    webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    with caplog.at_level(logging.WARNING):
+        read_served(knowledge_base, URI)
+        read_served(knowledge_base, URI)
+
+    assert switched, "the moved plugin was read"
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
+        body = (await http.get("/health")).text
+    (row,) = json.loads(body)["plugins"]["notes"]["skipped"]
+    assert row["path"] == "prompts/bad.md"
+    assert "cannot be read" in row["reason"]
+    assert str(tmp_path) not in body
+    kbs = [r.getMessage() for r in caplog.records if r.name.startswith("kubed.mcp_kb")]
+    assert any("bad.md" in message for message in kbs), "the re-read said it"
+    assert not [message for message in kbs if str(tmp_path) in message], kbs
+
+
 def test_no_reread_between_a_publish_and_its_swap(webdav, tmp_path, monkeypatch):
     """A set served but not yet swapped in: the request reads what is served
     and leaves the swap to land."""
