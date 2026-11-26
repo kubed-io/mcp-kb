@@ -518,7 +518,9 @@ class SkillServing:
                             del table[key]
                         else:
                             table[key] = before
-                        reason = f"conflict: {self._refusal(exc, plugin)}"
+                        reason = (
+                            f"conflict: {self._refusal(exc, plugin, _root(served_now))}"
+                        )
                         refused.setdefault(lib.name, {})[pid] = reason
                         continue
                     if watch is not None:
@@ -593,10 +595,11 @@ class SkillServing:
             if served_now is None:
                 raise
             self._reads.pop(key, None)
+            reason = self._clean(str(exc), plugin, served_now.root)
             self._note(
                 noted,
                 f"plugin {plugin.id} in library {lib.name} was not read again, so"
-                f" it serves what it served: {self._clean(str(exc), plugin)}",
+                f" it serves what it served: {reason}",
             )
             return self._keep(staged, key, served_now, read), True
 
@@ -638,7 +641,7 @@ class SkillServing:
                     ),
                 )
             except (OSError, UnicodeDecodeError, *READ_ERRORS) as exc:
-                reason = self._clean(str(exc) or type(exc).__name__, row.plugin)
+                reason = self._clean(str(exc) or type(exc).__name__, row.plugin, root)
                 raise ValueError(f"prompt {path}: {reason}") from exc
         # Every agent it serves, read as ``agent_meta`` reads it: one that no
         # longer reads would be skipped by the add, or lose its name (AGT-16).
@@ -654,7 +657,7 @@ class SkillServing:
                     if message.startswith("agent file ")
                     else "kb cannot read it"
                 )
-                reason = self._clean(reason, row.plugin)
+                reason = self._clean(reason, row.plugin, root)
                 raise ValueError(f"agent {file.path}: {reason}") from exc
 
     def _keep(
@@ -702,39 +705,66 @@ class SkillServing:
         stamp = _stamp(snapshot, tuple(skills), (*agents, *prompts))
         return _Watch(tuple(skills), agents, stamp, root, commands=prompts)
 
-    def _clean(self, text: str, plugin: Plugin) -> str:
-        """A kubed-mcp message with no cache path and no credential in it."""
-        tree = self._knowledge_base.served_tree(plugin.fetch.key)
-        if tree is not None:
-            for root in (plugin_root(tree, plugin.subdir), tree):
-                if root is None:
-                    continue
-                text = unrooted(text, root)
-                for base in (root.resolve(), root):
-                    text = text.replace(str(base), plugin.address)
+    def _clean(self, text: str, plugin: Plugin, read_from: Path | None = None) -> str:
+        """A kubed-mcp message with no cache path and no credential in it.
+
+        ``read_from`` is the root the layer read ``plugin`` at, its ``Served.root``.
+        A refresh assigns a fetch's new export before it publishes, and a live
+        re-read in that window reads one tree while ``served_tree`` answers the
+        next, so the layer's reasons quote a root kb no longer serves (HTTP-11)."""
+        for root, _tree in self._roots(plugin, read_from):
+            text = unrooted(text, root)
+            for base in (root.resolve(), root):
+                text = text.replace(str(base), plugin.address)
         return scrub(text)
 
-    def _refusal(self, exc: Exception, plugin: Plugin) -> str:
+    def _roots(
+        self, plugin: Plugin, read_from: Path | None = None
+    ) -> list[tuple[Path, bool]]:
+        """Each root a message about ``plugin`` may quote, and whether it is a
+        fetch's tree rather than the plugin's own root: the one the layer read it
+        at and the one served now, the longest first: a plugin's root is below
+        its tree, and one export's name can begin another's (``<version>.1``)."""
+        roots: list[tuple[Path, bool]] = []
+        if read_from is not None:
+            tree = Path(read_from)
+            for _ in PurePosixPath(plugin.subdir).parts:
+                tree = tree.parent
+            roots += [(Path(read_from), False), (tree, True)]
+        served = self._knowledge_base.served_tree(plugin.fetch.key)
+        if served is not None:
+            root = plugin_root(served, plugin.subdir)
+            roots += [] if root is None else [(root, False)]
+            roots.append((served, True))
+        return sorted(roots, key=lambda pair: len(str(pair[0])), reverse=True)
+
+    def _refusal(
+        self, exc: Exception, plugin: Plugin, read_from: Path | None = None
+    ) -> str:
         """Why kubed-mcp refused to add ``plugin``, as LIB-29 reports it: the
         layer's reason less its ``plugin <address> is not served:`` wrapper,
         which the conflict's key already says, with no cache path in it."""
         text = str(exc).removeprefix(f"plugin {plugin.address} is not served: ")
-        return self._clean(text, plugin)
+        return self._clean(text, plugin, read_from)
 
-    def _cleaned(self, text: str, plugins: Sequence[Plugin]) -> str:
+    def _cleaned(
+        self,
+        text: str,
+        plugins: Sequence[Plugin],
+        read_from: Sequence[tuple[Plugin, Path]] = (),
+    ) -> str:
         """``text`` with every served tree of ``plugins`` named by kb's address:
         each plugin's own root by its address, a fetch's tree by its key, the
-        deepest first, so a path is named by the plugin it is under."""
+        deepest first, so a path is named by the plugin it is under. The roots
+        ``read_from`` pairs with a plugin, the ones the layer read it at, are
+        named too, as ``_clean`` names them."""
         names: dict[str, str] = {}
-        for plugin in plugins:
-            tree = self._knowledge_base.served_tree(plugin.fetch.key)
-            if tree is None:
-                continue
-            root = plugin_root(tree, plugin.subdir)
-            for base, name in ((root, plugin.address), (tree, plugin.fetch.key)):
-                if base is not None:
-                    for spelling in (base.resolve(), base):
-                        names.setdefault(str(spelling), name)
+        pairs = [(plugin, None) for plugin in plugins] + list(read_from)
+        for plugin, root in pairs:
+            for base, is_tree in self._roots(plugin, root):
+                name = plugin.fetch.key if is_tree else plugin.address
+                for spelling in (base.resolve(), base):
+                    names.setdefault(str(spelling), name)
         for base in sorted(names, key=len, reverse=True):
             text = text.replace(base, names[base])
         return scrub(text)
@@ -919,7 +949,10 @@ class SkillServing:
             if path in dirs:
                 rows.setdefault(path, why)
         return [
-            {"path": self._clean(path, plugin), "reason": self._clean(why, plugin)}
+            {
+                "path": self._clean(path, plugin, served.root),
+                "reason": self._clean(why, plugin, served.root),
+            }
             for path, why in rows.items()
         ]
 
@@ -975,8 +1008,8 @@ class SkillServing:
             said.add(path)
             self._note(
                 noted,
-                f"{self._clean(path, plugin)!r} of plugin {plugin.id} is not served:"
-                f" {self._clean(why, plugin)}",
+                f"{self._clean(path, plugin, served.root)!r} of plugin {plugin.id}"
+                f" is not served: {self._clean(why, plugin, served.root)}",
             )
 
     def _agents_of(
@@ -1015,13 +1048,13 @@ class SkillServing:
                 )
             elif path in found:
                 accounted.add(path)
-                rows.setdefault(path, self._clean(why, plugin))
+                rows.setdefault(path, self._clean(why, plugin, served.root))
             elif why.startswith(_AGENT_META_FAILED):
                 # kb says it once; the layer's line is filtered (HTTP-45).
                 self._note(
                     noted,
-                    f"agent file {self._clean(path, plugin)} of plugin {plugin.id}"
-                    " is not served: kb's harvest did not find it",
+                    f"agent file {self._clean(path, plugin, served.root)} of plugin"
+                    f" {plugin.id} is not served: kb's harvest did not find it",
                 )
         for path in found:
             if path not in accounted:
@@ -1065,7 +1098,7 @@ class SkillServing:
         rows: dict[str, str] = {}
         for path, reason in served.skipped:
             if path in selected and path not in paths and reason != NOT_SELECTED:
-                rows.setdefault(path, self._clean(reason, plugin))
+                rows.setdefault(path, self._clean(reason, plugin, served.root))
         for path in commands.selected:
             if path not in paths and not any(
                 where == path for where, _ in served.skipped
@@ -1146,7 +1179,12 @@ class SkillServing:
                 return
             except Exception as exc:  # noqa: BLE001 - a failed re-read serves what is served
                 plugins = [row.plugin for row in published.table.values()]
-                message = self._cleaned(str(exc), plugins)
+                read_from = [
+                    (published.table[key].plugin, served.root)
+                    for key, served in current.items()
+                    if key in published.table
+                ]
+                message = self._cleaned(str(exc), plugins, read_from)
                 log.warning("re-reading live plugins failed: %s", message)
                 # Not tried again until a file moves again.
                 self._published = replace(published, live={**published.live, **moved})
@@ -1255,7 +1293,7 @@ class SkillServing:
                 dialect=dialect,
             )
         except READ_ERRORS as exc:
-            return self._clean(str(exc), row.plugin)
+            return self._clean(str(exc), row.plugin, root)
         if adding:
             self._prompt_reads.setdefault(key, {}).setdefault(path, file)
         elif last is not None:
@@ -1327,6 +1365,11 @@ class _Abandoned(Exception):
 def _under(path: str, entry: str) -> bool:
     """Whether the root-relative ``path`` is the component ``entry`` or in it."""
     return entry == "." or path == entry or path.startswith(f"{entry}/")
+
+
+def _root(served: Served | None) -> Path | None:
+    """The root ``served`` was read at, or None for a plugin not served yet."""
+    return None if served is None else Path(served.root)
 
 
 def _same_folder(recorded: Path | None, read: Path) -> bool:
