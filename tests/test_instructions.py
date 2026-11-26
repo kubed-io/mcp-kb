@@ -823,3 +823,44 @@ async def test_the_lines_carry_the_prefix(tmp_path, mode):
         text = await told(url, mode, {"Kb-Resource-Prefix": "kb+"})
     assert "Prompts: kb+prompts://lib/_index.md" in text.splitlines()
     assert "Agents: kb+agents://lib/b/_index.md" in text.splitlines()
+
+
+# -- kubed-mcp's Via, as pinned -----------------------------------------------
+
+VIA_INPUTS = [
+    ({"Kb-Via": "local"}, "", "local"),
+    ({"X-MCP-Via": "extension"}, "", "extension"),
+    ({}, "?via=local", "local"),
+    ({"Kb-Via": "extension", "X-MCP-Via": "local"}, "", "extension"),  # Kb- first (DLV-16)
+    ({"Kb-Via": "nonsense"}, "", "mcp"),
+    ({}, "", "mcp"),
+]
+
+
+def _via_client(url, mode, headers=None):
+    kwargs = {"mode": "legacy"} if mode == "legacy" else {}
+    return Client(StreamableHttpTransport(url, headers=headers or {}), **kwargs)
+
+
+@pytest.mark.integration
+@ERAS
+@pytest.mark.parametrize(("headers", "query", "via"), VIA_INPUTS)
+async def test_via_is_read_under_kb_names(tmp_path, mode, headers, query, via):
+    from tests.test_server import delivery
+
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    with served(kb) as url:
+        async with _via_client(url + query, mode, headers) as client:
+            assert (await delivery(client, mode))["via"] == via
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("via", ["extension", "local"])
+async def test_via_presets_list_no_plugin_prompts(tmp_path, via):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    with served(kb) as url:
+        async with _via_client(url, "default", {"Kb-Via": via}) as client:
+            assert [p.name for p in await client.list_prompts()] == []
+        async with _via_client(url, "default") as client:
+            names = sorted(p.name for p in await client.list_prompts())
+    assert names == ["lib_hello", "lib_top"]
