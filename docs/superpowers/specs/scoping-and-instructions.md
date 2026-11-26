@@ -4,7 +4,7 @@ A **scope** is the slice of the catalogue one request may see: one library, some
 some tag groups. It is read from the request's headers and query string, and every listing and
 every read goes through it. The **instructions** are the text a client gets when it connects,
 built for that connection from its scope. This file covers both. It names the client capability
-settings (`Kb-Resources`, `Kb-Prompts`) but does not cover what they do, which is in
+setting (`Kb-Resources`) but does not cover what they do, which is in
 [http-and-tools.md](http-and-tools.md), or what a library's description and categories are,
 which is in [plugins-and-libraries.md](plugins-and-libraries.md).
 
@@ -22,13 +22,12 @@ Each is read per MCP request from an HTTP header or a query parameter on the MCP
 | Tag | `Kb-Tag` | `tag` | `X-Skill-Tags` | `tags` |
 | Resource prefix | `Kb-Resource-Prefix` | `prefix` | `X-MCP-Resource-Prefix` | — |
 | Resources | `Kb-Resources` | `resources` | `X-MCP-Resources` | — |
-| Prompts | `Kb-Prompts` | `prompts` | `X-MCP-Prompts` | — |
 
-**SCP-3.** The resource prefix and the two capability settings are read by the same rules as the
+**SCP-3.** The resource prefix and the resources setting are read by the same rules as the
 scope (SCP-4 to SCP-7). The resource prefix, the resources setting and the listed setting are
 kubed-mcp's own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its
-`X-MCP-` alias (DLV-16); kb reads the prompts setting the same way. What the listed setting and the
-prefix do is specified in [skills.md](skills.md), and the capability settings in
+`X-MCP-` alias (DLV-16). What the listed setting and the
+prefix do is specified in [skills.md](skills.md), and the resources setting in
 [http-and-tools.md](http-and-tools.md).
 
 **SCP-4.** Header names match case-insensitively. Parameter names match exactly.
@@ -95,7 +94,7 @@ plugin, in that library, matches the categories and the tags (SCP-15 to SCP-17).
 
 **SCP-21.** The scope applies to skills, prompts, agents and library-level files alike, and to
 every surface that lists or reads them: `resources/list`, `resources/read`, `prompts/list`,
-`prompts/get`, `skills/list`, `skills/get`, `agents/list`, `agents/get` and the mirror tools.
+`prompts/get`, `skills/list`, `skills/get`, `agents/list`, `agents/get` and the resource tools.
 
 **SCP-22.** Out of scope means not listed and not readable. An index (`_index.md`) lists only the
 skills in scope, and `_files.md` lists only the library files in scope. An index or `_files.md`
@@ -108,7 +107,7 @@ scope, or the root of the in-scope skill it was addressed under.
 **SCP-24.** A read of an out-of-scope address fails exactly as a read of an absent one does, on
 `resources/read`, the `read_resource` tool, `skills/get` (`Unknown skill URI: <uri>`),
 `resources/directory/read` (`Directory not found`), `agents/get`
-(`Agent not found`, with `data.reason: "agent_not_found"`) and `prompts/get` or `get_prompt` alike:
+(`Agent not found`, with `data.reason: "agent_not_found"`) and `prompts/get` alike:
 the same error code and the same message.
 
 **SCP-25.** A hint that names the file to read instead of a directory is computed from the

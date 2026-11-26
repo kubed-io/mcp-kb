@@ -100,7 +100,7 @@ class Entry:
     """One row of a resource listing -- the shape both halves publish.
 
     ``uri``, ``name``, ``description`` and ``mime_type`` are the four fields
-    ``resources/list`` returns, so the tool mirror is the same rows and not a
+    ``resources/list`` returns, so the resource tools are the same rows and not a
     translation of them. ``tags`` rides alongside for ``resources.py`` to carry
     onto the ``TextResource`` it builds; it is not one of the four and never
     appears in ``as_dict``. A ``_files.md`` row is tagged with its library and

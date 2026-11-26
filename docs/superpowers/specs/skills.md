@@ -4,7 +4,7 @@ A **skill** is a directory holding a `SKILL.md`. This file covers which director
 skills, the `skill://` address space that skills and a library's other files live in, what each
 address reads as, the gateway prefix, folders, and the MCP Skills extension. Declaring plugins and their
 globs is in [plugins-and-libraries.md](plugins-and-libraries.md); who may see what is in
-[scoping-and-instructions.md](scoping-and-instructions.md); the mirror tools are in
+[scoping-and-instructions.md](scoping-and-instructions.md); the resource tools are in
 [http-and-tools.md](http-and-tools.md).
 
 ## What makes a skill
@@ -342,7 +342,7 @@ letter, digit, `+`, `-` or `.` (`kb+skill://` and `myskill://` stay as they are)
 | the plugin layer | a skill's files, the indexes inside a skill and an agent's card (GW-5), rendered prompts (GW-7), and `list_resources`, which writes the prefix into each row's `uri` (DLV-6, GW-5) |
 | kb, through the plugin layer's writer (GW-11) | everything else: resource bodies and listing descriptions outside a skill, read hints, the template's description, instructions |
 
-A prompt's description, in `prompts/list` and in `list_prompts`, is written as its library wrote
+A prompt's description in `prompts/list` is written as its library wrote
 it, with no prefix: the plugin layer prefixes the text a prompt renders, and a prompt's
 frontmatter is served as its file wrote it.
 

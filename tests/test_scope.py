@@ -13,7 +13,6 @@ from kubed.mcp_kb.mcp.request import (
     CATEGORY_HEADER,
     CATEGORY_PARAM,
     client_reads_resources,
-    client_uses_prompts,
     requested_scope,
 )
 from kubed.mcp_kb.mcp.scope import EVERYTHING, Scope
@@ -178,10 +177,9 @@ def test_the_library_takes_the_first_value_given(on_http):
     assert requested_scope().library == "grafana"
 
 
-def test_the_capability_readers_take_the_first_value_too(on_http):
-    on_http(query="prompts=off&prompts=on&resources=off")
+def test_the_capability_reader_takes_the_first_value_too(on_http):
+    on_http(query="resources=off&resources=on")
 
-    assert client_uses_prompts() is False
     assert client_reads_resources() is False
 
 
@@ -216,7 +214,6 @@ def test_headers_reachable_without_the_request_are_still_read(monkeypatch):
 def test_off_http_there_is_nothing_to_narrow_by(off_http):
     assert request_values() is None
     assert requested_scope() == EVERYTHING
-    assert client_uses_prompts() is True
     assert client_reads_resources() is True
 
 

@@ -92,20 +92,6 @@ async def test_the_header_declares_it_too(server_url, header):
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("header", ["X-MCP-Prompts", "Kb-Prompts"])
-async def test_a_prompts_header_reveals_the_prompt_mirror(server_url, header):
-    names = await tool_names(server_url, headers={header: "off"})
-    assert names == ["get_prompt", "list_prompts"]
-
-
-@pytest.mark.integration
-async def test_kbs_prompts_header_wins_over_x_mcps(server_url):
-    """DLV-16's order for kb's own input: ``Kb-`` first, as kubed-mcp reads."""
-    headers = {"Kb-Prompts": "on", "X-MCP-Prompts": "off"}
-    assert await tool_names(server_url, headers=headers) == []
-
-
-@pytest.mark.integration
 async def test_a_hidden_tool_is_still_callable(server_url):
     """Hiding from a listing is presentation; refusing to run would be a
     different and worse contract."""

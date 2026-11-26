@@ -1,7 +1,7 @@
 # HTTP and tools
 
 How mcp-kb is reached: the MCP endpoint and the plain HTTP routes beside it, the protocol eras it
-answers, the up to four mirror tools for clients without resources or prompts, and the container it
+answers, the resource tools for clients without resources, and the container it
 ships in. What the catalogue holds, how a scope narrows it and what a prompt renders are other
 areas, and this file points at them.
 
@@ -209,43 +209,37 @@ at the level set by `LOG_LEVEL` (`--log-level`, default `INFO`) for every logger
 **HTTP-40.** Per-request traffic lines (uvicorn's access log, httpx's per-request lines) are
 written only when the level is `DEBUG`.
 
-## The mirror tools
+## The resource tools
 
-**TOOL-1.** The server has up to four tools, each mirroring a native MCP feature. The prompt pair
-is kb's and always registered. The resource pair is kubed-mcp's plugin layer's (DLV-6), registered
-once kb adds its first plugin to the plugin set, which needs a plugin with a skill, an agent or
-a prompt file; until then the server has only the prompt pair. It is switched by the request's
-resources setting (DLV-2).
+**TOOL-1.** The server has two tools, kubed-mcp's resource pair (DLV-6). It is registered once kb
+adds its first plugin to the plugin set, which needs a plugin with a skill, an agent or a prompt
+file, and listed by the request's resources setting (DLV-2).
 
 | Tool | Mirrors | Listed when the request says |
 |---|---|---|
 | `list_resources` | `resources/list` | `Kb-Resources: off`, `X-MCP-Resources: off` or `?resources=off`, or the client is VS Code (TOOL-2) |
 | `read_resource` | `resources/read` | `Kb-Resources: off`, `X-MCP-Resources: off` or `?resources=off`, or the client is VS Code (TOOL-2) |
-| `list_prompts` | `prompts/list` | `Kb-Prompts: off`, `X-MCP-Prompts: off` or `?prompts=off` |
-| `get_prompt` | `prompts/get` | `Kb-Prompts: off`, `X-MCP-Prompts: off` or `?prompts=off` |
 
-**TOOL-2.** A request that declares neither sees no tools in `tools/list`, unless kubed-mcp knows
+**TOOL-2.** A request that declares nothing sees no tools in `tools/list`, unless kubed-mcp knows
 its client: one whose `clientInfo.name` starts `Visual Studio Code` is taken to declare resources
 off, and sees the resource pair (DLV-15). A resources setting the request sends beats the known
-client, in TOOL-4's order. Each pair is listed independently of the other.
+client, in TOOL-4's order.
 
-**TOOL-3.** `off`, `false`, `0`, `no` and `none` declare the feature absent, ignoring case and
-surrounding space. For prompts, any other value, or none, means the client has the feature. For
-resources, `on`, `true`, `1` and `yes` declare it present, any other value is passed over for the
-next source with a warning (DLV-2), and none means the client has the feature, unless TOOL-2's
-known clients say otherwise.
+**TOOL-3.** `off`, `false`, `0`, `no` and `none` declare resources off, and `on`, `true`, `1` and
+`yes` on, ignoring case and surrounding space. Any other value is passed over for the next source
+with a warning, and none means on unless TOOL-2's known clients say otherwise (DLV-2).
 
 **TOOL-4.** The `Kb-` header beats the `X-MCP-` one, which beats the query parameter (SCP-3). Only
 the first value of the winning one counts, and an empty value counts as not sent.
 
-**TOOL-5.** Hiding is a listing decision only: a mirror tool is callable whether or not it is
+**TOOL-5.** Hiding is a listing decision only: either tool is callable whether or not it is
 listed.
 
-**TOOL-6.** Every mirror tool is annotated `readOnlyHint: true`, `destructiveHint: false`,
-`idempotentHint: true` and `openWorldHint: false`, with a title: "List resources", "Read a
-resource", "List prompts", "Get a prompt".
+**TOOL-6.** Both tools are annotated `readOnlyHint: true`, `destructiveHint: false`,
+`idempotentHint: true` and `openWorldHint: false`, with a title: "List resources" and "Read a
+resource" (DLV-6).
 
-**TOOL-7.** A mirror tool is held to the caller's scope exactly as the feature it mirrors is. A
+**TOOL-7.** Either tool is held to the caller's scope exactly as the feature it mirrors is. A
 scope that names nothing refuses a tool call like any other request
 ([scoping-and-instructions.md](scoping-and-instructions.md)).
 
@@ -253,7 +247,7 @@ scope that names nothing refuses a tool call like any other request
 
 **TOOL-8.** `list_resources` takes no arguments and returns a JSON object whose `resources` is the
 rows `resources/list` returns for the same request, each as it is on the wire. Its result shape and both tools'
-descriptions are the plugin layer's (DLV-6): they teach neither kb's URI grammar nor its scope
+descriptions are kubed-mcp's (DLV-6): they teach neither kb's URI grammar nor its scope
 settings.
 
 **TOOL-10.** `read_resource` takes one argument, `uri`, and reads it through `resources/read`, so
@@ -261,35 +255,13 @@ the same middleware, scope and addressing apply. Text comes back as text, a `tex
 that is UTF-8 as its text, an image blob as image content, and any other blob as a JSON description
 saying it is not returned as text (DLV-6).
 
-**TOOL-11.** Both tools are the plugin layer's (DLV-6). `list_resources` writes the prefix into each
+**TOOL-11.** Both tools are kubed-mcp's (DLV-6). `list_resources` writes the prefix into each
 row's `uri` (GW-5); `read_resource` returns what `resources/read` returns, its prefix included
 (SKL-41), and taking the prefix off its `uri` is GW-4's. Addressing is in [skills.md](skills.md).
 
 **TOOL-12.** A `read_resource` that finds nothing is an error result (`isError: true`) carrying the
-message `resources/read` fails with: `Resource not found: '<uri>'. <hint>` when the URI is a
-directory in the caller's scope (SKL-34), and `Resource not found: '<uri>'` otherwise.
+message `resources/read` fails with, hint included, as kubed-mcp hands it on: `Resource not found:
+'<uri>'. <hint>` when the URI is a directory in the caller's scope (SKL-34), and `Resource not
+found: '<uri>'` otherwise.
 
 **TOOL-13.** An out-of-scope URI and an absent one give the same `read_resource` error.
-
-**TOOL-14.** A missed `read_resource` is logged with no traceback.
-
-## `list_prompts` and `get_prompt`
-
-**TOOL-15.** `list_prompts` and `get_prompt` are FastMCP's prompts-as-tools, routed through the
-server's own `prompts/list` and `prompts/get`, so they see exactly the prompts the caller's scope
-admits.
-
-**TOOL-16.** `list_prompts` takes no arguments and returns JSON: a list of prompts, each with its
-`name`, `description` and `arguments` (`name`, `description`, `required`).
-
-**TOOL-17.** `get_prompt` takes `name` and an optional `arguments` object, and returns JSON with a
-`messages` array of role-tagged messages, as `prompts/get` renders them.
-
-**TOOL-18.** An unknown prompt name is an error result reading
-`Unknown prompt: '<name>'. Call list_prompts() for the prompts available and the arguments each one
-takes.`
-
-**TOOL-19.** A missing required argument is an error result carrying the same message
-`prompts/get` refuses with. Through `get_prompt` the server never asks for it by elicitation.
-
-**TOOL-20.** A `get_prompt` mistake is logged at `DEBUG` only, with no traceback.

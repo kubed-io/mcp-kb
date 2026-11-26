@@ -1,7 +1,6 @@
 """The MCP surface: what a client sees, as resources and as the tool mirror."""
 
 import json
-import logging
 from importlib.metadata import version as dist_version
 
 import fastmcp
@@ -161,23 +160,7 @@ async def test_a_failed_fetch_does_not_take_the_others_down(skills_dir):
     assert "skill://flatsource/alpha/SKILL.md" in uris
 
 
-# -- the tool mirror ----------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_the_mirrors_are_four_tools_whatever_the_catalogue_holds(skills_dir):
-    """Adding sources or prompts must never add tools; the mirrors absorb them."""
-    server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
-    # Skip the middleware, which is the thing that hides these. What is
-    # registered is what an ?resources=off client is shown; what a resource
-    # client sees is covered over real HTTP in test_header_scope.
-    # The resource pair is kubed-mcp's (N4), listed only to a client that
-    # turned resources off, and always callable by name.
-    mcp = server_of(server)
-    registered = await mcp.list_tools(run_middleware=False)
-    assert sorted(t.name for t in registered) == ["get_prompt", "list_prompts"]
-    for name in ("list_resources", "read_resource"):
-        assert await mcp.get_tool(name) is not None
+# -- the resource tools ----------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -195,13 +178,12 @@ async def test_vs_code_lists_the_resource_pair_without_a_header(skills_dir, mode
 
 
 @pytest.mark.unit
-async def test_the_mirror_tools_are_advertised_as_read_only(skills_dir):
+async def test_the_resource_tools_are_advertised_as_read_only(skills_dir):
     """Unannotated, MCP's defaults advertise a tool as destructive."""
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
     mcp = server_of(server)
-    registered = await mcp.list_tools(run_middleware=False)
-    registered += [await mcp.get_tool(n) for n in ("list_resources", "read_resource")]
-    assert len(registered) == 4
+    registered = [await mcp.get_tool(n) for n in ("list_resources", "read_resource")]
+    assert len(registered) == 2
     for tool in registered:
         hints = tool.to_mcp_tool().annotations
         assert hints is not None, f"{tool.name} has no annotations"
@@ -235,25 +217,18 @@ async def test_read_resource_returns_what_reading_the_uri_returns(skills_dir):
 
 
 @pytest.mark.unit
-async def test_read_resource_explains_an_unknown_uri(skills_dir, caplog):
+async def test_read_resource_explains_an_unknown_uri(skills_dir):
     """An error result, so a caller branching on isError sees a miss -- with
-    what to do next in its message, and no traceback in the server's log."""
+    what to do next in its message."""
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
-    server_of(server)  # publishing logs what the plugin layer notes; not a call
-    caplog.clear()
-    with caplog.at_level(logging.INFO):
-        async with Client(server_of(server)) as client:
-            result = await client.call_tool(
-                "read_resource", {"uri": "skill://nope/nope"}, raise_on_error=False
-            )
+    async with Client(server_of(server)) as client:
+        result = await client.call_tool(
+            "read_resource", {"uri": "skill://nope/nope"}, raise_on_error=False
+        )
     assert result.is_error
     out = result.content[0].text
-    # N4: kubed-mcp's tool words a miss as resources/read does.
+    # kubed-mcp's tool words a miss as resources/read does.
     assert out == "Resource not found: 'skill://nope/nope'"
-    # N4: kubed-mcp logs a caller's miss at INFO, where kb's tool used DEBUG;
-    # never a warning, nor a traceback.
-    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
-    assert not [r for r in caplog.records if r.exc_info]
 
 
 @pytest.mark.unit

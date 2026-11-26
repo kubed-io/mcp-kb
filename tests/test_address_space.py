@@ -357,16 +357,12 @@ async def test_a_prompt_body_names_the_plugin_root_in_every_dialect(tmp_path):
             name: (await client.get_prompt(name)).messages[0].content.text
             for name in ("kit_own", "kit_theirs", "kit_vscode")
         }
-        mirrored = await client.call_tool("get_prompt", {"name": "kit_own"})
     assert {p.dialect for p in knowledge_base.prompts} == {
         "mcp-kb",
         "claude",
         "copilot",
     }
     assert set(rendered.values()) == {expected}
-    assert json.loads(mirrored.content[0].text)["messages"] == [
-        {"role": "user", "content": expected}
-    ]
 
 
 # -- dot segments ---------------------------------------------------------------

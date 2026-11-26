@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Resource-Prefix`, `Kb-Resources` and `Kb-Prompts`; the old `X-` names are still accepted.
+- Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Resource-Prefix` and `Kb-Resources`; the old `X-` names are still accepted.
 - **BREAKING:** A pin set under an old `X-` name (a gateway route header, a credential) no longer holds against a client-sent `Kb-` header, which now beats it; move such pins to the `Kb-` names.
 - **BREAKING:** Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
 - A plugin's `plugin.json` reads as Claude Code reads it: its `skills` add to the usual skill folders, and a marketplace entry's lists append to it.
@@ -77,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **BREAKING:** `Kb-Listing` (`?listing=`, `?skills=`, `X-Skill-Listing`) is no longer read.
+- **BREAKING:** The `list_prompts` and `get_prompt` tools and `Kb-Prompts` (`?prompts=`, `X-MCP-Prompts`) are gone; a tools-only client lists prompt files with `Kb-Listed: prompts` and reads them with `read_resource`.
 
 ## [0.1.0] - 2026-09-18
 

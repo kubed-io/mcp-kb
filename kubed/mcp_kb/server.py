@@ -1,7 +1,7 @@
 """The knowledge base: the lifecycle of what the server serves.
 
 Builds the catalogue a config file describes and keeps it current; the MCP
-server over it -- the address space, the resources, the mirror tools, the
+server over it -- the address space, the resources, the resource tools, the
 routes -- is ``app.create_app``'s. Turning a fetch into a directory is
 ``sources``'s job; resolving
 the config's plugins and reading a marketplace is ``plugins``'s; deciding what

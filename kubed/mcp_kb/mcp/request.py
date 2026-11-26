@@ -4,7 +4,7 @@ Two kinds of question, both answered from the HTTP request and both meaningless 
 *what slice of the catalogue may this client see*, and *which MCP features
 can it use natively*. They
 are read here rather than in the handlers because both halves of the server --
-the resources and the tools that mirror them -- have to agree on the answers,
+the resources and kubed-mcp's tools that mirror them -- have to agree on the answers,
 and a second reader is how the two halves drift apart.
 
 Every helper degrades to the permissive default outside an HTTP request, which
@@ -37,12 +37,6 @@ TAG_PARAM = "tag"
 TAG_HEADER = "kb-tag"
 TAG_ALIAS = "x-skill-tags"
 TAG_PARAM_ALIAS = "tags"
-
-# How a client declares it cannot use MCP prompts, and so wants them as tools.
-# kb's own header first, as kubed-mcp reads its ``Kb-`` inputs (DLV-16).
-PROMPTS_PARAM = "prompts"
-PROMPTS_HEADER = "x-mcp-prompts"
-PROMPTS_KB_HEADER = "kb-prompts"
 
 # How a client declares it cannot read resources: what kubed-mcp lists its
 # resource mirror by (DLV-6), and what the instructions are worded for.
@@ -107,16 +101,6 @@ def _declared_on(header: str, param: str, kb_header: str) -> bool:
     """
     declared = _read(kb_header, param, header)
     return not declared or declared[0].strip().lower() not in _OFF
-
-
-def client_uses_prompts() -> bool:
-    """Whether this caller can be expected to use MCP prompts natively.
-
-    The protocol has no client-side signal for it -- prompts are a server
-    capability -- so, like resources, a client that cannot says so:
-    ``?prompts=off`` or ``X-MCP-Prompts: off``.
-    """
-    return _declared_on(PROMPTS_HEADER, PROMPTS_PARAM, PROMPTS_KB_HEADER)
 
 
 def client_reads_resources() -> bool:

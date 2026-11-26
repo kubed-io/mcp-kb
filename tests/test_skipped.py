@@ -269,10 +269,8 @@ async def test_a_second_prompt_with_one_name_in_a_plugin_is_skipped(tmp_path):
     async with Client(server_of(kb)) as client:
         prompts = await client.list_prompts()
         rendered = await client.get_prompt("lib_debug")
-        mirrored = await client.call_tool("list_prompts", {})
     assert [p.name for p in prompts] == ["lib_debug"]
     assert "first" in rendered.messages[0].content.text
-    assert mirrored.content[0].text.count("lib_debug") == 1
 
 
 async def test_a_skipped_skills_own_files_neither_serve_nor_fail_the_plugin(tmp_path):

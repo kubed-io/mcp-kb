@@ -52,16 +52,14 @@ Agent-aware clients can call `agents/list` and `agents/get` for the subagents yo
 
 MCP already has a primitive for material an agent reads, and it is the **resource**. So resources are the interface, and a client that speaks them sees *no tools at all* (VS Code is listed the resource pair).
 
-Many clients only implement tools — n8n's MCP Client Tool above all — and to those a resource-only server looks empty. They get the same interface as up to four tools, revealed with `?resources=off`, `?prompts=off`, or both:
+Many clients only implement tools — n8n's MCP Client Tool above all — and to those a resource-only server looks empty. They get the same interface as two tools, revealed with `?resources=off`:
 
 | Tool | Mirrors |
 |---|---|
 | `list_resources()` | `resources/list` — the same `uri`/`name`/`description` rows |
 | `read_resource(uri)` | `resources/read` — the same URI |
-| `list_prompts()` | `prompts/list` — each prompt's name, description and arguments |
-| `get_prompt(name, arguments)` | `prompts/get` — the rendered, role-tagged messages |
 
-The vocabulary is the protocol's own, so an agent that can drive MCP resources can drive these with nothing new to learn. Each pair is hidden from a client that has the real feature, and stays callable either way.
+The vocabulary is the protocol's own, so an agent that can drive MCP resources can drive these with nothing new to learn. The pair is hidden from a client that has the real feature, and stays callable either way. A tools-only client reads prompt files with `?listed=prompts`, which lists them, and `read_resource`.
 
 📖 [Tools](https://github.com/kubed-io/mcp-kb/wiki/Tools) · [Installing](https://github.com/kubed-io/mcp-kb/wiki/Installing)
 
@@ -69,7 +67,7 @@ The vocabulary is the protocol's own, so an agent that can drive MCP resources c
 
 ## 🎯 One server, many narrow agents
 
-A client can be given part of the catalogue and no more, and the narrowing is a **ceiling the model cannot widen past** — enforced on resources, prompts and every mirror tool alike:
+A client can be given part of the catalogue and no more, and the narrowing is a **ceiling the model cannot widen past** — enforced on resources, prompts and both tools alike:
 
 | On the MCP URL | Header | Sees |
 |---|---|---|
@@ -179,8 +177,7 @@ Per request, on the MCP URL — each with a header form that beats it:
 
 | Parameter | Header | Does |
 |---|---|---|
-| `?resources=off` | `X-MCP-Resources` | Reveals the resource mirror tools |
-| `?prompts=off` | `X-MCP-Prompts` | Reveals the prompt mirror tools |
+| `?resources=off` | `X-MCP-Resources` | Reveals the resource tools |
 | `?library=<name>` | `Kb-Library` | Restricts this client to one library, by name |
 | `?category=<name>` | `Kb-Category` | Restricts it to the libraries listing that category and the plugins declaring it |
 | `?tag=a,b` | `Kb-Tag` | Restricts it to what carries all of those tags; repeat for any-of |

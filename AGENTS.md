@@ -76,8 +76,8 @@ installer's, against whatever image tag it chooses.
 | `kubed/mcp_kb/sources/` | where bytes come from, one `Fetch` at a time — a loader per source in `__init__.py`, over `file.py`, `git.py`, `webdav.py`, the shared per-version `export.py`, `errors.py`, and `live.py`, because revalidation is a source concern; and `ServedTrees`, the one loader kubed-mcp is handed, which answers a plugin's address with the tree kb is serving for it and never fetches |
 | `kubed/mcp_kb/mcp/` | what an agent sees |
 | ⤷ `skills.py` | `SkillServing` — the skills, agents and prompts, served by kubed-mcp's plugin layer: `publish` adds every plugin to a plugin set each generation, its `commands` exactly kb's prompt files (`entry_for`), `view` is kb's scope, `rewrite` its one rewriter (a command's body included), `read_command` kb's dialect reader, `agent_meta` adds kb's `_meta` key, the parity guard narrows the catalogue to what is served, and the live re-read; `QuietSelection`, the log filter that drops the layer's own line for each skip kb reports, and for a file kb left out |
-| ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `HideMirrorTools` |
-| ⤷ `tools.py`, `prompts.py` | `prompts.py` `MCPFilePrompt` and `adapt`, the `Prompt` kb's reader hands the plugin layer, and the prompt mirror pair; `tools.py` names kubed-mcp's resource pair (DLV-6) and holds the read-only annotations |
+| ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead` |
+| ⤷ `tools.py`, `prompts.py` | `prompts.py` `MCPFilePrompt` and `adapt`, the `Prompt` kb's reader hands the plugin layer; `tools.py` names kubed-mcp's resource pair (DLV-6) and the delivery inputs for the wiki, and defines no tool |
 | ⤷ `request.py`, `scope.py` | what the current request says about itself, and the `Scope` it becomes |
 | ⤷ `instructions.py` | `ScopedInstructions` — sets the `instructions` on each `initialize` and `server/discover` answer |
 | ⤷ `announce.py` | `AnnounceChanges` — telling a session its listing moved |
@@ -97,14 +97,13 @@ closed unanswered), so each module exposes a `register(...)` that `create_app` c
 Mounting sub-servers is the other option and is wrong here: it namespaces tool
 names with a prefix, and these names are the agent's API.
 
-- **Adding a tool** → a module of its own in `mcp/` with a `register(...)`, as
-  `mcp/prompts.py` registers the prompt mirror, called from `create_app`; its
-  shared annotations are `mcp/tools.py`'s `READ_ONLY`. Never `server.py` or
-  `app.py`. `list_resources` and `read_resource` are kubed-mcp's (DLV-6), and it
+- **Adding a tool** → a module of its own in `mcp/` with a `register(...)`
+  called from `create_app`, never `server.py` or `app.py`. kb registers none
+  today: `list_resources` and `read_resource` are kubed-mcp's (DLV-6), and it
   refuses a tool of either name, so `mcp/tools.py` defines none. But think
-  first: the tools are a *mirror* of the resources and the prompts, and one that
-  is not breaks the promise the whole design rests on — that a client which
-  knows how to read MCP resources already knows how to drive this server.
+  first: the tools are a *mirror* of the resources, and one that is not breaks
+  the promise the whole design rests on — that a client which knows how to read
+  MCP resources already knows how to drive this server.
 - **Changing the URI grammar, or what a URI resolves to** → `catalogue/uris.py`.
   Resources and tools both project from `Catalogue`, so a change there lands on
   both at once, which is the point.
@@ -189,12 +188,13 @@ for what `QuickMCP` does not pass through (a transform, a custom route).
 ## The surface, and why the tools are a mirror
 
 Resources are the interface. The tools mirror them and nothing else:
-`list_resources()` returns the rows `resources/list` returns,
-`read_resource(uri)` takes the URI `resources/read` takes, and `list_prompts` /
-`get_prompt` do the same for prompts. The resource pair is kubed-mcp's (DLV-6),
-over every resource the server has, so kb defines neither tool and may not
-(DLV-7); the prompt pair is kb's, in `mcp/prompts.py`. An agent that can drive MCP resources can
-drive this server without learning anything.
+`list_resources()` returns the rows `resources/list` returns and
+`read_resource(uri)` takes the URI `resources/read` takes. The pair is
+kubed-mcp's (DLV-6), over every resource the server has, so kb defines neither
+tool and may not (DLV-7), and the server has no other. A prompt's file is a
+resource too: a tools-only client reads it at `prompts://` once
+`Kb-Listed: prompts` lists it. An agent that can drive MCP resources can drive
+this server without learning anything.
 
 Progressive disclosure lives in the address space, so adding a library adds
 no tools:
@@ -316,11 +316,9 @@ the build is made, so a render fills in the dialect's placeholders alone.
 A client declares it cannot read resources with `?resources=off`,
 `Kb-Resources: off` or `X-MCP-Resources: off`, and only then, or for a client
 kubed-mcp knows as VS Code (DLV-15), does kubed-mcp list the resource mirror
-(DLV-2); prompts work the same way with `?prompts=off` or `Kb-Prompts: off`,
-which kb reads itself. There is no protocol signal for either —
-prompts are a server capability, so a client cannot advertise using them. The
-tools stay callable either way: hiding one from a listing is presentation,
-refusing to run one would be a different and worse contract.
+(DLV-2). The tools stay callable either way: hiding one from a
+listing is presentation, refusing to run one would be a different and worse
+contract.
 
 Three ways to hard-scope, the first two ceilings the model cannot widen past:
 
@@ -373,10 +371,6 @@ which generation is being served, and has a refresh picked up an edit yet.
   lets `kubed.mcp_kb` and the sibling `kubed.selenium_flow` install side by
   side. Adding one breaks the pair silently, in whichever environment resolves
   second; `tests/test_packaging.py` fails if one appears.
-- **The prompt mirror is FastMCP's `PromptsAsTools`**, subclassed to add
-  read-only annotations, turn an unknown name or a missing argument into a tool
-  error, and never ask for input (elicitation) through the mirror. Keep it FastMCP's: a prompt is role-tagged messages,
-  which a resource or a hand-written tool would flatten to text.
 - **Do not reach for `ResourcesAsTools`, or back for `SkillsDirectoryProvider`.**
   The resource mirror is kubed-mcp's DLV-6 pair and the skills are its plugin
   layer's. The listing is the plugin layer's, and `SkillsDirectoryProvider` would

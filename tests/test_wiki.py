@@ -121,7 +121,7 @@ def test_configuration_documents_every_config_model():
 def test_installing_documents_every_url_parameter_and_header():
     """The URL is the whole client-side API, and it is hand-written prose.
 
-    A parameter added to `request.py` and left out of Installing is a feature
+    A parameter added to `request.py` or `tools.py` and left out of Installing is a feature
     that ships invisible to anyone connecting a client from the manual.
     """
     page = (WIKI / "Installing.md").read_text().lower()
@@ -129,16 +129,15 @@ def test_installing_documents_every_url_parameter_and_header():
         request.LIBRARY_PARAM,
         request.CATEGORY_PARAM,
         request.TAG_PARAM,
-        request.PROMPTS_PARAM,
-        request.RESOURCES_PARAM,
+        tools.RESOURCES_PARAM,
         tools.LISTED_PARAM,
     ]
     headers = [
         request.LIBRARY_HEADER,
         request.CATEGORY_HEADER,
         request.TAG_HEADER,
-        request.PROMPTS_HEADER,
-        request.RESOURCES_HEADER,
+        tools.RESOURCES_HEADER,
+        "x-mcp-resources",
         tools.LISTED_HEADER,
     ]
     for name in parameters:
