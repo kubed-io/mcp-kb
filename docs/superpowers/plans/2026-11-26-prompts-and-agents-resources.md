@@ -34,6 +34,17 @@
 > Two of Task 2's AGENTS.md edits, the Agents-extension paragraph and the provider-getter note,
 > moved into Task 1, so that no commit leaves the manual false.
 > `tests/test_agents_extension.py::test_nothing_else_changes` now allows exactly the `Agents:` line.
+>
+> **Task 2 ran 2026-11-26, and the plan is complete.** The collision skip reaches `/health` as
+> `skipped: [{"path": "prompts/x.md", "reason": "prompts://lib/prompts/x.md is already served by
+> commands/prompts/x.md"}]`, so no assertion is xfail. The scope test reads a second library's
+> addresses too, so the `?library=else` arm runs against a view that selects something. The
+> whole-branch review found no Critical or Important issues. Its seven doc and test fixes landed with
+> Task 2:
+> - the changelog line no longer names only `<library>/_index.md`;
+> - INS-19 cites SKL-58 and LIB-29, not SKL-45;
+> - agents.md's opening names AGT-3;
+> - SKL-8's lead no longer claims every address is `skill://`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -430,7 +441,7 @@ view and prefix. If one fails, the finding goes to Dr K. kb grows no workaround 
   `tests.conftest`, and `market` from `tests.test_plugin_serving`.
 - Produces: nothing later tasks use.
 
-- [ ] **Step 1: Write the tests**
+- [x] **Step 1: Write the tests**
 
 ```python
 URIS = ["prompts://lib/_index.md", "prompts://lib/top.md", "prompts://lib/a/_index.md",
@@ -468,13 +479,13 @@ The `skipped` assertion is the one fact not checked against code. If 0.3.0's ski
 `/health`, mark that assertion `xfail(strict=True)` with the reason "K4's place collision is not
 reported (quick-mcp ask)", and name it in the PR.
 
-- [ ] **Step 2: Run them**
+- [x] **Step 2: Run them**
 
 Run: `pytest tests/test_kinds_as_resources.py tests/test_agents.py -v`
 Expected: PASS. The `test_agents.py` fallback tests (`test_the_library_fallback_refuses_an_agent_file`,
 `test_the_skill_fallback_refuses_an_agent_file`) pass unchanged, which is D5.
 
-- [ ] **Step 3: Spec rows and AGENTS.md**
+- [x] **Step 3: Spec rows and AGENTS.md**
 
 - **PRM-63**, in a new `## As a resource` section after "Naming". Its content is:
   - A served prompt's file also reads, unlisted, at `prompts://<namespace>/<place>`. The namespace
@@ -512,12 +523,12 @@ Expected: PASS. The `test_agents.py` fallback tests (`test_the_library_fallback_
   - In "A provider that stores a `Catalogue`…", `ScopedInstructions` now takes
     `SkillServing.served_snapshot`, not `catalogue()`. *(Done in Task 1, with the Agents paragraph.)*
 
-- [ ] **Step 4: Run every check**
+- [x] **Step 4: Run every check**
 
 Run: `ruff check . && pytest && python scripts/generate_wiki.py --check`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_kinds_as_resources.py docs/superpowers/specs AGENTS.md

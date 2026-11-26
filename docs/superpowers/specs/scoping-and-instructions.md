@@ -218,9 +218,9 @@ starts with a `[<library>]` line and no names are listed.
 
 **INS-19.** After the pointer, a section has a `Prompts:` line when a prompt of the library is in
 the request's scope, then an `Agents:` line when an agent is. A prompt is in scope by SCP-27 and an
-agent by AGT-15, and only what the plugin layer serves counts (SKL-45). The lines are built from
-what the plugin layer serves as the answer is written (SKL-45): the generation the request
-pinned, or else the one it serves now.
+agent by AGT-15, and only what the plugin layer serves counts (SKL-58, LIB-29). The lines are built
+from what the plugin layer serves as the answer is written: the generation the request pinned, or
+else the one it serves now.
 
 - Each line names `<scheme>://<library>/_index.md` when the library's main plugin (SKL-59) serves
   the scope one of that kind. Only then is that folder there (kubed-mcp's PLUG-68).

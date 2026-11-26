@@ -1217,8 +1217,8 @@ class SkillServing:
 
         The one the request's view pinned when it has pinned, otherwise the one
         published with the set kubed-mcp serves now. ``_published`` is set
-        before ``serve()`` and ``KnowledgeBase`` swaps after, so this one never
-        names a generation the layer does not serve yet. While this serving
+        just before ``serve()`` and ``KnowledgeBase`` swaps after, so it leads
+        kb's snapshot and never lags what the layer serves. While this serving
         stages a generation, and in the publishing context only, it is the
         staged one, which the instructions never reach.
         """

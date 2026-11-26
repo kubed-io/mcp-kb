@@ -3,9 +3,10 @@
 kb serves the subagent definitions that plugins ship, through the draft MCP Agent Discovery
 Extension (`io.modelcontextprotocol/agents`, agents-wg proposal 0000 at `137d88b`, targeting MCP
 `2026-07-28`). It serves definitions only. The host builds and runs the agent. Agents are never
-served as prompts or tools, and as a resource only by AGT-18. The extension is kubed-mcp's plugin
-layer's: it serves the agents of the plugins kb adds to its plugin set (SKL-58), named, read and
-rewritten as this file says.
+served as prompts or tools, and as a resource only at `agents://` (AGT-18, AGT-19), which the
+instructions point at (INS-19), and at `skill://` only when an operator's `files:` glob names one
+(AGT-3). The extension is kubed-mcp's plugin layer's: it serves the agents of the plugins kb adds to
+its plugin set (SKL-58), named, read and rewritten as this file says.
 
 **The extension is experimental, and kb follows the draft named above.** The README names the
 draft and marks the extension experimental. The rule behind every choice here is Claude Code's: a
@@ -197,6 +198,11 @@ below the plugin root. A renamed agent (AGT-8) reads at `agents://<namespace>/<n
 the request's `Listed` setting names `agents` (DLV-8). It is held to the request's scope as
 `agents/get` is, and out of scope it fails as an absent address does. It reads as the plugin layer
 builds the file, after kb's rewriter and the prefix.
+
+**AGT-19.** Every folder holding a served agent file is a directory with `_index.md` and
+`_index.json` (kubed-mcp's PLUG-68), under the request's scope. `agents://<library>` is one only
+when the main plugin serves an agent. The instructions point at it, or at each plugin folder that
+serves one (INS-19).
 
 ## Caching and errors
 

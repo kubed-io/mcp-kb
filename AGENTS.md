@@ -268,6 +268,15 @@ one set of bytes:
   and logs what it changed, as a refresh does. What it cannot cover is a skill that fails one
   view's build alone (N15): that one is still named in kb's indexes under that view.
 
+A served prompt's file reads, unlisted, at `prompts://<namespace>/<place>`, the place being its path
+below the commands folder it was read from, or the path its manifest lists it by (PRM-63), and an
+agent's at `agents://<namespace>/<path>`. Every folder holding one has `_index.md` and
+`_index.json`. All of it is kubed-mcp's, and kb serves neither scheme. `prompts://<library>` (and
+`agents://<library>`) is a folder only when the library's main plugin serves that kind, which is why
+INS-19 can point at plugin folders. Two files of one plugin at one place: the first in kb's path
+order serves, and the other is a `skipped` row on `/health` (kubed-mcp's limit, reported to
+quick-mcp).
+
 kubed-mcp's own types and naming apply to a skill's files: a file that is not
 UTF-8 text, or has no or an unknown extension, is a blob (SKL-22), its media type is the plugin layer's (SKL-23), and
 `_manifest` names the skill by its `name` (SKL-24). Both `server/discover` and

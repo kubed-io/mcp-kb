@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `<plugin>:<skill>` name in a skill, prompt or agent reads as the skill's `skill://` address.
 - Browse a library, a folder or a skill's own folders with `resources/directory/read`, or read the `_index.json` beside each.
 - **Send profiles to Pyroscope, and traces and metrics over OpenTelemetry**, from a `telemetry` section in the config; the image ships the packages.
-- A client's instructions now point at each library's prompts and agents, at `prompts://<library>/_index.md` and `agents://<library>/_index.md`.
+- A client's instructions now say where each library's prompts and agents read, at their `prompts://` and `agents://` indexes.
 
 ### Changed
 
