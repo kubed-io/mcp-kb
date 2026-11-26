@@ -411,11 +411,11 @@ async def _directory(url, uri):
     return answer["resources"]
 
 
-async def test_a_directory_read_never_climbs_out_of_the_library(url):
+async def test_a_directory_read_that_pops_past_the_root_names_nothing(url):
     """Since kubed-mcp 0.4.1 it resolves the dots of a
     ``resources/directory/read`` itself, as it does a read's (SKL-13): a `..`
-    that stays inside the library lists its folder, and one that climbs out of
-    it names nothing, so the address never leaves the library."""
+    that stays inside the library lists its folder, and one with nothing left
+    to pop, past ``skill://``, names nothing."""
     from kubed.mcp.protocol import MCPError
 
     plain = await _directory(url, "skill://grafana")

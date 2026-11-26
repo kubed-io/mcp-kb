@@ -158,9 +158,9 @@ gateway needs to find them. `invalid_agent_definition` therefore never arises.
 
 **AGT-16.** An agent of a live fetch is revalidated by every request that reads skills or agents
 under a scope admitting its plugin (SKL-37). A file that moved re-reads its plugin, and from the
-next request on `agents/list` and `agents/get` both serve the new read: the request that found the
-edit still reads what it began with. An edit of the frontmatter `name` serves the agent under the
-new name without a refresh, and a later plugin's agent it now clashes with is renamed by AGT-8.
+request that found the edit on `agents/list` and `agents/get` both serve the new read. An edit of
+the frontmatter `name` serves the agent under the new name without a refresh, and a later
+plugin's agent it now clashes with is renamed by AGT-8.
 
 An edit that no longer reads as an agent leaves the plugin serving the build it served, its skills
 and prompts and the agent under its name included. It no longer reads when kb cannot read it (it
@@ -171,11 +171,11 @@ that is not a non-empty string, or a frontmatter `name` that is not usable. The 
 one of its files moves, as PRM-60 says for a prompt.
 
 An edit that gives an agent a name another agent file of the same plugin serves still reads, so
-nothing is kept: from the next request the first of the two files in path order is served under
-that name and the other is skipped (AGT-6), as a refresh of the same tree serves them. An edit
-whose new name is taken in its library, and whose `<name>@<plugin name>` is taken too, still reads
-as well: from the next request that agent is not served in that library and is listed under its
-`unserved` (AGT-8), as a refresh would leave it. A refresh reads the plugin from its source and has no earlier build to
+nothing is kept: from the request that found the edit the first of the two files in path order
+is served under that name and the other is skipped (AGT-6), as a refresh of the same tree serves
+them. An edit whose new name is taken in its library, and whose `<name>@<plugin name>` is taken
+too, still reads as well: from the request that found the edit that agent is not served in that
+library and is listed under its `unserved` (AGT-8), as a refresh would leave it. A refresh reads the plugin from its source and has no earlier build to
 keep.
 
 **AGT-17.** `instructions` rewrites qualified skill names (SKL-54) as SKL-55 says, for the

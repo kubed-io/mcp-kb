@@ -191,11 +191,11 @@ def default_of(field: dict) -> str:
 def notes_of(field: dict) -> str:
     """What the schema constrains this field to, beyond its type.
 
-    pydantic carries no per-field descriptions in this config model — the prose
-    is in each model's docstring, printed above its table — so the column would
-    be empty. The constraints are the part a table can say better than prose:
-    a `refresh` pattern and a `cache` enum are exactly what someone writing the
-    file gets wrong.
+    A field's own description, where the model gives one (the items carry
+    `doc=`), leads; the rest of the prose is in each model's docstring, printed
+    above its table. The constraints are the part a table can say better than
+    prose: a `refresh` pattern and a `cache` enum are exactly what someone
+    writing the file gets wrong.
     """
     described = clean(field.get("description"))
     parts = []

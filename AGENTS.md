@@ -51,9 +51,9 @@ installer's, against whatever image tag it chooses.
 | --- | --- |
 | `kubed/mcp_kb/server.py` | `KnowledgeBase`: cold start, the refresh loop, which snapshot is current. No FastMCP, no tool bodies |
 | `kubed/mcp_kb/app.py` | `create_app` — the composition root: the `QuickMCP` (kubed-mcp) over a `KnowledgeBase`, its `ServedTrees` loader, its container's `KnowledgeBase` singleton and `Catalogue` transient, `SkillServing`, and every `register(...)` |
-| `kubed/mcp_kb/main.py` | CLI and env parsing, and the `mcp-kb` console script |
+| `kubed/mcp_kb/main.py` | the `mcp-kb` console script: the `serve`/`schema` word, `--help` read off the schema, the `CONFIG` guard, and the run. It parses no item itself |
 | `kubed/mcp_kb/routes.py` | the plain-HTTP surface: `/health`, `/reindex`, `/openapi.yaml` |
-| `kubed/mcp_kb/config.py` | the config file's model — `Config`, `SourceConfig`, `PluginConfig`, `LibraryConfig`, `Selector`, `BasicAuth`, `EnvRef`, `schema()`, and `telemetry`, kubed-mcp's `TelemetrySettings` as it is |
+| `kubed/mcp_kb/config.py` | the config's sections and `load` — the root `Config` and its `SourceConfig`, `PluginConfig`, `LibraryConfig`, `Selector`, `BasicAuth` and `EnvRef`; `Serving` and `Telemetry`, kubed-mcp's `serving` and `telemetry` sections with kb's defaults and guard; `SECTIONS`, `load()`, which hands them to kubed-mcp's `load_config`, and `schema()` |
 | `kubed/mcp_kb/plugins/` | what the config declares and a marketplace publishes, resolved |
 | ⤷ `address.py` | `<source>://<path>[//<subdir>][?ref=]` — `Address`, and the fetch key that makes two plugins one clone |
 | ⤷ `__init__.py` | `Fetch`, `Globs`, `Plugin`, and the resolution of a declared plugin. Imports no FastMCP |
@@ -154,13 +154,18 @@ names with a prefix, and these names are the agent's API.
   through `Catalogue.qualified_names`. It is rewritten to an address, never to a
   name, because a client picks its own names for kb's skills. Commands and bare
   words are left alone.
-- **A new flag or env var** → `main.py`, which is the whole configuration
-  surface. Nothing else in the package reads `os.environ`, except `{env: NAME}`
-  resolution in `config.py`, which is the one other reader — and it resolves a
-  credential where it is declared so it never travels as a plain `str`.
+- **A new config item** → a field of a section in `config.py`, with its `env`
+  and `arg` written out on kubed-mcp's `Field` (imported as `Item`), never
+  derived. The file, its env var and its flag then all set it, and `--help`, the
+  schema and the wiki read it off the schema. kubed-mcp's loader reads the
+  environment for every item; `main.py` loads, and reads `os.environ` for the
+  `CONFIG` guard alone. `EnvRef.resolve` in `config.py` is still the one other
+  reader — and it resolves a credential where it is declared so it never travels
+  as a plain `str`.
 - **A telemetry setting** → kubed-io/quick-mcp's `TelemetrySettings`, never a
-  field of kb's. `Config.telemetry` embeds it as it is, `QuickMCP` reads it off
-  the config, and `config_hash` leaves it out because it changes nothing served.
+  field of kb's. `Telemetry` subclasses kubed-mcp's section for kb's `profiles`
+  guard alone, `QuickMCP` reads it off the loaded config, and `config_hash`
+  reads the three lists alone, so it changes nothing served.
   Metrics are pushed over OTLP, or scraped from the exporter's own port with
   `OTEL_METRICS_EXPORTER=prometheus` and `OTEL_EXPORTER_PROMETHEUS_HOST=0.0.0.0`
   for a scrape from another pod. The server adds no metrics route. Only the
@@ -180,7 +185,10 @@ Where FastMCP is used, it arrives through `kubed-mcp`'s facade: kb imports
 `kubed.mcp`, `kubed.mcp.protocol`, `kubed.mcp.request`, `kubed.mcp.plugins` (the
 plugin set, its view and its rewriter's `Site`), `kubed.mcp.skills`,
 `kubed.mcp.agents` (its `parse_agent`, imported by `mcp/skills.py` alone),
-`kubed.mcp.gateway`, and `kubed.mcp.delivery` (its `Resolved`, for the `mcp.instructions` hook), never `fastmcp`, `mcp` or `mcp_types` directly. `kubed-mcp` owns the FastMCP pin, so
+`kubed.mcp.gateway`, and `kubed.mcp.delivery` (its `Resolved`, for the `mcp.instructions` hook), never `fastmcp`, `mcp` or `mcp_types` directly.
+`config.py` takes `Field` (as `Item`), `config`, `config_schema`, `load_config`,
+`LoadedConfig`, `ServingSettings` and `TelemetrySettings` from `kubed.mcp`, never
+`kubed.mcp._config` or `kubed.mcp._builtins`. `kubed-mcp` owns the FastMCP pin, so
 `pyproject.toml` declares none. A name the facade lacks is added there, in
 kubed-io/quick-mcp, not imported around it; `mcp.server` is the FastMCP instance,
 for what `QuickMCP` does not pass through (a transform, a custom route).
@@ -265,7 +273,9 @@ one set of bytes:
   `/health`'s counts and the scope refusal read what is served. A plugin
   kubed-mcp refuses is a conflict in its library (LIB-29), a prompt name an
   earlier plugin serves included. A live re-read narrows the catalogue again
-  and logs what it changed, as a refresh does. What it cannot cover is a skill that fails one
+  and logs what it changed, as a refresh does, and the request that re-reads
+  serves the edit: the view re-reads before kb's state and kubed-mcp's are
+  pinned (SKL-37). What it cannot cover is a skill that fails one
   view's build alone (N15): that one is still named in kb's indexes under that view.
 
 A served prompt's file reads, unlisted, at `prompts://<namespace>/<place>`, the place being its path
@@ -417,12 +427,6 @@ which generation is being served, and has a refresh picked up an edit yet.
   serves nothing in that library (LIB-28), and kubed-mcp's nesting guard refuses
   the same overlap (LIB-29). Renaming the plugin is the fix; there is no
   setting that moves a namespace.
-- **A live edit reads one request late.** kubed-mcp pins a request's state
-  before it calls the view, so the request whose view revalidates and re-adds a
-  moved plugin still reads the copy it pinned, and the next request reads the
-  edit (SKL-37, N6). quick-mcp#45 would let the re-read land in its own request;
-  a kb middleware that re-reads before the pin is ruled out. A test of a live
-  edit reads twice.
 - **`served_tree` takes no lock, and must not.** `refresh` publishes the new
   plugin set while it holds `KnowledgeBase._lock`, a plain `Lock`, and kubed-mcp
   reaches `served_tree` through `ServedTrees` during that publish, so taking the

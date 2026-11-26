@@ -23,7 +23,10 @@ def test_the_schema_subcommand_prints_the_model(capsys):
     assert json.loads(capsys.readouterr().out) == schema()
 
 
-def test_serve_with_a_missing_config_exits_2_with_a_message_on_stderr(capsys):
+def test_serve_with_a_missing_config_exits_2_with_a_message_on_stderr(
+    monkeypatch, capsys
+):
+    monkeypatch.delenv("CONFIG", raising=False)
     """A bad config must fail loudly at boot, not silently serve nothing."""
     with pytest.raises(SystemExit) as raised:
         main(["serve", "--config-file", "/nope"])
@@ -94,7 +97,8 @@ def test_the_httpx_logger_is_held_at_warning_below_debug():
         httpx_logger.setLevel(saved[2])
 
 
-def test_a_typod_telemetry_key_exits_2(tmp_path, capsys):
+def test_a_typod_telemetry_key_exits_2(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("CONFIG", raising=False)
     path = tmp_path / "config.yaml"
     path.write_text("telemetry:\n  profile: http://pyroscope.example.com:4040\n")
     with pytest.raises(SystemExit) as raised:

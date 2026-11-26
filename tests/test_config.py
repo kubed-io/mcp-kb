@@ -771,7 +771,8 @@ def test_the_schema_is_the_composed_one():
     assert published == config_schema(*SECTIONS)
     props = published["properties"]
     assert {
-        "sources", "plugins", "libraries", "cache_dir", "serving", "telemetry", "delivery"
+        "sources", "plugins", "libraries", "cache_dir",
+        "serving", "telemetry", "delivery",
     } <= set(props)
     assert (props["sources"]["env"], props["sources"]["arg"]) == (
         "KB_SOURCES", "--sources"

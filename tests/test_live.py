@@ -483,6 +483,8 @@ def test_a_manifest_is_priced_against_the_server_before_it_is_served(
 
     assert size() > before, "N6: the read that re-adds prices the edit"
     assert mcp.generation == generation + 1
+    # Reads a kubed-mcp internal: the build cache is public nowhere, so a 0.5.x
+    # patch may move it.
     built = list(mcp._plugins._memo.builds)
     assert [key[0] for key in built] == [mcp.generation], built
 
@@ -916,8 +918,8 @@ async def test_an_out_of_scope_live_skill_is_not_revalidated(webdav, tmp_path):
 
 def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock, caplog):
     """N6 for an agent: the re-adding request serves the edit, and so does the
-    one after it, on ``agents/get`` and ``agents/list`` both; an edit that no longer parses
-    keeps the plugin's last good build, said once (AGT-16), and the next good
+    one after it, on ``agents/get`` and ``agents/list`` both; an edit that no longer
+    parses keeps the plugin's last good build, said once (AGT-16), and the next good
     one is served."""
     webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
     webdav.write(
