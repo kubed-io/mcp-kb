@@ -49,8 +49,7 @@ renders a ``SKILL.md`` through ``instructions`` and an agent's body through
 ``agent_instructions``, and ``agent_meta`` is kb's key in an agent's ``_meta``.
 
 Nothing here imports FastMCP. Absent content is ``None``, never an exception, so
-a caller in the resource half can raise and a caller in the tool half can
-explain -- and the scoping rule stays in one place either way.
+the resource half raises on it -- and the scoping rule stays in one place.
 """
 
 from __future__ import annotations

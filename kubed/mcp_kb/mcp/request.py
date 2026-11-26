@@ -1,11 +1,10 @@
 """What the current request says about itself.
 
-Two kinds of question, both answered from the HTTP request and both meaningless off it:
-*what slice of the catalogue may this client see*, and *which MCP features
-can it use natively*. They
-are read here rather than in the handlers because both halves of the server --
-the resources and kubed-mcp's tools that mirror them -- have to agree on the answers,
-and a second reader is how the two halves drift apart.
+One question, answered from the HTTP request and meaningless off it: *what
+slice of the catalogue may this client see*. It is read here rather than in the
+handlers because both halves of the server -- the resources and kubed-mcp's
+tools that mirror them -- have to agree on the answer, and a second reader is
+how the two halves drift apart.
 
 Every helper degrades to the permissive default outside an HTTP request, which
 is what stdio is: no headers, no query string, nothing to narrow by.
@@ -13,7 +12,6 @@ is what stdio is: no headers, no query string, nothing to narrow by.
 
 from __future__ import annotations
 
-from kubed.mcp.protocol import client_supports_extension
 from kubed.mcp.request import request_values
 
 from .scope import Scope
@@ -37,13 +35,6 @@ TAG_PARAM = "tag"
 TAG_HEADER = "kb-tag"
 TAG_ALIAS = "x-skill-tags"
 TAG_PARAM_ALIAS = "tags"
-
-# How a client declares it cannot read resources: what kubed-mcp lists its
-# resource mirror by (DLV-6), and what the instructions are worded for.
-RESOURCES_PARAM = "resources"
-RESOURCES_HEADER = "x-mcp-resources"
-RESOURCES_KB_HEADER = "kb-resources"
-_OFF = ("off", "false", "0", "no", "none")
 
 def _read(
     header: str,
@@ -92,38 +83,3 @@ def requested_scope() -> Scope:
         ),
         _read(TAG_HEADER, TAG_PARAM, TAG_ALIAS, TAG_PARAM_ALIAS),
     )
-
-
-def _declared_on(header: str, param: str, kb_header: str) -> bool:
-    """True unless the client said ``off`` for this capability.
-
-    ``Kb-<Name>`` wins over ``X-MCP-<Name>``, then the query parameter.
-    """
-    declared = _read(kb_header, param, header)
-    return not declared or declared[0].strip().lower() not in _OFF
-
-
-def client_reads_resources() -> bool:
-    """Whether this caller can be expected to read MCP resources.
-
-    Defaults to true -- the assumption is that a client is spec-complete, and a
-    client that is not says so, with ``?resources=off`` on the MCP URL or an
-    ``X-MCP-Resources: off`` header.
-    """
-    return _declared_on(RESOURCES_HEADER, RESOURCES_PARAM, RESOURCES_KB_HEADER)
-
-
-def declared_on_initialize(context) -> bool:
-    """Whether the ``initialize`` request declared the Skills extension."""
-    params = getattr(getattr(context, "message", None), "params", None)
-    extensions = getattr(getattr(params, "capabilities", None), "extensions", None)
-    return bool(extensions) and EXTENSION_ID in extensions
-
-
-def declared_on_discover(context) -> bool:
-    """Whether a 2026-07-28 request's ``_meta`` declared it; no session, no."""
-    try:
-        session = context.fastmcp_context.session
-        return client_supports_extension(session, EXTENSION_ID)
-    except (RuntimeError, AttributeError):  # no context or session: not declared
-        return False

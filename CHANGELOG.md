@@ -73,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A marketplace entry on another repository now serves its edited `skills`, `commands`, `agents` or `path` on the next refresh.
 - A marketplace plugin's version is now its `plugin.json`'s when both declare one, as in Claude Code.
 - `/health` lists the skill folders a plugin cannot serve, and counts no skills, prompts or agents for a plugin that is not served.
+- A VS Code client with no header is told to read with `read_resource`, matching the tools it is listed.
 
 ### Removed
 

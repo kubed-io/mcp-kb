@@ -5,7 +5,7 @@ Three pages describe things the code defines exactly once, and a hand-written
 copy of any of them would be wrong within a month:
 
     Configuration.md   every field of every config model, from config.schema()
-    Tools.md           the two resource tools, from kubed-mcp's own definitions
+    Tools.md           the two resource tools, from a live server's tool list
     Endpoints.md       the HTTP surface, from spec.build_spec()
 
 They are built in-process, from the installed package, rather than read off

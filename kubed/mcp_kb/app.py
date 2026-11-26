@@ -93,7 +93,7 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
     )
     # The snapshot the plugin layer serves, not kb's: the handshake pins no
     # build, so its pointers name what is served (INS-19).
-    mcp.add_middleware(ScopedInstructions(serving.served_snapshot))
+    mcp.instructions(ScopedInstructions(serving.served_snapshot))
     mcp.add_middleware(
         RefuseEmptyScope(
             lambda scope: what_is_wrong(scope, config, knowledge_base.snapshot)

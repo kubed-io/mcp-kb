@@ -827,7 +827,7 @@ TEMPLATE = (
     "skill",
     "A skill, index or file this server serves: {library} is a library's name"
     " and {path} a path below it. Start at skill://{library}/_index.md;"
-    " resources/list lists each skill's SKILL.md.",
+    " resources/list lists each skill's SKILL.md by default.",
     None,
 )
 

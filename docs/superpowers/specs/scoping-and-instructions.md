@@ -173,12 +173,12 @@ a build. The checks of SCP-31 read kb's catalogue as narrowed to what the plugin
 are built for that request. The same request gets the same text from either.
 
 **INS-2.** The text is built from the current catalogue, the request's scope, whether the client
-reads resources (see [http-and-tools.md](http-and-tools.md)), whether the client declared the
-Skills extension, and the request's resource prefix.
+reads resources, which is kubed-mcp's resolved `resources` setting for the request (DLV-2,
+DLV-15; see [http-and-tools.md](http-and-tools.md)), whether the client declared the Skills
+extension, and the request's resource prefix.
 
-**INS-3.** The client declared the Skills extension when `io.modelcontextprotocol/skills` is in
-the `initialize` request's `capabilities.extensions`, or, for `server/discover`, among the client
-capabilities that request carries. A request with no message or no session has not declared it.
+**INS-3.** The client declared the Skills extension when `io.modelcontextprotocol/skills` is
+among the extensions kubed-mcp resolved for the request (DLV-11).
 
 **INS-4.** A session keeps the text it was given. No notification changes it. A new connection
 gets text built from the catalogue as it is then.
@@ -247,12 +247,12 @@ line. With no library selected, the text is the footer alone.
 
 | Mode | Footer |
 |---|---|
-| Resources (default) | `Read a listed skill at skill://<library>/<path>/SKILL.md; read its _manifest in place of SKILL.md for the other files it ships.` |
-| Tools | `Read these with read_resource.` |
+| Resources (`resources` resolved `on`) | `Read a listed skill at skill://<library>/<path>/SKILL.md; read its _manifest in place of SKILL.md for the other files it ships.` |
+| Tools (`resources` resolved `off`, a VS Code client with no setting included) | `Read these with read_resource.` |
 
 **INS-16.** With a resource prefix, every address in the description, the notes, the pointer and
-the resources footer is written with the prefix in front (`kb+skill://…`). kb writes the prefix
-over the whole text with the plugin layer's writer (GW-11), and its rules are SKL-40 and SKL-41
+the resources footer is written with the prefix in front (`kb+skill://…`). kubed-mcp writes the prefix
+over the whole text kb's instructions hook returns (DLV-11), by SKL-40 and SKL-41
 ([skills.md](skills.md)).
 
 **INS-17.** One library selected, names listed, a prefix of `kb+`:

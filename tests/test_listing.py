@@ -109,6 +109,7 @@ async def test_listed_prompts_lists_prompt_files_and_files_md(server_url, sent):
     assert uris
     assert all(u.endswith("/_files.md") or u.startswith("prompts://") for u in uris)
     assert any(u.startswith("prompts://") for u in uris)
+    assert f"skill://{FILES_LIBRARIES[0]}/_files.md" in uris
     async with http_client(server_url, sent if isinstance(sent, dict) else None) as c:
         for uri in uris:
             if uri.startswith("prompts://"):

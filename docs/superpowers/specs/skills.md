@@ -116,7 +116,7 @@ description `Files the <library> library ships outside any skill, which its skil
 request is not refused for (SCP-29): `uriTemplate` `skill://{library}/{+path}`, `name` `skill`,
 no `mimeType`, and the description `A skill, index or file this server serves: {library} is a
 library's name and {path} a path below it. Start at skill://{library}/_index.md; resources/list
-lists each skill's SKILL.md.` The description is text and carries the prefix (SKL-41); the `uriTemplate`
+lists each skill's SKILL.md by default.` The description is text and carries the prefix (SKL-41); the `uriTemplate`
 never does. The template is for discovery only: a read resolves exactly as it would without it,
 and no tool lists it.
 
@@ -339,8 +339,8 @@ letter, digit, `+`, `-` or `.` (`kb+skill://` and `myskill://` stay as they are)
 
 | Written by | Where |
 |---|---|
-| the plugin layer | a skill's files, the indexes inside a skill and an agent's card (GW-5), rendered prompts (GW-7), and `list_resources`, which writes the prefix into each row's `uri` (DLV-6, GW-5) |
-| kb, through the plugin layer's writer (GW-11) | everything else: resource bodies and listing descriptions outside a skill, read hints, the template's description, instructions |
+| the plugin layer | a skill's files, the indexes inside a skill and an agent's card (GW-5), rendered prompts (GW-7), the server instructions kb's instructions hook returns (DLV-11), and `list_resources`, which writes the prefix into each row's `uri` (DLV-6, GW-5) |
+| kb, through the plugin layer's writer (GW-11) | everything else: resource bodies and listing descriptions outside a skill, read hints, the template's description |
 
 A prompt's description in `prompts/list` is written as its library wrote
 it, with no prefix: the plugin layer prefixes the text a prompt renders, and a prompt's

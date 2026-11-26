@@ -79,7 +79,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead` |
 | ⤷ `tools.py`, `prompts.py` | `prompts.py` `MCPFilePrompt` and `adapt`, the `Prompt` kb's reader hands the plugin layer; `tools.py` names kubed-mcp's resource pair (DLV-6) and the delivery inputs for the wiki, and defines no tool |
 | ⤷ `request.py`, `scope.py` | what the current request says about itself, and the `Scope` it becomes |
-| ⤷ `instructions.py` | `ScopedInstructions` — sets the `instructions` on each `initialize` and `server/discover` answer |
+| ⤷ `instructions.py` | `ScopedInstructions`: the `instructions` hook kubed-mcp calls with each `initialize` and `server/discover` request's resolution |
 | ⤷ `announce.py` | `AnnounceChanges` — telling a session its listing moved |
 | ⤷ `pins.py` | `RefuseEmptyScope` — a scope that names nothing fails every request, saying what there is |
 | `kubed/mcp_kb/spec/` | `builder.py`, the OpenAPI document for the HTTP surface |
@@ -179,8 +179,8 @@ the scoping rules directly rather than only through a tool call, and
 Where FastMCP is used, it arrives through `kubed-mcp`'s facade: kb imports
 `kubed.mcp`, `kubed.mcp.protocol`, `kubed.mcp.request`, `kubed.mcp.plugins` (the
 plugin set, its view and its rewriter's `Site`), `kubed.mcp.skills`,
-`kubed.mcp.agents` (its `parse_agent`, imported by `mcp/skills.py` alone) and
-`kubed.mcp.gateway`, never `fastmcp`, `mcp` or `mcp_types` directly. `kubed-mcp` owns the FastMCP pin, so
+`kubed.mcp.agents` (its `parse_agent`, imported by `mcp/skills.py` alone),
+`kubed.mcp.gateway`, and `kubed.mcp.delivery` (its `Resolved`, for the `mcp.instructions` hook), never `fastmcp`, `mcp` or `mcp_types` directly. `kubed-mcp` owns the FastMCP pin, so
 `pyproject.toml` declares none. A name the facade lacks is added there, in
 kubed-io/quick-mcp, not imported around it; `mcp.server` is the FastMCP instance,
 for what `QuickMCP` does not pass through (a transform, a custom route).

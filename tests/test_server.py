@@ -1,4 +1,4 @@
-"""The MCP surface: what a client sees, as resources and as the tool mirror."""
+"""The MCP surface: what a client sees, as resources and as kubed-mcp's resource tools."""
 
 import json
 from importlib.metadata import version as dist_version
