@@ -127,9 +127,9 @@ async def test_category_selects_libraries(server_url):
     """The two libraries listing `dev`, though no plugin has that category."""
     assert await _uris(server_url, DEV) == [
         "skill://alpha/_files.md",
-        "skill://alpha/_index.md",
-        "skill://alpha/shared/_index.md",
-        "skill://beta/_index.md",
+        "skill://alpha/one/SKILL.md",
+        "skill://alpha/shared/common/SKILL.md",
+        "skill://beta/two/SKILL.md",
     ]
     assert "The one skill." in await _read(
         server_url, DEV, "skill://alpha/one/SKILL.md"
@@ -144,7 +144,7 @@ async def test_category_selects_libraries(server_url):
 
 async def test_plugin_category_still_selects(server_url):
     uris = await _uris(server_url, {"Kb-Category": "ops"})
-    assert "skill://gamma/_index.md" in uris
+    assert "skill://gamma/three/SKILL.md" in uris
     assert not any(u.startswith(("skill://alpha", "skill://beta")) for u in uris)
 
 
@@ -158,7 +158,7 @@ async def test_pin_and_foreign_category(server_url):
 
 async def test_tag_narrows_within_categories(server_url):
     uris = await _uris(server_url, {**DEV, "Kb-Tag": "x"})
-    assert "skill://alpha/_index.md" in uris
+    assert "skill://alpha/one/SKILL.md" in uris
     assert not any(u.startswith("skill://beta") for u in uris)
 
 
@@ -207,6 +207,6 @@ async def test_prompts_follow_library_categories(server_url):
 async def test_a_padded_library_category_still_selects(server_url):
     assert await _uris(server_url, {"Kb-Category": "sp"}) == [
         "skill://gamma/_files.md",
-        "skill://gamma/_index.md",
-        "skill://gamma/shared/_index.md",
+        "skill://gamma/shared/common/SKILL.md",
+        "skill://gamma/three/SKILL.md",
     ]

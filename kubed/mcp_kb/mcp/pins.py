@@ -149,18 +149,20 @@ def _up(snapshot: Snapshot, library: str) -> bool:
 
 
 def _serving(snapshot: Snapshot, scope: Scope) -> bool:
-    """Whether ``scope`` would be shown anything at all: a row, a prompt or an agent.
+    """Whether ``scope`` would be shown anything at all.
 
-    An agent counts (SCP-31 row 9): a plugin that ships only agents is a thing
-    a scope can name, and refusing it would leave agents/list unreachable. A
-    skill that is not served is not something to be shown.
+    A served skill, a library file, a prompt or an agent is something to be
+    shown; a skill that is not served is not. An agent counts (SCP-31 row 9): a
+    plugin that ships only agents is a thing a scope can name, and refusing it
+    would leave agents/list unreachable.
     """
     served = snapshot.catalogue
-    if served.entries(scope):
-        return True
-    if snapshot.visible_prompts(scope):
-        return True
-    return bool(snapshot.visible_agents(scope))
+    return bool(
+        served.visible_skills(scope)
+        or served.entries(scope)
+        or snapshot.visible_prompts(scope)
+        or snapshot.visible_agents(scope)
+    )
 
 
 class RefuseEmptyScope(Middleware):

@@ -12,8 +12,7 @@ and a second library reuses a skill name, which are the shapes scope and the
 listing have to keep apart.
 
 Every address is read over MCP from a real ``KnowledgeBase`` on a loopback
-port, because scope and the ``?listing=full`` listing exist only inside an HTTP
-request.
+port, because scope exists only inside an HTTP request.
 """
 
 import json
@@ -570,40 +569,22 @@ async def test_only_a_not_found_read_becomes_a_directory_hint(tmp_path):
 # -- indexes and the listing ------------------------------------------------------
 
 
-async def test_the_listing_is_exactly_the_index_rows(url):
+async def test_the_listing_is_a_skill_md_row_per_skill_then_the_files_rows(url):
     md = "text/markdown"
-    assert await _rows(url) == [
-        (
-            "skill://grafana/_index.md",
-            "grafana/_index.md",
-            "The grafana library — 8 skills in 4 folders:"
-            " grafana-k6, grafana-lgtm, grafana-ops, grafana-plugins.",
-            md,
-        ),
-        (
-            "skill://grafana/grafana-k6/_index.md",
-            "grafana/grafana-k6/_index.md",
-            "2 skills in the grafana-k6 folder of the grafana library.",
-            md,
-        ),
-        (
-            "skill://grafana/grafana-lgtm/_index.md",
-            "grafana/grafana-lgtm/_index.md",
-            "3 skills in the grafana-lgtm folder of the grafana library.",
-            md,
-        ),
-        (
-            "skill://grafana/grafana-ops/_index.md",
-            "grafana/grafana-ops/_index.md",
-            "1 skill in the grafana-ops folder of the grafana library.",
-            md,
-        ),
-        (
-            "skill://grafana/grafana-plugins/_index.md",
-            "grafana/grafana-plugins/_index.md",
-            "1 skill in the grafana-plugins folder of the grafana library.",
-            md,
-        ),
+    rows = await _rows(url)
+    skills = [row for row in rows if row[0].endswith("/SKILL.md")]
+    assert sorted(skills) == [
+        ("skill://grafana/grafana-k6/k6/SKILL.md", "grafana/grafana-k6/k6/SKILL.md", "Load test.", md),
+        ("skill://grafana/grafana-k6/testing/SKILL.md", "grafana/grafana-k6/testing/SKILL.md", "Test with k6.", md),
+        ("skill://grafana/grafana-lgtm/loki/SKILL.md", "grafana/grafana-lgtm/loki/SKILL.md", "Query logs.", md),
+        ("skill://grafana/grafana-lgtm/tempo/SKILL.md", "grafana/grafana-lgtm/tempo/SKILL.md", "Query traces.", md),
+        ("skill://grafana/grafana-lgtm/testing/SKILL.md", "grafana/grafana-lgtm/testing/SKILL.md", "Test the stack.", md),
+        ("skill://grafana/grafana-ops/runbook/SKILL.md", "grafana/grafana-ops/runbook/SKILL.md", "Run the book.", md),
+        ("skill://grafana/grafana-plugins/sdk/SKILL.md", "grafana/grafana-plugins/sdk/SKILL.md", "Build a plugin.", md),
+        ("skill://grafana/overview/SKILL.md", "grafana/overview/SKILL.md", "Start here.", md),
+        ("skill://other/loki/SKILL.md", "other/loki/SKILL.md", "Another loki.", md),
+    ]
+    assert rows[len(skills) :] == [
         (
             "skill://grafana/_files.md",
             "grafana/_files.md",
@@ -618,17 +599,12 @@ async def test_the_listing_is_exactly_the_index_rows(url):
             " which its skills reference.",
             md,
         ),
-        (
-            "skill://other/_index.md",
-            "other/_index.md",
-            "The other library — 1 skill.",
-            md,
-        ),
     ]
+    assert not [row for row in rows if row[0].endswith("_index.md")]
 
 
 async def test_every_listed_row_reads(url):
-    for uri, *_ in await _rows(url, "?listing=full"):
+    for uri, *_ in await _rows(url):
         assert await _read(url, uri)
 
 
@@ -664,7 +640,9 @@ async def test_a_folder_index_lists_the_skills_directly_in_it(url):
 
 async def test_every_uri_an_index_names_reads(url):
     """Walked from the library indexes down, through both surfaces."""
-    seen, queue = set(), [row[0] for row in await _rows(url)]
+    # The indexes are not listed, so the walk starts at each library's.
+    seen, queue = set(), ["skill://grafana/_index.md", "skill://other/_index.md"]
+    queue += [row[0] for row in await _rows(url) if row[0].endswith("/_files.md")]
     while queue:
         uri = queue.pop()
         if uri in seen:
@@ -689,49 +667,42 @@ async def test_the_files_index_lists_the_library_level_files(url):
     )
 
 
-async def test_the_full_listing_adds_every_skills_instructions(url):
-    uris = [row[0] for row in await _rows(url, "?listing=full")]
-    skills = [u for u in uris if u.endswith("/SKILL.md")]
-    assert skills == [
+# -- scope --------------------------------------------------------------------------
+
+
+async def test_a_tag_scope_lists_the_skills_of_the_plugins_carrying_it(url):
+    """A tag narrows which plugins count, so the skill rows and the files are
+    theirs alone."""
+    uris = [row[0] for row in await _rows(url, tags="core")]
+    assert sorted(u for u in uris if u.endswith("/SKILL.md")) == [
         "skill://grafana/grafana-k6/k6/SKILL.md",
         "skill://grafana/grafana-k6/testing/SKILL.md",
         "skill://grafana/grafana-lgtm/loki/SKILL.md",
         "skill://grafana/grafana-lgtm/tempo/SKILL.md",
         "skill://grafana/grafana-lgtm/testing/SKILL.md",
-        "skill://grafana/grafana-ops/runbook/SKILL.md",
         "skill://grafana/grafana-plugins/sdk/SKILL.md",
         "skill://grafana/overview/SKILL.md",
-        "skill://other/loki/SKILL.md",
     ]
-    assert uris[: -len(skills)] == [row[0] for row in await _rows(url)]
-
-
-# -- scope --------------------------------------------------------------------------
-
-
-async def test_a_tag_scope_lists_the_library_with_the_plugins_carrying_it(url):
-    """The listing is always the library level and its top folders: a tag
-    narrows which plugins count, so the folders and files are theirs alone."""
-    assert [row[0] for row in await _rows(url, tags="core")] == [
-        "skill://grafana/_index.md",
-        "skill://grafana/grafana-k6/_index.md",
-        "skill://grafana/grafana-lgtm/_index.md",
-        "skill://grafana/grafana-plugins/_index.md",
-        "skill://grafana/_files.md",
-    ]
+    assert uris[-1] == "skill://grafana/_files.md"
     files = await _read(url, "skill://grafana/_files.md", tags="core")
     assert "skill://grafana/shared/style.md" in files
     assert "extra/notes.md" not in files
 
 
-async def test_every_listed_folder_is_one_an_index_names(url):
-    """Unscoped, the listing's folders are the library index's folders exactly."""
-    listed = {r[0] for r in await _rows(url)} - {"skill://grafana/_index.md"}
-    index = await _read(url, "skill://grafana/_index.md")
-    named = set(re.findall(r"^(skill://\S+/_index\.md):", index, re.M))
-    assert {u for u in listed if u.startswith("skill://grafana/")} - {
-        "skill://grafana/_files.md"
-    } == named
+async def test_every_listed_skill_is_one_an_index_names(url):
+    """Unscoped, the listing's skills are the ones the folder indexes name."""
+    listed = {r[0] for r in await _rows(url) if r[0].endswith("/SKILL.md")}
+    named = set()
+    for index in (
+        "skill://grafana/_index.md",
+        "skill://grafana/grafana-k6/_index.md",
+        "skill://grafana/grafana-lgtm/_index.md",
+        "skill://grafana/grafana-ops/_index.md",
+        "skill://grafana/grafana-plugins/_index.md",
+        "skill://other/_index.md",
+    ):
+        named |= set(re.findall(r"^(skill://\S+/SKILL\.md):", await _read(url, index), re.M))
+    assert listed == named
 
 
 async def test_a_tag_scope_cannot_read_another_plugins_library_file(url):
@@ -860,7 +831,7 @@ TEMPLATE = (
     "skill",
     "A skill, index or file this server serves: {library} is a library's name"
     " and {path} a path below it. Start at skill://{library}/_index.md;"
-    " resources/list names the libraries.",
+    " resources/list lists each skill's SKILL.md.",
     None,
 )
 

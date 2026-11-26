@@ -38,9 +38,9 @@ skill://<library>/_files.md                  what the library ships outside its 
 skill://<library>/<path>                     one of those files
 ```
 
-A library, a folder or a skill's own directory is not a file — reading one is not found, and the error names the file to read instead. Progressive disclosure lives in the addresses rather than in a tool list, so a listing is a dozen index rows whether the catalogue holds nine skills or ninety.
+A library, a folder or a skill's own directory is not a file — reading one is not found, and the error names the file to read instead. Progressive disclosure lives in the addresses rather than in a tool list, so the listing names each skill's `SKILL.md`; indexes read, unlisted.
 
-Skills-aware clients can also use `skills/list` and `skills/get`. The server advertises `io.modelcontextprotocol/skills` and returns each skill's frontmatter and complete file manifest, with SHA-256 digests of the bytes served by `resources/read`. The same library, category and tag scopes apply; ordinary resource listings stay small. Connect to `/mcp` and enable Skills in your client — no `?listing=full` is needed for this extension.
+Skills-aware clients can also use `skills/list` and `skills/get`. The server advertises `io.modelcontextprotocol/skills` and returns each skill's frontmatter and complete file manifest, with SHA-256 digests of the bytes served by `resources/read`. The same library, category and tag scopes apply.
 
 Agent-aware clients can call `agents/list` and `agents/get` for the subagents your plugins ship. This is **experimental**: it follows the MCP Agent Discovery draft (agents-wg proposal 0000 at `137d88b`), and the same library, category and tag scopes apply.
 
@@ -184,10 +184,10 @@ Per request, on the MCP URL — each with a header form that beats it:
 | `?library=<name>` | `Kb-Library` | Restricts this client to one library, by name |
 | `?category=<name>` | `Kb-Category` | Restricts it to the libraries listing that category and the plugins declaring it |
 | `?tag=a,b` | `Kb-Tag` | Restricts it to what carries all of those tags; repeat for any-of |
-| `?listing=full` | `Kb-Listing` | Lists every skill, for clients that sync them to disk |
+| `?listed=` | `Kb-Listed` | What the listing holds: `skills` (the default), `prompts`, `agents` or `none` |
 | `?prefix=kb+` | `Kb-Resource-Prefix` | Writes a gateway's prefix before addresses in text |
 
-The old `X-Skill-*` and `X-MCP-Resource-Prefix` names (and `?categories=`, `?tags=`, `?skills=`) still work, though a pin under an old header yields to a client-sent `Kb-` one.
+The old `X-Skill-*` and `X-MCP-Resource-Prefix` names (and `?categories=`, `?tags=`) still work, though a pin under an old header yields to a client-sent `Kb-` one.
 
 `mcp-kb schema` prints the config JSON Schema, which is also committed as `config.schema.json` for an editor to validate against live.
 

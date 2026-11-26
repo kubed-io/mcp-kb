@@ -118,7 +118,7 @@ def _client(url, query="", headers=None):
 
 
 async def _seen(url, query="", headers=None):
-    """(tool names, index resource names, prompt names) for one client."""
+    """(tool names, listed resource names, prompt names) for one client."""
     async with _client(url, query, headers) as client:
         tools = sorted(t.name for t in await client.list_tools())
         resources = sorted(r.name for r in await client.list_resources())
@@ -127,7 +127,7 @@ async def _seen(url, query="", headers=None):
 
 
 async def _skills(url, query=""):
-    async with _client(url, query + "&skills=full") as client:
+    async with _client(url, query) as client:
         return sorted(
             str(r.uri) for r in await client.list_resources()
             if str(r.uri).endswith("/SKILL.md")
@@ -202,7 +202,7 @@ async def test_a_prompt_tool_mistake_is_an_error_result_that_says_what_to_do(
 
 async def test_a_library_is_the_whole_library(url):
     _, resources, prompts = await _seen(url, "?library=observe")
-    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
+    assert resources == ["observe/loki/SKILL.md", "observe/observe-extra/alerts/SKILL.md", "observe/tempo/SKILL.md"]
     assert prompts == ["observe_debug"]
     assert await _skills(url, "?library=observe") == [
         "skill://observe/loki/SKILL.md",
@@ -219,16 +219,15 @@ async def test_a_library_of_prompts_alone_is_visible_by_name(url):
 
 async def test_tags_select_across_libraries(url):
     _, resources, prompts = await _seen(url, "?tag=ops")
-    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
+    assert resources == ["observe/loki/SKILL.md", "observe/observe-extra/alerts/SKILL.md", "observe/tempo/SKILL.md"]
     assert prompts == ["notes_standup", "observe_debug"]
 
 
 async def test_a_repeated_tag_parameter_means_any_of_them(url):
     _, resources, _ = await _seen(url, "?tag=ui&tag=extra")
     assert resources == [
-        "design/_index.md",
-        "observe/_index.md",
-        "observe/observe-extra/_index.md",
+        "design/palette/SKILL.md",
+        "observe/observe-extra/alerts/SKILL.md",
     ]
     assert await _skills(url, "?tag=ui&tag=extra") == [
         "skill://design/palette/SKILL.md",
@@ -240,14 +239,14 @@ async def test_a_comma_in_a_tag_means_all_of_them(url):
     """`?tag=extra,ops` admits only a plugin carrying both: `observe-extra`,
     not `observe` (ops alone) and not `notes` (ops alone)."""
     _, resources, prompts = await _seen(url, "?tag=extra,ops")
-    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
+    assert resources == ["observe/observe-extra/alerts/SKILL.md"]
     assert prompts == []
     assert await _skills(url, "?tag=extra,ops") == ["skill://observe/observe-extra/alerts/SKILL.md"]
 
 
 async def test_a_category_selects_the_plugins_declaring_it(url):
     _, resources, prompts = await _seen(url, "?category=observability")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/loki/SKILL.md", "observe/tempo/SKILL.md"]
     assert prompts == ["observe_debug"]
     assert await _skills(url, "?category=observability") == [
         "skill://observe/loki/SKILL.md",
@@ -257,12 +256,16 @@ async def test_a_category_selects_the_plugins_declaring_it(url):
 
 async def test_a_repeated_category_parameter_means_any_of_them(url):
     _, resources, _ = await _seen(url, "?category=observability&category=design")
-    assert resources == ["design/_index.md", "observe/_index.md"]
+    assert resources == [
+        "design/palette/SKILL.md",
+        "observe/loki/SKILL.md",
+        "observe/tempo/SKILL.md",
+    ]
 
 
 async def test_tags_narrow_within_a_library(url):
     _, resources, prompts = await _seen(url, "?library=observe&tag=extra")
-    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
+    assert resources == ["observe/observe-extra/alerts/SKILL.md"]
     assert prompts == []
     assert await _skills(url, "?library=observe&tag=extra") == [
         "skill://observe/observe-extra/alerts/SKILL.md"
@@ -360,7 +363,7 @@ async def test_a_header_beats_the_url_parameter(url):
     _, resources, prompts = await _seen(
         url, "?library=design", {"Kb-Library": "observe"}
     )
-    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
+    assert resources == ["observe/loki/SKILL.md", "observe/observe-extra/alerts/SKILL.md", "observe/tempo/SKILL.md"]
     assert prompts == ["observe_debug"]  # design has no prompts
 
 

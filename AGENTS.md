@@ -197,11 +197,11 @@ over every resource the server has, so kb defines neither tool and may not
 drive this server without learning anything.
 
 Progressive disclosure lives in the address space, so adding a library adds
-neither tools nor listing rows:
+no tools:
 
 | call | returns | cost |
 | --- | --- | --- |
-| list | one index per library and per folder | ~1.9 KB for 90 skills |
+| list | one `SKILL.md` per skill in scope, plus `_files.md` | grows with the catalogue |
 | read `skill://grafana/grafana-lgtm/_index.md` | that folder's skills, as URIs | ~4k chars |
 | read `skill://grafana/grafana-lgtm/loki/SKILL.md` | the instructions to follow | one file |
 
@@ -379,12 +379,10 @@ which generation is being served, and has a refresh picked up an edit yet.
   which a resource or a hand-written tool would flatten to text.
 - **Do not reach for `ResourcesAsTools`, or back for `SkillsDirectoryProvider`.**
   The resource mirror is kubed-mcp's DLV-6 pair and the skills are its plugin
-  layer's. Both FastMCP pieces enumerate every skill on every listing call —
-  `resources/list` is 1.9 KB for this catalogue and was 77 KB before `Catalogue`
-  replaced it with a dozen indexes. `SkillsDirectoryProvider` also keys a skill
+  layer's. The listing is the plugin layer's, and `SkillsDirectoryProvider` would
+  list a second copy. `SkillsDirectoryProvider` also keys a skill
   on its folder name alone, so two libraries shipping a `testing/` collapse into
-  one and the loser vanishes from the server entirely. Neither failure raises
-  anything.
+  one and the loser vanishes from the server entirely, and nothing raises.
 - **A provider that stores a `Catalogue` serves the old generation forever** —
   read through the getter (the `catalogue()` `create_app` defines, which returns
   `knowledge_base.snapshot.catalogue` and is handed to `resources.register`),

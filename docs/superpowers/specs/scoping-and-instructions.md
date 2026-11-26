@@ -20,16 +20,15 @@ Each is read per MCP request from an HTTP header or a query parameter on the MCP
 | Library | `Kb-Library` | `library` | `X-Skill-Library` | — |
 | Category | `Kb-Category` | `category` | `X-Skill-Categories` | `categories` |
 | Tag | `Kb-Tag` | `tag` | `X-Skill-Tags` | `tags` |
-| Listing | `Kb-Listing` | `listing` | `X-Skill-Listing` | `skills` |
 | Resource prefix | `Kb-Resource-Prefix` | `prefix` | `X-MCP-Resource-Prefix` | — |
 | Resources | `Kb-Resources` | `resources` | `X-MCP-Resources` | — |
 | Prompts | `Kb-Prompts` | `prompts` | `X-MCP-Prompts` | — |
 
-**SCP-3.** The listing, the resource prefix and the two capability settings are read by the same
-rules as the scope (SCP-4 to SCP-7). The resource prefix and the resources setting are kubed-mcp's
-own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its `X-MCP-` alias
-(DLV-16); kb reads the prompts setting the same way. What the listing and the prefix do is
-specified in [skills.md](skills.md), and the capability settings in
+**SCP-3.** The resource prefix and the two capability settings are read by the same rules as the
+scope (SCP-4 to SCP-7). The resource prefix, the resources setting and the listed setting are
+kubed-mcp's own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its
+`X-MCP-` alias (DLV-16); kb reads the prompts setting the same way. What the listed setting and the
+prefix do is specified in [skills.md](skills.md), and the capability settings in
 [http-and-tools.md](http-and-tools.md).
 
 **SCP-4.** Header names match case-insensitively. Parameter names match exactly.
@@ -144,7 +143,7 @@ that fails.
 | 6 | a requested category is unknown (SCP-32) | refused: `The scope names category '<x>', which no library lists and no plugin declares. The categories are: <sorted>.` |
 | 7 | a requested tag is unknown (SCP-33) | refused: `The scope names tag '<x>', which nothing carries. The tags are: <sorted>.` |
 | 8 | no library is set and the server serves nothing at all | served, not refused |
-| 9 | categories or tags are set and the scope would be shown no listing row, no prompt and no agent | refused: `The scope names things that exist, but nothing in library '<x>' carries the combination: <what was asked>.` (`any library` when none is set) |
+| 9 | categories or tags are set and the scope would be shown no served skill, no library file, no prompt and no agent | refused: `The scope names things that exist, but nothing in library '<x>' carries the combination: <what was asked>.` (`any library` when none is set) |
 
 Rows 6 and 7 use the plural (`categories`, `tags`) when several are unknown. An empty list is
 written `none`. Rows 8 and 9 count only skills that are served (SKL-45).

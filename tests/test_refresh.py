@@ -644,9 +644,9 @@ def test_listings_are_memoised_per_scope(skills_dir, cache):
     """A catalogue lives and dies with its snapshot, so its memo cannot go stale."""
     catalogue = KnowledgeBase(make_config(skills_dir), cache).snapshot.catalogue
 
-    assert catalogue.entries(Scope(), False) is catalogue.entries(Scope(), False)
-    assert catalogue.entries(Scope("flatsource"), False) is not catalogue.entries(Scope(), False)
-    assert catalogue.entries(Scope(), True) is not catalogue.entries(Scope(), False)
+    assert catalogue.entries(Scope()) is catalogue.entries(Scope())
+    assert catalogue.entries(Scope("deepsource")) is catalogue.entries(Scope("deepsource"))
+    assert catalogue.entries(Scope("deepsource")) is not catalogue.entries(Scope())
 
 
 # -- what a live client sees ---------------------------------------------------
@@ -660,7 +660,7 @@ async def test_a_rebuild_is_visible_to_a_connected_client(skills_dir, cache):
     config = make_config(skills_dir, nested=(*NESTED, "plugin-c"))
     knowledge_base = KnowledgeBase(config, cache)
     async with Client(server_of(knowledge_base)) as client:
-        assert "skill://deepsource/plugin-c/_index.md" not in [
+        assert "skill://deepsource/plugin-c/epsilon/SKILL.md" not in [
             str(r.uri) for r in await client.list_resources()
         ]
         assert "flatsource_extra" not in [p.name for p in await client.list_prompts()]
@@ -675,7 +675,7 @@ async def test_a_rebuild_is_visible_to_a_connected_client(skills_dir, cache):
         _add_prompt(skills_dir / "flatsource" / "prompts" / "extra.md")
         knowledge_base.refresh()
 
-        assert "skill://deepsource/plugin-c/_index.md" in [str(r.uri) for r in await client.list_resources()]
+        assert "skill://deepsource/plugin-c/epsilon/SKILL.md" in [str(r.uri) for r in await client.list_resources()]
         assert "flatsource_extra" in [p.name for p in await client.list_prompts()]
 
 

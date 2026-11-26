@@ -38,10 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Browse a library, a folder or a skill's own folders with `resources/directory/read`, or read the `_index.json` beside each.
 - **Send profiles to Pyroscope, and traces and metrics over OpenTelemetry**, from a `telemetry` section in the config; the image ships the packages.
 - A client's instructions now say where each library's prompts and agents read, at their `prompts://` and `agents://` indexes.
+- Choose what `resources/list` lists with `Kb-Listed` (`?listed=`): `skills`, `prompts`, `agents` or `none`.
 
 ### Changed
 
-- Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Listing`, `Kb-Resource-Prefix`, `Kb-Resources` and `Kb-Prompts`; the old `X-` names are still accepted.
+- Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Resource-Prefix`, `Kb-Resources` and `Kb-Prompts`; the old `X-` names are still accepted.
 - **BREAKING:** A pin set under an old `X-` name (a gateway route header, a credential) no longer holds against a client-sent `Kb-` header, which now beats it; move such pins to the `Kb-` names.
 - **BREAKING:** Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
 - A plugin's `plugin.json` reads as Claude Code reads it: its `skills` add to the usual skill folders, and a marketplace entry's lists append to it.
@@ -58,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A library can no longer be named `mcp-kb`, the server's own name.
 - `skills/get` of a skill that is not served answers `Unknown skill URI: <uri>`.
 - Plugin sources (git, WebDAV, `file://`) load through kubed-mcp plugin loaders.
+- `resources/list` lists each skill's `SKILL.md` and each library's `_files.md`; the `_index.md` files still read, unlisted.
 - Built on kubed-mcp 0.3: VS Code is listed `list_resources` and `read_resource` with no header, and `initialize` and `server/discover` report what they resolved in `_meta["io.kubed/delivery"]`.
 
 ### Fixed
@@ -71,6 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A marketplace entry on another repository now serves its edited `skills`, `commands`, `agents` or `path` on the next refresh.
 - A marketplace plugin's version is now its `plugin.json`'s when both declare one, as in Claude Code.
 - `/health` lists the skill folders a plugin cannot serve, and counts no skills, prompts or agents for a plugin that is not served.
+
+### Removed
+
+- **BREAKING:** `Kb-Listing` (`?listing=`, `?skills=`, `X-Skill-Listing`) is no longer read.
 
 ## [0.1.0] - 2026-09-18
 

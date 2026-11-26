@@ -75,14 +75,14 @@ async def test_the_handshake_echo_matches_what_is_listed(skills_dir, mode):
 
 
 @pytest.mark.unit
-async def test_resources_are_indexes_not_one_per_skill(skills_dir):
-    """The listing is the cheap layer; it must not grow with the catalogue."""
+async def test_resources_are_a_skill_md_row_per_skill(skills_dir):
+    """The listing is the plugin layer's: each skill's ``SKILL.md``, indexes unlisted."""
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "_cache")
     async with Client(server_of(server)) as client:
         uris = [str(r.uri) for r in await client.list_resources()]
-    assert "skill://flatsource/_index.md" in uris
-    assert "skill://deepsource/plugin-a/_index.md" in uris
-    assert not any("SKILL.md" in u for u in uris)
+    assert "skill://flatsource/alpha/SKILL.md" in uris
+    assert "skill://deepsource/plugin-a/gamma/SKILL.md" in uris
+    assert not any(u.endswith("_index.md") for u in uris)
 
 
 @pytest.mark.unit
@@ -158,7 +158,7 @@ async def test_a_failed_fetch_does_not_take_the_others_down(skills_dir):
     assert server.status["plugins"]["flatsource"]["status"] == "ok"
     async with Client(server_of(server)) as client:
         uris = [str(r.uri) for r in await client.list_resources()]
-    assert "skill://flatsource/_index.md" in uris
+    assert "skill://flatsource/alpha/SKILL.md" in uris
 
 
 # -- the tool mirror ----------------------------------------------------------

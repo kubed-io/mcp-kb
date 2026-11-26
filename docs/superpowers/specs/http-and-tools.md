@@ -256,10 +256,6 @@ rows `resources/list` returns for the same request, each as it is on the wire. I
 descriptions are the plugin layer's (DLV-6): they teach neither kb's URI grammar nor its scope
 settings.
 
-**TOOL-9.** `list_resources` honours `?listing=full` (or `Kb-Listing: full`, `?skills=full`,
-`X-Skill-Listing: full`) exactly as `resources/list` does. Without it the listing is indexes, as in
-[skills.md](skills.md).
-
 **TOOL-10.** `read_resource` takes one argument, `uri`, and reads it through `resources/read`, so
 the same middleware, scope and addressing apply. Text comes back as text, a `text/*` or SVG blob
 that is UTF-8 as its text, an image blob as image content, and any other blob as a JSON description

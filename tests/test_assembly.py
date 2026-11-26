@@ -25,6 +25,7 @@ from kubed.mcp_kb.catalogue.snapshot import (
     assemble_libraries,
     build_snapshot,
 )
+from kubed.mcp_kb.catalogue.uris import uri_for
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.pins import what_is_wrong
 from kubed.mcp_kb.mcp.scope import Scope
@@ -106,9 +107,8 @@ async def _health(knowledge_base):
 
 
 async def _skills(knowledge_base):
-    """Every served skill's URI: the full listing, which is the index's addresses."""
-    listing = knowledge_base.catalogue.entries(full=True)
-    return sorted(e.uri for e in listing if e.uri.endswith("/SKILL.md"))
+    """Every served skill's ``SKILL.md`` URI, from the catalogue."""
+    return sorted(uri_for(s) for s in knowledge_base.catalogue.visible_skills())
 
 
 async def _read(knowledge_base, uri):
@@ -476,7 +476,7 @@ async def test_a_manifests_keywords_join_the_plugins_labels(manifested, tmp_path
         server.should_exit = True
         thread.join(timeout=5)
     # `sp` is obs's lone entry and so its main plugin; in `tests` it is not.
-    assert names == ["obs/_index.md", "tests/_index.md", "tests/sp/_index.md"]
+    assert names == ["obs/tdd/SKILL.md", "tests/sp/tdd/SKILL.md"]
     assert both == names
 
 

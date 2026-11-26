@@ -32,7 +32,8 @@ async def test_the_resource_mirror_is_kubed_mcps_over_kbs_rows(skills_dir, tmp_p
     assert set(reading.parameters["properties"]) == {"uri"}
     rows = {row["uri"] for row in json.loads(listed.content[0].text)["resources"]}
     assert rows == resources
-    assert "skill://deepsource/_index.md" in rows
+    assert "skill://deepsource/plugin-a/gamma/SKILL.md" in rows
+    assert "skill://deepsource/_files.md" in rows
 
 
 async def test_a_call_reads_the_snapshot_serving_when_it_started(skills_dir, tmp_path):

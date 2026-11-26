@@ -13,7 +13,7 @@ import pytest
 
 from kubed.mcp_kb.config import schema
 from kubed.mcp_kb.main import build_parser
-from kubed.mcp_kb.mcp import request
+from kubed.mcp_kb.mcp import request, tools
 
 pytestmark = pytest.mark.unit
 
@@ -131,7 +131,7 @@ def test_installing_documents_every_url_parameter_and_header():
         request.TAG_PARAM,
         request.PROMPTS_PARAM,
         request.RESOURCES_PARAM,
-        request.LISTING_PARAM,
+        tools.LISTED_PARAM,
     ]
     headers = [
         request.LIBRARY_HEADER,
@@ -139,7 +139,7 @@ def test_installing_documents_every_url_parameter_and_header():
         request.TAG_HEADER,
         request.PROMPTS_HEADER,
         request.RESOURCES_HEADER,
-        request.LISTING_HEADER,
+        tools.LISTED_HEADER,
     ]
     for name in parameters:
         assert f"?{name}=" in page, f"?{name}= is missing from Installing.md"

@@ -22,6 +22,7 @@ from kubed.mcp.plugins import PluginError, PluginSet
 from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
+from kubed.mcp_kb.catalogue.uris import uri_for
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp import tools as tools_module
 from kubed.mcp_kb.mcp.scope import Scope
@@ -128,21 +129,17 @@ async def test_every_skill_reads_at_its_address(skills_dir):
             assert got == catalogue.instructions(skill.address, raw)
 
 
-async def test_the_listing_is_index_rows_only(skills_dir):
+async def test_the_listing_is_the_plugin_layers_rows_then_kbs_files_rows(skills_dir):
     knowledge_base = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
     catalogue = knowledge_base.catalogue
     async with Client(server_of(knowledge_base)) as client:
         rows = [str(r.uri) for r in await client.list_resources()]
-    assert rows == [entry.uri for entry in catalogue.entries()]
-    assert not [uri for uri in rows if uri.endswith("/SKILL.md")]
-
-    with serve_http(knowledge_base) as url:
-        async with http_client(url, {"Kb-Listing": "full"}) as client:
-            full = [str(r.uri) for r in await client.list_resources()]
-    assert full == [entry.uri for entry in catalogue.entries(full=True)]
-    assert len([uri for uri in full if uri.endswith("/SKILL.md")]) == len(
-        catalogue.visible_skills()
+    files = [entry.uri for entry in catalogue.entries()]
+    assert rows[len(rows) - len(files) :] == files
+    assert sorted(rows[: len(rows) - len(files)]) == sorted(
+        uri_for(skill) for skill in catalogue.visible_skills()
     )
+    assert not [uri for uri in rows if uri.endswith("_index.md")]
 
 
 async def test_kubed_mcp_serves_the_prompts(tmp_path):

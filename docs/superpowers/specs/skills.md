@@ -100,28 +100,23 @@ percent-escapes are never decoded. A URI that does not start with `skill://` res
 
 ## The listing
 
-**SKL-14.** `resources/list` holds index rows only, unless the request's `Listed` setting
-(`Kb-Listed`, `X-MCP-Listed` or `?listed=`, which kb defaults to none) names `skills`, when the
-plugin layer adds a row per served `SKILL.md` (DLV-8). For each library, in name order:
+**SKL-14.** `resources/list` holds what the plugin layer lists for the request's `Listed` setting
+(`Kb-Listed`, `X-MCP-Listed` or `?listed=`, DLV-8). By default that is one row per served skill in
+scope: the URI `skill://<namespace>/<skill>/SKILL.md`, the name `<namespace>/<skill>/SKILL.md`, the
+skill's own `description` and the `mimeType` `text/markdown`. `prompts` lists the prompt files and
+`agents` the agent files instead, and `none` lists none. Then, under every setting, one row per
+library with a library file in scope, in library name order: `skill://<library>/_files.md`, with the
+description `Files the <library> library ships outside any skill, which its skills reference.` No
+`_index.md` is listed, and each one still reads (SKL-17).
 
-| Row | Present when | Description |
-|---|---|---|
-| `skill://<library>/_index.md` | a skill of the library is in scope | `The <library> library — N skills in M folders: a, b.` (folder clause only when there are folders) |
-| `skill://<library>/<folder>/_index.md`, per top-level folder | a skill under it is in scope | `N skills in the <folder> folder of the <library> library.` |
-| `skill://<library>/_files.md` | a library file is in scope | `Files the <library> library ships outside any skill, which its skills reference.` |
-
-**SKL-15.** A row's `name` is its URI without `skill://`, its `mimeType` is `text/markdown`, and
-its tags are the library's name and `index`.
-
-**SKL-16.** With the listing set to `full` (`?listing=full` or `Kb-Listing: full`, read as in
-SCP-3, any case), the listing adds one row per in-scope skill, by address: its `SKILL.md` URI, the
-name `<address>/SKILL.md`, the skill's description, and its library and plugin labels as tags.
+**SKL-15.** The `_files.md` row's `name` is its URI without `skill://`, its `mimeType` is
+`text/markdown`, and its tags are the library's name and `index`.
 
 **SKL-53.** `resources/templates/list` returns one template under every scope a
 request is not refused for (SCP-29): `uriTemplate` `skill://{library}/{+path}`, `name` `skill`,
 no `mimeType`, and the description `A skill, index or file this server serves: {library} is a
 library's name and {path} a path below it. Start at skill://{library}/_index.md; resources/list
-names the libraries.` The description is text and carries the prefix (SKL-41); the `uriTemplate`
+lists each skill's SKILL.md.` The description is text and carries the prefix (SKL-41); the `uriTemplate`
 never does. The template is for discovery only: a read resolves exactly as it would without it,
 and no tool lists it.
 

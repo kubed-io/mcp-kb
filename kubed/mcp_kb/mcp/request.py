@@ -51,15 +51,6 @@ RESOURCES_HEADER = "x-mcp-resources"
 RESOURCES_KB_HEADER = "kb-resources"
 _OFF = ("off", "false", "0", "no", "none")
 
-# How a skill-syncing client asks for every skill in the listing. Off by default
-# because it is the expensive shape and almost nothing needs it.
-LISTING_PARAM = "listing"
-LISTING_HEADER = "kb-listing"
-LISTING_ALIAS = "x-skill-listing"
-LISTING_PARAM_ALIAS = "skills"
-_FULL = "full"
-
-
 def _read(
     header: str,
     param: str,
@@ -136,22 +127,6 @@ def client_reads_resources() -> bool:
     ``X-MCP-Resources: off`` header.
     """
     return _declared_on(RESOURCES_HEADER, RESOURCES_PARAM, RESOURCES_KB_HEADER)
-
-
-def full_listing() -> bool:
-    """Whether to list every skill rather than just the indexes.
-
-    A tool that syncs skills to disk (FastMCP's ``sync_skills`` and friends)
-    finds them only by scanning ``resources/list`` for ``/SKILL.md``, so for
-    those clients the cheap listing is an empty one. Everything else pays ~16k
-    tokens per listing for rows it was going to narrow down anyway, which is why
-    this is opt-in: ``?listing=full`` or a ``Kb-Listing: full`` header
-    (``?skills=full`` and ``X-Skill-Listing`` also work).
-    """
-    declared = _read(
-        LISTING_HEADER, LISTING_PARAM, LISTING_ALIAS, LISTING_PARAM_ALIAS
-    )
-    return bool(declared) and declared[0].strip().lower() == _FULL
 
 
 def declared_on_initialize(context) -> bool:

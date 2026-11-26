@@ -435,9 +435,8 @@ async def test_a_skill_one_prefix_cannot_build_is_named_nowhere_under_it(skills_
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
     with _serve(server) as url:
         for headers in (
-            {"Kb-Resource-Prefix": "kb+", "Kb-Listing": "full"},
             {"Kb-Resource-Prefix": "kb+"},
-            {"Kb-Listing": "full"},
+            {},
         ):
             transport = StreamableHttpTransport(url, headers=headers)
             async with Client(transport) as client:

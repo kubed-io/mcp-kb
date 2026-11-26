@@ -13,12 +13,13 @@ wrong here for two reasons that only show up at scale:
   become one, and the loser is not merely shadowed but absent from the
   server. With four libraries and ninety skills that is a matter of time,
   not luck.
-- It lists every skill and every manifest on every ``resources/list`` -- 77KB
-  for this catalogue, paid by every client on every listing. That is the same
-  expense this server rejects ``ResourcesAsTools`` for.
+- It lists every skill and every manifest, a second copy of what the plugin
+  layer already lists.
 
-``Catalogue`` fixes both by listing *indexes* and resolving content on demand,
-which is the resource half of progressive disclosure. A library and a folder
+The listing is the plugin layer's, one ``SKILL.md`` row per skill, plus this
+provider's ``_files.md`` rows; the indexes read and are not listed. ``Catalogue``
+resolves content on demand, which is the resource half of progressive
+disclosure. A library and a folder
 are directories too: ``CatalogueProvider.children`` lists one for
 ``resources/directory/read`` and ``_index.json``, from the same scoped
 ``Catalogue.directory``.
@@ -52,14 +53,14 @@ from kubed.mcp.protocol import INVALID_PARAMS, MCPError, Provider, VersionSpec, 
 from kubed.mcp.skills import FolderNotFound, NameTheIndex
 
 from ..catalogue.uris import INDEX_JSON, SCHEME, Catalogue, climbs, resolved
-from .request import full_listing, requested_scope
+from .request import requested_scope
 
 TEMPLATE_URI = "skill://{library}/{+path}"
 
 TEMPLATE_DESCRIPTION = (
     "A skill, index or file this server serves: {library} is a library's name"
     " and {path} a path below it. Start at skill://{library}/_index.md;"
-    " resources/list names the libraries."
+    " resources/list lists each skill's SKILL.md."
 )
 
 
@@ -97,7 +98,7 @@ class CatalogueProvider(Provider):
         self._catalogue = catalogue
 
     async def _list_resources(self) -> Sequence[Resource]:
-        entries = self._catalogue().entries(requested_scope(), full=full_listing())
+        entries = self._catalogue().entries(requested_scope())
         p = prefix()
         return [
             TextResource(
