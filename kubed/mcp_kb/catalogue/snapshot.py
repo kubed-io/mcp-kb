@@ -149,6 +149,17 @@ class PluginCommands:
 
 
 @dataclass(frozen=True)
+class Folders:
+    """The namespaces of one library serving a scope a prompt, and an agent.
+
+    Each in the library's plugin order: what the instructions point at (INS-19).
+    """
+
+    prompts: tuple[str, ...] = ()
+    agents: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Snapshot:
     """The catalogue as of one generation, complete and never edited again.
 
@@ -205,6 +216,34 @@ class Snapshot:
                 p.library, p.category, p.tags, library_categories=p.library_categories
             )
         ]
+
+    def folders(self, scope: Scope = EVERYTHING) -> dict[str, Folders]:
+        """Each library's namespaces serving ``scope`` a prompt, and an agent.
+
+        By library name, in each library's plugin order, and only the libraries
+        with one: what the plugin layer serves counts, and nothing else.
+        """
+        prompts = {(p.library, p.plugin) for p in self.visible_prompts(scope)}
+        agents = {(a.library, a.plugin) for a in self.visible_agents(scope)}
+        plugins = {plugin.id: plugin for plugin in self.plugins}
+        found: dict[str, Folders] = {}
+        for library in self.libraries:
+            mine = [plugins[i] for i in library.plugins if i in plugins]
+            folders = Folders(
+                prompts=tuple(
+                    namespace_for(library, p)
+                    for p in mine
+                    if (library.name, p.id) in prompts
+                ),
+                agents=tuple(
+                    namespace_for(library, p)
+                    for p in mine
+                    if (library.name, p.id) in agents
+                ),
+            )
+            if folders.prompts or folders.agents:
+                found[library.name] = folders
+        return found
 
     def revalidate(self, path: Path) -> None:
         """Bring ``path`` level with its server, if a live fetch owns it."""

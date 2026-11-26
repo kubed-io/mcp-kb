@@ -22,6 +22,18 @@
 > by commands/prompts/x.md`. Dr K's approval of 01:23 adds a test to Task 1: a refresh that lands
 > between the pin and the instructions. If the snapshot cannot be tied to the pinned build, the
 > instructions read through `_reading()`.
+>
+> **Task 1 ran 2026-11-26, and D1 changed.** Neither `initialize` nor `server/discover` pins a build:
+> `SkillServing.view` was called zero times on connect, in both modes. So no pinned build exists to
+> tie `knowledge_base.snapshot` to, and by Dr K's rule the instructions read through `_reading()`.
+> `ScopedInstructions` is handed the new `SkillServing.served_snapshot`, which returns
+> `_reading()[0].snapshot`, not `lambda: knowledge_base.snapshot`. It gives the pinned state
+> inside a request that pinned, otherwise the published one. `_published` is set before `serve()`,
+> so it never names a generation the layer does not serve yet.
+> `test_a_refresh_between_the_pin_and_the_instructions` holds this.
+> Two of Task 2's AGENTS.md edits, the Agents-extension paragraph and the provider-getter note,
+> moved into Task 1, so that no commit leaves the manual false.
+> `tests/test_agents_extension.py::test_nothing_else_changes` now allows exactly the `Agents:` line.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -240,7 +252,7 @@ git commit -S -m "test: what kubed-mcp 0.3.0 serves at prompts:// and agents:// 
   - `build_instructions(catalogue, scope, *, resources, skills_extension, folders: Mapping[str, Folders] | None = None) -> str`.
   - `ScopedInstructions(snapshot: Callable[[], Snapshot])`.
 
-- [ ] **Step 1: Write the failing unit tests** in `tests/test_instructions.py`, using the file's
+- [x] **Step 1: Write the failing unit tests** in `tests/test_instructions.py`, using the file's
   `_catalogue` and `_build` (`_build` gains a `folders=None` pass-through)
 
 ```python
@@ -288,7 +300,7 @@ def test_the_lines_are_prefixed_once(tmp_path):
 `ScopedInstructions(lambda: SimpleNamespace(catalogue=cat, folders=lambda scope: {}))`, with the
 same assertions.
 
-- [ ] **Step 2: Write the failing snapshot and HTTP tests** in `tests/test_instructions.py`
+- [x] **Step 2: Write the failing snapshot and HTTP tests** in `tests/test_instructions.py`
 
 They use `market` from `tests/test_plugin_serving.py`, a library `lib` with the entries
 `lib` (`./main`: `commands/top.md`, a skill), `a` (`./a`: `commands/hello.md`, a skill, tags `["t"]`)
@@ -330,13 +342,13 @@ async def test_the_lines_carry_the_prefix(tmp_path, mode):
 
 `_three(tmp_path) -> Config` is a helper in the test file.
 
-- [ ] **Step 3: Run them to see them fail**
+- [x] **Step 3: Run them to see them fail**
 
 Run: `pytest tests/test_instructions.py -v`
 Expected: FAIL with `ImportError` (`Folders`, `kind_pointer`) and, once those exist, on the
 missing lines.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 - `snapshot.py`: `Folders` and `Snapshot.folders`. For each library in `self.libraries`, walk
   `library.plugins` in order. Keep `namespace_for(library, plugin)` for each plugin id that has a
@@ -351,12 +363,12 @@ missing lines.
   the module docstring.
 - `app.py`: `mcp.add_middleware(ScopedInstructions(lambda: knowledge_base.snapshot))`.
 
-- [ ] **Step 5: Run the tests to see them pass**
+- [x] **Step 5: Run the tests to see them pass**
 
 Run: `pytest tests/test_instructions.py tests/test_boundaries.py -v`
 Expected: PASS.
 
-- [ ] **Step 6: Spec, wiki and changelog**
+- [x] **Step 6: Spec, wiki and changelog**
 
 - INS-10: "The pointer names the library's index: `Skills: skill://<library>/_index.md`. INS-19
   adds the prompt and agent pointers after it."
@@ -387,12 +399,12 @@ Expected: PASS.
 - `CHANGELOG.md`, `[Unreleased]` → `### Added`: `- A client's instructions now point at each
   library's prompts and agents, at prompts://<library>/_index.md and agents://<library>/_index.md.`
 
-- [ ] **Step 7: Run every check**
+- [x] **Step 7: Run every check**
 
 Run: `ruff check . && pytest && python scripts/generate_wiki.py --check`
 Expected: all pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add kubed/mcp_kb/catalogue/snapshot.py kubed/mcp_kb/catalogue/instructions.py \
@@ -497,8 +509,8 @@ Expected: PASS. The `test_agents.py` fallback tests (`test_the_library_fallback_
     unlisted, at `prompts://<namespace>/<place>` and an agent at `agents://…`, with folder indexes,
     all kubed-mcp's. `prompts://<library>` exists only when the main plugin serves one, which is
     why INS-19 can point at plugin folders. kb serves neither scheme.
-  - In "A provider that stores a `Catalogue`…", `ScopedInstructions` now takes the snapshot getter
-    (`lambda: knowledge_base.snapshot`), not `catalogue()`.
+  - In "A provider that stores a `Catalogue`…", `ScopedInstructions` now takes
+    `SkillServing.served_snapshot`, not `catalogue()`. *(Done in Task 1, with the Agents paragraph.)*
 
 - [ ] **Step 4: Run every check**
 

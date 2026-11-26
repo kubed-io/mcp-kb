@@ -203,7 +203,8 @@ description is: [plugins-and-libraries.md](plugins-and-libraries.md).
 **INS-9.** Blank lines and trailing whitespace are removed from the description and the notes, so
 neither can open a new section.
 
-**INS-10.** The pointer names the library's index: `Skills: skill://<library>/_index.md`.
+**INS-10.** The pointer names the library's index: `Skills: skill://<library>/_index.md`. INS-19
+adds the prompt and agent pointers after it.
 
 **INS-11.** The pointer also lists skill names when all of these hold: exactly one library is
 selected, that library's `listSkills` is true, and the client has not declared the Skills
@@ -214,6 +215,30 @@ extension. It then reads `Skills (skill://<library>/_index.md): <names>`.
 
 **INS-13.** With one library selected, its section has no heading. With several, each section
 starts with a `[<library>]` line and no names are listed.
+
+**INS-19.** After the pointer, a section has a `Prompts:` line when a prompt of the library is in
+the request's scope, then an `Agents:` line when an agent is. A prompt is in scope by SCP-27 and an
+agent by AGT-15, and only what the plugin layer serves counts (SKL-45). The lines are built from
+what the plugin layer serves as the answer is written (SKL-45): the generation the request
+pinned, or else the one it serves now.
+
+- Each line names `<scheme>://<library>/_index.md` when the library's main plugin (SKL-59) serves
+  the scope one of that kind. Only then is that folder there (kubed-mcp's PLUG-68).
+- Otherwise the line names the `_index.md` of each plugin namespace that serves one, in the
+  library's plugin order, joined by `, `.
+- The lines are written in both modes, whether or not the client declared an extension, and in
+  the INS-11 form. INS-6 still decides which libraries have a section.
+- The prefix is written as INS-16 says.
+
+```
+[grafana]
+Grafana, Loki and the rest of the LGTM stack.
+Skills: skill://grafana/_index.md
+Prompts: prompts://grafana/_index.md
+Agents: agents://grafana/k6/_index.md
+```
+
+INS-17 and INS-18 stay as they are: their libraries are shown without prompts or agents.
 
 ### Layout and footer
 

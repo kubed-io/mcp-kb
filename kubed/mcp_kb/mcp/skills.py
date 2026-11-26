@@ -1212,6 +1212,18 @@ class SkillServing:
             return pinned[1], False
         return self._published, False
 
+    def served_snapshot(self) -> Snapshot:
+        """The narrowed snapshot of the state a hook reads (``_reading``).
+
+        The one the request's view pinned when it has pinned, otherwise the one
+        published with the set kubed-mcp serves now. ``_published`` is set
+        before ``serve()`` and ``KnowledgeBase`` swaps after, so this one never
+        names a generation the layer does not serve yet. While this serving
+        stages a generation, and in the publishing context only, it is the
+        staged one, which the instructions never reach.
+        """
+        return self._reading()[0].snapshot
+
     def rewrite(self, site: Site, text: str) -> str:
         """kb's rewriting: a root ``SKILL.md`` and an agent's or a command's body
         rendered, and every text file of a skill with LF line endings (SKL-22);
