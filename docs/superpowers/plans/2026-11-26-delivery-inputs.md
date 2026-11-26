@@ -14,8 +14,17 @@
 >   middleware kb adds. The one public way in is `QuickMCP.instructions(fn)` (DLV-11): `fn` is
 >   called with the `Resolved` itself. So ruling 3 is built by moving `ScopedInstructions` onto that
 >   hook. That is the hook half of #87; #87 keeps Via, the `local` mode and N17.
-> - **D6, the pin.** Ruling 1's "asks the view" is built as "does the view admit any plugin". That
->   differs from today in one corner, named as L6.
+> - **D6, the pin.** Proposed as "does the view admit any plugin", which differed from today in one
+>   corner.
+>
+> **Dr K's answers (2026-11-26 02:58).** D5 is accepted: the hook moves into #86, #87 shrinks to Via,
+> `local` and N17, and #104's test that the instructions come from the build the request pinned
+> stays. D6 is not: today's behaviour is kept exactly, so a scope whose only admitted plugin serves
+> nothing is still refused, and L6 is dropped. `_serving` counts served skills, library files,
+> prompts and agents, and `what_is_wrong` keeps its signature (D6 below). Task 0 passed as written:
+> with no `delivery` the plugin layer lists a `SKILL.md` row per skill, so `Config.delivery` is
+> deleted with no `listed=("skills",)` fallback, and `extensions` holds the declared Skills id in
+> both eras.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -26,7 +35,7 @@ go. The tools-mode footer follows kubed-mcp's resolved `resources`.
 **Architecture:** Mostly deletion. kb's `CatalogueProvider` stops listing index rows and lists only
 `_files.md`. kubed-mcp's plugin layer lists the `SKILL.md` rows once kb stops forcing `listed`
 to none. `mcp/prompts.py` loses the mirror, and `HideMirrorTools` goes. `RefuseEmptyScope`'s
-`_serving` asks `SkillServing` whether its view admits any plugin. `ScopedInstructions` becomes the
+`_serving` counts served skills itself, now that the index rows it counted are gone. `ScopedInstructions` becomes the
 `fn` that `mcp.instructions` calls with the request's `Resolved`.
 
 **Tech Stack:** Python ≥3.11, `kubed-mcp>=0.3.0,<0.4` (FastMCP through it), pytest +
@@ -122,12 +131,15 @@ What was not read: how the plugin layer filters its own rows by `listed`, and th
   `RefuseEmptyScope` raises inside `_Describe`'s `call_next`, so a refused scope never reaches `fn`
   (INS-5). `Resolved` is imported from `kubed.mcp.delivery` under `TYPE_CHECKING`, and AGENTS.md's
   facade list names that module.
-- **D6. The pin asks the view.** `SkillServing.admits(scope: Scope) -> bool` is true when any row
-  of `self._reading()[0].table` is `admitted(scope)`. It does not re-read live plugins, pin or build.
-  `what_is_wrong(scope, config, snapshot, admits)` takes it as `admits: Callable[[Scope], bool]`.
-  `_serving(snapshot, scope, admits)` is `admits(scope) or bool(snapshot.catalogue.entries(scope))`.
-  The second term covers a library of files alone. Every prompt and agent comes from an added
-  plugin, so `visible_prompts` and `visible_agents` leave `_serving`. The messages are unchanged.
+- **D6. The pin keeps today's answer** (Dr K, 02:58). Today `_serving` is true when
+  `catalogue.entries(scope)` has a row, and that row is an index (there is a served skill in scope)
+  or a `_files.md` (there is a library file in scope); or a prompt or an agent is visible. Once
+  `entries` lists `_files.md` alone, the skill term is asked directly: `_serving(snapshot, scope)`
+  is `served.visible_skills(scope) or served.entries(scope) or snapshot.visible_prompts(scope) or
+  snapshot.visible_agents(scope)`, with `served = snapshot.catalogue`, the narrowed catalogue
+  (SKL-45). A scope whose only admitted plugin serves nothing is refused, as now. `what_is_wrong`
+  keeps its three arguments, `app.py` is unchanged, `SkillServing` gains no `admits`, and SCP-31
+  is unchanged. The messages are unchanged.
 - **D7. Spec rows keep their IDs.** Removed rows leave gaps (specs/README). TOOL-9, TOOL-14 to
   TOOL-20 and PRM-3 are deleted. SKL-16 is deleted and SKL-14 rewritten. TOOL-1 to TOOL-13 are
   reworded to the resource pair alone, and each says which DLV row it restates.
@@ -146,9 +158,9 @@ What was not read: how the plugin layer filters its own rows by `listed`, and th
 - **L5. The tools footer follows kubed-mcp.** Any client kubed-mcp resolves `resources: off` for
   gets `Read these with read_resource.`, VS Code with no header included (DLV-15). It matches the
   tools it is listed (#99).
-- **L6. A scope whose view admits a plugin is not refused under SCP-31 row 9,** even when that
-  plugin serves the scope nothing (every skill dropped by the parity guard, no prompt, no agent).
-  Before, that scope was refused.
+
+L6 (a scope whose admitted plugin serves nothing being served empty) was proposed and dropped: the
+refusal is unchanged.
 
 Not named: `Kb-Resources` keeps working, because kubed-mcp reads it. kb's duplicate read goes
 unseen. The resource tools' text is kubed-mcp's (K3 N4). VS Code's default listing of the pair is
@@ -276,7 +288,7 @@ git add tests/test_delivery_layer.py
 git commit -S -m "test: what kubed-mcp 0.3.0 lists by Listed, and what instructions fn is handed (#86)"
 ```
 
-### Task 1: One `SKILL.md` row per skill (L1, L2, L6)
+### Task 1: One `SKILL.md` row per skill (L1, L2)
 
 **Files:**
 - Modify: `kubed/mcp_kb/config.py` (delete `Config.delivery`, `Delivery`, `DELIVERY`)
@@ -284,12 +296,10 @@ git commit -S -m "test: what kubed-mcp 0.3.0 lists by Listed, and what instructi
   docstring)
 - Modify: `kubed/mcp_kb/mcp/resources.py` (`CatalogueProvider._list_resources`, module docstring)
 - Modify: `kubed/mcp_kb/mcp/request.py` (delete `LISTING_*`, `_FULL`, `full_listing`)
-- Modify: `kubed/mcp_kb/mcp/skills.py` (`SkillServing.admits`)
-- Modify: `kubed/mcp_kb/mcp/pins.py` (`what_is_wrong`, `_serving`), `kubed/mcp_kb/app.py`
-  (`RefuseEmptyScope`'s lambda)
+- Modify: `kubed/mcp_kb/mcp/pins.py` (`_serving`, D6)
 - Modify: `kubed/mcp_kb/mcp/tools.py` (`LISTED_PARAM`, `LISTED_HEADER`, D4), `tests/test_wiki.py`
 - Modify: specs `skills.md` (SKL-14, SKL-15, SKL-16), `scoping-and-instructions.md` (SCP-2's
-  Listing row, SCP-3, SCP-31 rows 8 and 9 and the note under the table),
+  Listing row, SCP-3),
   `http-and-tools.md` (TOOL-9); `AGENTS.md`; `README.md`; `CHANGELOG.md`; wiki `Skills.md`,
   `Installing.md`, `Scoping.md`, `Home.md`
 - Test: `tests/test_listing.py` (create); then every test that asserts the old listing:
@@ -302,8 +312,7 @@ git commit -S -m "test: what kubed-mcp 0.3.0 lists by Listed, and what instructi
   `server_of`, `serving_of`.
 - Produces:
   - `Catalogue.entries(self, scope: Scope = EVERYTHING) -> list[Entry]`: only `_files.md` rows.
-  - `SkillServing.admits(self, scope: Scope) -> bool`.
-  - `what_is_wrong(scope: Scope, config: Config, snapshot: Snapshot, admits: Callable[[Scope], bool]) -> str | None`.
+  - `what_is_wrong(scope, config, snapshot)` as today, its answer unchanged (D6).
   - `tools.LISTED_PARAM = "listed"` and `tools.LISTED_HEADER = "kb-listed"`.
 
 - [ ] **Step 1: Write the failing tests** in `tests/test_listing.py`, over `serve_http` with the
@@ -349,10 +358,11 @@ async def test_a_files_only_library_is_served_its_files_md(tmp_path):
     # not refused; uris == ["skill://docs/_files.md"]
 
 @pytest.mark.unit
-def test_the_pin_asks_the_view(tmp_path):
-    # a plugin tagged "t" whose only skill holds assets/.gitkeep (dropped, N13), no prompt or agent
-    # what_is_wrong(Scope.parse(tags="t"), config, kb.snapshot, serving.admits) is None    (L6)
-    # what_is_wrong(Scope.parse(tags="t,u"), ...) is the row-9 message, unchanged
+def test_the_pin_still_counts_served_skills(tmp_path):
+    # a plugin tagged "s" with one served skill, no prompt, agent or file:
+    #   what_is_wrong(Scope.parse(tags="s"), config, kb.snapshot) is None
+    # a plugin tagged "t" whose only skill holds assets/.gitkeep (dropped, N13), no prompt or agent:
+    #   what_is_wrong(Scope.parse(tags="t"), ...) is the row-9 message, unchanged (D6)
 ```
 
 `resource_uris(url, sent=None)` is a helper in the file: a headers dict or a query string.
@@ -360,8 +370,9 @@ def test_the_pin_asks_the_view(tmp_path):
 - [ ] **Step 2: Run them to see them fail**
 
 Run: `pytest tests/test_listing.py -v`
-Expected: FAIL. The listing still has index rows and no `SKILL.md` row, `entries` still lists index
-rows, and `what_is_wrong` takes three arguments.
+Expected: FAIL. The listing still has index rows and no `SKILL.md` row, and `entries` still lists
+index rows. `test_the_pin_still_counts_served_skills` passes before and after: it is the guard that
+`_serving` keeps its answer once `entries` stops listing indexes.
 
 - [ ] **Step 3: Implement**
 
@@ -374,11 +385,8 @@ rows, and `what_is_wrong` takes three arguments.
 - `resources.py`: `self._catalogue().entries(requested_scope())`. In the module docstring, the
   listing is the plugin layer's `SKILL.md` rows plus kb's `_files.md`.
 - `request.py`: delete `LISTING_*`, `_FULL` and `full_listing`.
-- `skills.py`: `admits` as D6. Its docstring says it reads `_reading()`, takes no lock and builds
-  nothing.
-- `pins.py`: `what_is_wrong` gains `admits`. `_serving` follows D6, and its docstring says why
-  prompts and agents need no term of their own.
-- `app.py`: `what_is_wrong(scope, config, knowledge_base.snapshot, serving.admits)`.
+- `pins.py`: `_serving` follows D6. Its docstring says a served skill, a library file, a prompt
+  or an agent is something to be shown, and a skill that is not served is not.
 - `tools.py`: D4's two `LISTED_*` names. `tests/test_wiki.py` lists `tools.LISTED_PARAM` and
   `tools.LISTED_HEADER` in place of `request.LISTING_*`.
 
@@ -416,11 +424,8 @@ Any other failure is a finding (Global Constraints).
 - **SKL-16:** delete it (a gap).
 - **SCP-2:** delete the Listing row. **SCP-3:** delete "The listing,". It adds `Listed` to
   kubed-mcp's inputs, read with the header prefix `Kb` (DLV-16).
-- **SCP-31:** row 8 becomes "no library is set and the plugin layer's view admits no plugin, and
-  no library file is served". Row 9 becomes "categories or tags are set, and the view admits no
-  plugin for the scope and no library file is in it". The note "Rows 8 and 9 count only skills that
-  are served (SKL-45)" becomes "Rows 8 and 9 ask the plugin layer's view (SCP-36), so a plugin it
-  adds counts whatever it serves, plus kb's library files".
+- **SCP-31:** unchanged (D6). Check its rows 8 and 9 and the note under the table still read
+  true once the listing holds no index row; reword only a row that names the listing.
 - **TOOL-9:** delete it.
 - **AGENTS.md:** in the progressive-disclosure table, the list row becomes "one `SKILL.md` per
   skill in scope, plus `_files.md` | grows with the catalogue". The sentence above it, "adding a
