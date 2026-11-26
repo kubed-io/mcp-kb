@@ -15,7 +15,6 @@ Scope only exists inside an HTTP request, so this runs against a real server on
 a loopback port, like ``test_address_space.py``.
 """
 
-import json
 import threading
 
 import pytest
@@ -264,14 +263,10 @@ async def test_a_skills_rendered_citation_with_a_prefix(url):
 
 async def test_a_prompt_citing_its_plugins_skills_renders_their_addresses(url):
     """A prompt body is the plugin's text too, so the same citations render the
-    same addresses -- through ``prompts/get`` and through its tool mirror."""
+    same addresses through ``prompts/get``."""
     async with _client(url) as client:
         got = await client.get_prompt("kit_cite")
-        mirrored = await client.call_tool("get_prompt", {"name": "kit_cite"})
     assert RENDERED in got.messages[0].content.text
-    # The mirror returns the messages as JSON, so the text is one field of it.
-    message = json.loads(mirrored.content[0].text)["messages"][0]
-    assert RENDERED in message["content"]
 
 
 async def test_a_prompts_rendered_citation_with_a_prefix(url):

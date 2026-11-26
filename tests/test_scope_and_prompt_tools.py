@@ -1,8 +1,8 @@
-"""Library, category and tag scoping, and the prompt tool mirror, over real HTTP.
+"""Library, category and tag scoping of the prompts and resources, over real HTTP.
 
-Both only exist inside an HTTP request -- a scope is read from the MCP URL or
-its headers, and whether a mirror is shown depends on what the client declared
-there -- so these run the app on a loopback port, as test_header_scope does.
+A scope only exists inside an HTTP request -- it is read from the MCP URL or
+its headers, and whether the resource tools are shown depends on what the client
+declared there -- so these run the app on a loopback port, as test_header_scope does.
 
 The catalogue is shaped to make the rules visible: ``observe`` holds two
 plugins, its own -- the main one -- in category ``observability`` tagged ``ops``
@@ -12,15 +12,13 @@ category ``tooling`` tagged ``extra`` and ``ops`` with a skill;
 (tagged ``ops``) has a prompt and no skills at all.
 """
 
-import json
-import logging
 import threading
 
 import pytest
 import uvicorn
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
-from kubed.mcp import ToolError
+from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
@@ -31,7 +29,7 @@ from tests.test_header_scope import _free_port
 
 pytestmark = pytest.mark.unit
 
-MIRRORS = ["get_prompt", "list_prompts", "list_resources", "read_resource"]
+RESOURCE_PAIR = ["list_resources", "read_resource"]
 
 
 def _skill(root, name):
@@ -118,7 +116,7 @@ def _client(url, query="", headers=None):
 
 
 async def _seen(url, query="", headers=None):
-    """(tool names, index resource names, prompt names) for one client."""
+    """(tool names, listed resource names, prompt names) for one client."""
     async with _client(url, query, headers) as client:
         tools = sorted(t.name for t in await client.list_tools())
         resources = sorted(r.name for r in await client.list_resources())
@@ -127,74 +125,41 @@ async def _seen(url, query="", headers=None):
 
 
 async def _skills(url, query=""):
-    async with _client(url, query + "&skills=full") as client:
+    async with _client(url, query) as client:
         return sorted(
             str(r.uri) for r in await client.list_resources()
             if str(r.uri).endswith("/SKILL.md")
         )
 
 
-# -- the prompt mirror ----------------------------------------------------------
+# -- the tools and the prompts ----------------------------------------------------------
 
 
-async def test_a_client_with_both_native_features_sees_no_mirror_tools(url):
+async def test_a_client_with_both_native_features_sees_no_tool(url):
     tools, _, _ = await _seen(url)
     assert tools == []
 
 
-async def test_prompts_off_shows_only_the_prompt_tools(url):
-    tools, _, _ = await _seen(url, "?prompts=off")
-    assert tools == ["get_prompt", "list_prompts"]
+async def test_resources_off_shows_the_resource_pair_alone(url):
+    tools, _, _ = await _seen(url, "?resources=off")
+    assert tools == RESOURCE_PAIR
 
 
-async def test_both_off_shows_every_mirror(url):
-    tools, _, _ = await _seen(url, "?prompts=off&resources=off")
-    assert tools == MIRRORS
-
-
-async def test_list_prompts_gives_each_prompts_arguments(url):
-    async with _client(url, "?prompts=off") as client:
-        result = await client.call_tool("list_prompts", {})
-    listed = {p["name"]: p for p in json.loads(result.content[0].text)}
+async def test_prompts_list_gives_each_prompts_arguments(url):
+    async with _client(url) as client:
+        listed = {p.name: p for p in await client.list_prompts()}
     assert set(listed) == {"observe_debug", "notes_standup"}
-    assert listed["observe_debug"]["arguments"] == [
-        {"name": "app", "description": "The workload.", "required": True}
+    assert [(a.name, a.description, a.required) for a in listed["observe_debug"].arguments] == [
+        ("app", "The workload.", True)
     ]
 
 
-async def test_get_prompt_returns_rendered_role_tagged_messages(url):
-    async with _client(url, "?prompts=off") as client:
-        result = await client.call_tool(
-            "get_prompt", {"name": "observe_debug", "arguments": {"app": "nextcloud"}}
-        )
-    messages = json.loads(result.content[0].text)["messages"]
-    assert [(m["role"], m["content"].strip()) for m in messages] == [
+async def test_prompts_get_returns_rendered_role_tagged_messages(url):
+    async with _client(url) as client:
+        got = await client.get_prompt("observe_debug", {"app": "nextcloud"})
+    assert [(m.role, m.content.text.strip()) for m in got.messages] == [
         ("user", "Look at **nextcloud**.")
     ]
-
-
-@pytest.mark.parametrize(
-    ("name", "arguments", "says"),
-    [
-        ("observe_nope", {}, "Unknown prompt: 'observe_nope'. Call list_prompts()"),
-        ("observe_debug", {}, "Prompt 'observe_debug' needs the argument app."),
-    ],
-)
-async def test_a_prompt_tool_mistake_is_an_error_result_that_says_what_to_do(
-    url, name, arguments, says, caplog
-):
-    """The caller's mistake: an error result, and nothing in the log above DEBUG."""
-    with caplog.at_level(logging.DEBUG, logger="fastmcp"):
-        async with _client(url, "?prompts=off") as client:
-            result = await client.call_tool(
-                "get_prompt",
-                {"name": name, "arguments": arguments},
-                raise_on_error=False,
-            )
-    assert result.is_error
-    assert result.content[0].text.startswith(says)
-    server = [r for r in caplog.records if r.name.startswith("fastmcp.server")]
-    assert [r.getMessage() for r in server if r.levelno > logging.DEBUG] == []
 
 
 # -- library, categories and tags -----------------------------------------------
@@ -202,7 +167,7 @@ async def test_a_prompt_tool_mistake_is_an_error_result_that_says_what_to_do(
 
 async def test_a_library_is_the_whole_library(url):
     _, resources, prompts = await _seen(url, "?library=observe")
-    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
+    assert resources == ["observe/loki/SKILL.md", "observe/observe-extra/alerts/SKILL.md", "observe/tempo/SKILL.md"]
     assert prompts == ["observe_debug"]
     assert await _skills(url, "?library=observe") == [
         "skill://observe/loki/SKILL.md",
@@ -219,16 +184,15 @@ async def test_a_library_of_prompts_alone_is_visible_by_name(url):
 
 async def test_tags_select_across_libraries(url):
     _, resources, prompts = await _seen(url, "?tag=ops")
-    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
+    assert resources == ["observe/loki/SKILL.md", "observe/observe-extra/alerts/SKILL.md", "observe/tempo/SKILL.md"]
     assert prompts == ["notes_standup", "observe_debug"]
 
 
 async def test_a_repeated_tag_parameter_means_any_of_them(url):
     _, resources, _ = await _seen(url, "?tag=ui&tag=extra")
     assert resources == [
-        "design/_index.md",
-        "observe/_index.md",
-        "observe/observe-extra/_index.md",
+        "design/palette/SKILL.md",
+        "observe/observe-extra/alerts/SKILL.md",
     ]
     assert await _skills(url, "?tag=ui&tag=extra") == [
         "skill://design/palette/SKILL.md",
@@ -240,14 +204,14 @@ async def test_a_comma_in_a_tag_means_all_of_them(url):
     """`?tag=extra,ops` admits only a plugin carrying both: `observe-extra`,
     not `observe` (ops alone) and not `notes` (ops alone)."""
     _, resources, prompts = await _seen(url, "?tag=extra,ops")
-    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
+    assert resources == ["observe/observe-extra/alerts/SKILL.md"]
     assert prompts == []
     assert await _skills(url, "?tag=extra,ops") == ["skill://observe/observe-extra/alerts/SKILL.md"]
 
 
 async def test_a_category_selects_the_plugins_declaring_it(url):
     _, resources, prompts = await _seen(url, "?category=observability")
-    assert resources == ["observe/_index.md"]
+    assert resources == ["observe/loki/SKILL.md", "observe/tempo/SKILL.md"]
     assert prompts == ["observe_debug"]
     assert await _skills(url, "?category=observability") == [
         "skill://observe/loki/SKILL.md",
@@ -257,12 +221,16 @@ async def test_a_category_selects_the_plugins_declaring_it(url):
 
 async def test_a_repeated_category_parameter_means_any_of_them(url):
     _, resources, _ = await _seen(url, "?category=observability&category=design")
-    assert resources == ["design/_index.md", "observe/_index.md"]
+    assert resources == [
+        "design/palette/SKILL.md",
+        "observe/loki/SKILL.md",
+        "observe/tempo/SKILL.md",
+    ]
 
 
 async def test_tags_narrow_within_a_library(url):
     _, resources, prompts = await _seen(url, "?library=observe&tag=extra")
-    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
+    assert resources == ["observe/observe-extra/alerts/SKILL.md"]
     assert prompts == []
     assert await _skills(url, "?library=observe&tag=extra") == [
         "skill://observe/observe-extra/alerts/SKILL.md"
@@ -360,17 +328,21 @@ async def test_a_header_beats_the_url_parameter(url):
     _, resources, prompts = await _seen(
         url, "?library=design", {"Kb-Library": "observe"}
     )
-    assert resources == ["observe/_index.md", "observe/observe-extra/_index.md"]
+    assert resources == ["observe/loki/SKILL.md", "observe/observe-extra/alerts/SKILL.md", "observe/tempo/SKILL.md"]
     assert prompts == ["observe_debug"]  # design has no prompts
 
 
-async def test_the_prompt_tools_are_held_to_the_scope(url):
-    """The tools route through prompts/list and prompts/get, so the scope binds."""
-    async with _client(url, "?prompts=off&library=design") as client:
-        listed = json.loads((await client.call_tool("list_prompts", {})).content[0].text)
-        with pytest.raises(ToolError, match="observe_debug"):
-            await client.call_tool("get_prompt", {"name": "observe_debug"})
-    assert listed == []
+async def test_the_prompts_are_held_to_the_scope(url):
+    async with _client(url, "?library=design") as client:
+        assert await client.list_prompts() == []
+        with pytest.raises(MCPError) as hidden:
+            await client.get_prompt("observe_debug", {"app": "x"})
+        with pytest.raises(MCPError) as absent:
+            await client.get_prompt("observe_nope", {"app": "x"})
+    assert hidden.value.error.code == absent.value.error.code
+    assert hidden.value.error.message.replace(
+        "observe_debug", "<name>"
+    ) == absent.value.error.message.replace("observe_nope", "<name>")
 
 
 # -- scope across plugins of one library ------------------------------------------

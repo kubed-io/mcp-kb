@@ -13,6 +13,7 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.skills import SkillsClientExtension
 from kubed.mcp.gateway import prefixed
+from kubed.mcp.protocol import types
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import harvest
@@ -22,7 +23,7 @@ from kubed.mcp_kb.catalogue.snapshot import Folders
 from kubed.mcp_kb.catalogue.uris import Catalogue, LibraryText
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.instructions import ScopedInstructions
-from kubed.mcp_kb.mcp.request import declared_on_initialize
+from kubed.mcp_kb.mcp.request import EXTENSION_ID
 from kubed.mcp_kb.mcp.scope import EVERYTHING, Scope
 from tests.conftest import (
     FLAT_FOLDERS,
@@ -263,9 +264,14 @@ def served(knowledge_base):
         thread.join(timeout=5)
 
 
-async def told(url, mode, headers=None, extension=False):
+VS_CODE = types.Implementation(name="Visual Studio Code", version="1.99.0")
+
+
+async def told(url, mode, headers=None, extension=False, client_info=None):
     """The instructions a client in ``mode`` is handed on connecting."""
     kwargs = {"extensions": [SkillsClientExtension()]} if extension else {}
+    if client_info is not None:
+        kwargs["client_info"] = client_info
     if mode == "legacy":
         kwargs["mode"] = "legacy"
     transport = StreamableHttpTransport(url, headers=headers or {})
@@ -516,38 +522,47 @@ async def test_the_text_a_library_is_told_and_its_index_open_alike(
     assert expected in index
 
 
-class _Context:
-    """What FastMCP hands a middleware; ``message`` is None when it could not
-    re-validate the request."""
-
-    message = None
-    fastmcp_context = None
-
-
 @pytest.mark.unit
-def test_a_missing_message_means_the_extension_is_not_declared():
-    assert declared_on_initialize(_Context()) is False
-
-
-@pytest.mark.unit
-async def test_a_missing_message_still_gets_instructions(tmp_path):
+def test_the_fn_builds_from_the_resolution(tmp_path):
     cat = _catalogue(tmp_path, {LibraryText("penpot"): ["router"]})
-    result = type("Result", (), {"instructions": None})()
-
-    async def call_next(_context):
-        return result
-
-    mw = ScopedInstructions(
+    fn = ScopedInstructions(
         lambda: SimpleNamespace(catalogue=cat, folders=lambda scope: {})
     )
-    assert await mw.on_initialize(_Context(), call_next) is result
-    assert result.instructions.startswith("Skills (skill://penpot/_index.md)")
-    # discover has no message to read, and a None answer must not raise either
-    assert await mw.on_discover(_Context(), _none) is None
+    on = SimpleNamespace(resources="on", extensions=None, prefix="kb+")
+    # unprefixed: kubed-mcp writes the prefix over what the fn returns
+    assert fn(on).startswith("Skills (skill://penpot/_index.md)")
+    assert fn(on).endswith(RES_FOOTER)
+    off = SimpleNamespace(resources="off", extensions=frozenset(), prefix=None)
+    assert fn(off).endswith(TOOLS_FOOTER)
+    declared = SimpleNamespace(
+        resources="on", extensions=frozenset({EXTENSION_ID}), prefix=None
+    )
+    assert fn(declared).startswith("Skills: skill://penpot/_index.md")
 
 
-async def _none(_context):
-    return None
+async def _tools(url, mode, headers=None):
+    kwargs = {"mode": "legacy"} if mode == "legacy" else {}
+    transport = StreamableHttpTransport(url, headers=headers or {})
+    async with Client(transport, client_info=VS_CODE, **kwargs) as client:
+        return sorted(t.name for t in await client.list_tools())
+
+
+@pytest.mark.integration
+@ERAS
+async def test_the_footer_follows_what_kubed_mcp_resolved(server_url, mode):  # noqa: F811
+    text = await told(server_url, mode, client_info=VS_CODE)
+    assert text.endswith(TOOLS_FOOTER)
+    assert await _tools(server_url, mode) == ["list_resources", "read_resource"]
+    on = {"Kb-Resources": "on"}
+    text = await told(server_url, mode, on, client_info=VS_CODE)
+    assert text.endswith(RES_FOOTER)
+    assert await _tools(server_url, mode, on) == []
+    nonsense = {"Kb-Resources": "nonsense"}
+    text = await told(server_url, mode, nonsense)
+    assert text.endswith(RES_FOOTER)
+    # passed over, so the client's own default answers
+    text = await told(server_url, mode, nonsense, client_info=VS_CODE)
+    assert text.endswith(TOOLS_FOOTER)
 
 
 # -- instructions follow the prefix ---------------------------------------
@@ -784,6 +799,7 @@ def test_a_refresh_between_the_pin_and_the_instructions(tmp_path):
     server_of(kb)
     serving = serving_of(kb)
     instructions = ScopedInstructions(serving.served_snapshot)
+    on = SimpleNamespace(resources="on", extensions=None, prefix=None)
     request = contextvars.copy_context()
     request.run(serving.view)  # pins the published state, off-request: everything
 
@@ -792,9 +808,9 @@ def test_a_refresh_between_the_pin_and_the_instructions(tmp_path):
     kb.refresh(force=True)
     assert kb.snapshot.folders() == {"lib": Folders(agents=("lib/b",))}
 
-    pinned = request.run(instructions._text, False)
+    pinned = request.run(instructions, on)
     assert "Prompts: prompts://lib/_index.md" in pinned.splitlines()
-    fresh = contextvars.Context().run(instructions._text, False)
+    fresh = contextvars.Context().run(instructions, on)
     assert not [line for line in fresh.splitlines() if line.startswith("Prompts:")]
     assert "Agents: agents://lib/b/_index.md" in fresh.splitlines()
 

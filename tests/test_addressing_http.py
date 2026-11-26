@@ -21,7 +21,6 @@ from tests.test_skills_extension import request
 
 PIN = {"Kb-Library": "flatsource"}
 PREFIX = {"Kb-Resource-Prefix": "kb+"}
-FULL = {"Kb-Listing": "full"}
 ALPHA_DESCRIPTION = "First skill, see kb+skill://flatsource/beta/SKILL.md now"
 BOTH = {**PIN, **PREFIX}
 
@@ -88,9 +87,10 @@ async def read(url, uri, headers=None):
 
 @pytest.mark.integration
 async def test_defaults_are_unchanged(server_url):
-    assert ("skill://flatsource/_index.md", "flatsource/_index.md") in await listing(
-        server_url
-    )
+    assert (
+        "skill://flatsource/alpha/SKILL.md",
+        "flatsource/alpha/SKILL.md",
+    ) in await listing(server_url)
     body = await read(server_url, "skill://flatsource/_index.md")
     assert "skill://flatsource/alpha/SKILL.md" in body
 
@@ -98,7 +98,10 @@ async def test_defaults_are_unchanged(server_url):
 @pytest.mark.integration
 async def test_a_library_pin_changes_no_address(server_url):
     rows = await listing(server_url, PIN)
-    assert rows == [("skill://flatsource/_index.md", "flatsource/_index.md")]
+    assert sorted(rows) == [
+        ("skill://flatsource/alpha/SKILL.md", "flatsource/alpha/SKILL.md"),
+        ("skill://flatsource/beta/SKILL.md", "flatsource/beta/SKILL.md"),
+    ]
     pinned = await read(server_url, "skill://flatsource/_index.md", PIN)
     assert pinned == await read(server_url, "skill://flatsource/_index.md")
     assert "skill://flatsource/alpha/SKILL.md" in pinned
@@ -107,7 +110,7 @@ async def test_a_library_pin_changes_no_address(server_url):
 @pytest.mark.integration
 async def test_prefix_only_bodies_and_prefixed_reads(server_url):
     uris = [u for u, _ in await listing(server_url, PREFIX)]
-    assert "skill://flatsource/_index.md" in uris
+    assert "skill://flatsource/alpha/SKILL.md" in uris
     body = await read(server_url, "skill://flatsource/_index.md", PREFIX)
     assert "kb+skill://flatsource/alpha/SKILL.md" in body
     plain = await read(server_url, "skill://flatsource/beta/SKILL.md")
@@ -215,11 +218,11 @@ async def test_read_returns_the_uri_the_client_sent(server_url):
 
 @pytest.mark.integration
 async def test_listing_descriptions_are_addressed(server_url):
-    headers = {**BOTH, **FULL}
+    headers = BOTH
     async with _client(server_url, headers) as client:
         rows = {str(r.uri): r.description for r in await client.list_resources()}
     assert rows["skill://flatsource/alpha/SKILL.md"] == ALPHA_DESCRIPTION
-    plain = {**FULL, **PIN}
+    plain = PIN
     async with _client(server_url, plain) as client:
         rows = {str(r.uri): r.description for r in await client.list_resources()}
     assert "kb+" not in rows["skill://flatsource/alpha/SKILL.md"]
@@ -242,7 +245,10 @@ async def test_tools_mode_with_the_prefix(server_url):
     headers = {**BOTH, "X-MCP-Resources": "off"}
     # N4: kubed-mcp's list_resources answers {"resources": rows}.
     rows = json.loads(await tool(server_url, "list_resources", headers=headers))
-    assert [r["uri"] for r in rows["resources"]] == ["kb+skill://flatsource/_index.md"]
+    assert sorted(r["uri"] for r in rows["resources"]) == [
+        "kb+skill://flatsource/alpha/SKILL.md",
+        "kb+skill://flatsource/beta/SKILL.md",
+    ]
     bodies = {
         await tool(server_url, "read_resource", {"uri": uri}, headers)
         for uri in (

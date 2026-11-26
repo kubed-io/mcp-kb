@@ -1,7 +1,7 @@
 """The MCP server over a knowledge base, built by ``QuickMCP``.
 
 ``create_app`` is the wiring and nothing else: the plugin set, the address
-space, the resources, the prompts, the middleware and the routes, around one
+space, the resources, the middleware and the routes, around one
 ``KnowledgeBase`` that ``main`` has already cold-started.
 
 The skills, agents and prompts are kubed-mcp's to serve, from the plugin set
@@ -9,8 +9,8 @@ The skills, agents and prompts are kubed-mcp's to serve, from the plugin set
 text rewriting as its rewriter and kb's dialect reader as its command reader.
 kb serves the rest of the ``skill://`` space: the indexes, ``_files.md``,
 library files and the fallbacks. The
-resource mirror tools are kubed-mcp's too (DLV-6), shown to a client that says
-it cannot read resources; the prompt mirror is kb's.
+resource tools are kubed-mcp's too (DLV-6), shown to a client that says it
+cannot read resources, and they are the server's only tools.
 """
 
 from __future__ import annotations
@@ -22,11 +22,10 @@ from kubed.mcp.skills import SkillsExtension
 from . import routes
 from .catalogue.uris import Catalogue
 from .config import BUILTIN_SCHEMES, SERVER_NAME
-from .mcp import prompts, resources
+from .mcp import resources
 from .mcp.announce import AnnounceChanges
 from .mcp.instructions import ScopedInstructions
 from .mcp.pins import RefuseEmptyScope, what_is_wrong
-from .mcp.request import client_uses_prompts
 from .mcp.skills import QuietSelection, SkillServing
 from .server import KnowledgeBase
 from .sources import ServedTrees
@@ -94,15 +93,11 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
     )
     # The snapshot the plugin layer serves, not kb's: the handshake pins no
     # build, so its pointers name what is served (INS-19).
-    mcp.add_middleware(ScopedInstructions(serving.served_snapshot))
-    prompt_tools = prompts.register(mcp)
+    mcp.instructions(ScopedInstructions(serving.served_snapshot))
     mcp.add_middleware(
         RefuseEmptyScope(
             lambda scope: what_is_wrong(scope, config, knowledge_base.snapshot)
         )
-    )
-    mcp.add_middleware(
-        resources.HideMirrorTools(dict.fromkeys(prompt_tools, client_uses_prompts))
     )
     mcp.add_middleware(AnnounceChanges(knowledge_base))
     routes.register(mcp, knowledge_base)

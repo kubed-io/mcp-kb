@@ -2,7 +2,7 @@
 
 A prompt is a Markdown file a plugin ships, which a person picks and fills in. kb reads three
 dialects of prompt file and serves each as the same MCP prompt. This file covers how a file becomes
-a prompt and how it renders, not which files a plugin offers, scope, or the tool mirror.
+a prompt and how it renders, not which files a plugin offers or scope.
 
 ## Neighbours
 
@@ -16,9 +16,6 @@ admits its plugin, and the view is kb's scope, decided as in
 [scoping-and-instructions.md](scoping-and-instructions.md). A prompt out of scope is neither listed
 by `prompts/list` nor found by `prompts/get`, and reads as absent: `Unknown prompt`, as a name
 nobody serves does.
-
-**PRM-3.** The `list_prompts` and `get_prompt` tools ([http-and-tools.md](http-and-tools.md))
-list and render exactly what `prompts/list` and `prompts/get` do, under the same scope.
 
 **PRM-4.** A skipped prompt file is reported under its plugin's `skipped` in `/health`, as a
 plugin-relative path and a reason, as in [plugins-and-libraries.md](plugins-and-libraries.md). The
@@ -301,8 +298,8 @@ PRM-52.
 **PRM-56.** A `decline`, a `cancel`, or an `accept` with no content fails as in PRM-52, whatever
 content came with it.
 
-**PRM-57.** An older protocol, a client that declared no form elicitation, and the `get_prompt`
-tool are never asked. They get the failure in PRM-52.
+**PRM-57.** An older protocol and a client that declared no form elicitation are never asked. They
+get the failure in PRM-52.
 
 ## Live prompts
 

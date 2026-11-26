@@ -4,7 +4,7 @@ A **scope** is the slice of the catalogue one request may see: one library, some
 some tag groups. It is read from the request's headers and query string, and every listing and
 every read goes through it. The **instructions** are the text a client gets when it connects,
 built for that connection from its scope. This file covers both. It names the client capability
-settings (`Kb-Resources`, `Kb-Prompts`) but does not cover what they do, which is in
+setting (`Kb-Resources`) but does not cover what they do, which is in
 [http-and-tools.md](http-and-tools.md), or what a library's description and categories are,
 which is in [plugins-and-libraries.md](plugins-and-libraries.md).
 
@@ -20,16 +20,14 @@ Each is read per MCP request from an HTTP header or a query parameter on the MCP
 | Library | `Kb-Library` | `library` | `X-Skill-Library` | — |
 | Category | `Kb-Category` | `category` | `X-Skill-Categories` | `categories` |
 | Tag | `Kb-Tag` | `tag` | `X-Skill-Tags` | `tags` |
-| Listing | `Kb-Listing` | `listing` | `X-Skill-Listing` | `skills` |
 | Resource prefix | `Kb-Resource-Prefix` | `prefix` | `X-MCP-Resource-Prefix` | — |
 | Resources | `Kb-Resources` | `resources` | `X-MCP-Resources` | — |
-| Prompts | `Kb-Prompts` | `prompts` | `X-MCP-Prompts` | — |
 
-**SCP-3.** The listing, the resource prefix and the two capability settings are read by the same
-rules as the scope (SCP-4 to SCP-7). The resource prefix and the resources setting are kubed-mcp's
-own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its `X-MCP-` alias
-(DLV-16); kb reads the prompts setting the same way. What the listing and the prefix do is
-specified in [skills.md](skills.md), and the capability settings in
+**SCP-3.** The resource prefix and the resources setting are read by the same rules as the
+scope (SCP-4 to SCP-7). The resource prefix, the resources setting and the listed setting are
+kubed-mcp's own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its
+`X-MCP-` alias (DLV-16). What the listed setting and the
+prefix do is specified in [skills.md](skills.md), and the resources setting in
 [http-and-tools.md](http-and-tools.md).
 
 **SCP-4.** Header names match case-insensitively. Parameter names match exactly.
@@ -96,7 +94,7 @@ plugin, in that library, matches the categories and the tags (SCP-15 to SCP-17).
 
 **SCP-21.** The scope applies to skills, prompts, agents and library-level files alike, and to
 every surface that lists or reads them: `resources/list`, `resources/read`, `prompts/list`,
-`prompts/get`, `skills/list`, `skills/get`, `agents/list`, `agents/get` and the mirror tools.
+`prompts/get`, `skills/list`, `skills/get`, `agents/list`, `agents/get` and the resource tools.
 
 **SCP-22.** Out of scope means not listed and not readable. An index (`_index.md`) lists only the
 skills in scope, and `_files.md` lists only the library files in scope. An index or `_files.md`
@@ -109,7 +107,7 @@ scope, or the root of the in-scope skill it was addressed under.
 **SCP-24.** A read of an out-of-scope address fails exactly as a read of an absent one does, on
 `resources/read`, the `read_resource` tool, `skills/get` (`Unknown skill URI: <uri>`),
 `resources/directory/read` (`Directory not found`), `agents/get`
-(`Agent not found`, with `data.reason: "agent_not_found"`) and `prompts/get` or `get_prompt` alike:
+(`Agent not found`, with `data.reason: "agent_not_found"`) and `prompts/get` alike:
 the same error code and the same message.
 
 **SCP-25.** A hint that names the file to read instead of a directory is computed from the
@@ -144,7 +142,7 @@ that fails.
 | 6 | a requested category is unknown (SCP-32) | refused: `The scope names category '<x>', which no library lists and no plugin declares. The categories are: <sorted>.` |
 | 7 | a requested tag is unknown (SCP-33) | refused: `The scope names tag '<x>', which nothing carries. The tags are: <sorted>.` |
 | 8 | no library is set and the server serves nothing at all | served, not refused |
-| 9 | categories or tags are set and the scope would be shown no listing row, no prompt and no agent | refused: `The scope names things that exist, but nothing in library '<x>' carries the combination: <what was asked>.` (`any library` when none is set) |
+| 9 | categories or tags are set and the scope would be shown no served skill, no library file, no prompt and no agent | refused: `The scope names things that exist, but nothing in library '<x>' carries the combination: <what was asked>.` (`any library` when none is set) |
 
 Rows 6 and 7 use the plural (`categories`, `tags`) when several are unknown. An empty list is
 written `none`. Rows 8 and 9 count only skills that are served (SKL-45).
@@ -175,12 +173,12 @@ a build. The checks of SCP-31 read kb's catalogue as narrowed to what the plugin
 are built for that request. The same request gets the same text from either.
 
 **INS-2.** The text is built from the current catalogue, the request's scope, whether the client
-reads resources (see [http-and-tools.md](http-and-tools.md)), whether the client declared the
-Skills extension, and the request's resource prefix.
+reads resources, which is kubed-mcp's resolved `resources` setting for the request (DLV-2,
+DLV-15; see [http-and-tools.md](http-and-tools.md)), whether the client declared the Skills
+extension, and the request's resource prefix.
 
-**INS-3.** The client declared the Skills extension when `io.modelcontextprotocol/skills` is in
-the `initialize` request's `capabilities.extensions`, or, for `server/discover`, among the client
-capabilities that request carries. A request with no message or no session has not declared it.
+**INS-3.** The client declared the Skills extension when `io.modelcontextprotocol/skills` is
+among the extensions kubed-mcp resolved for the request (DLV-11).
 
 **INS-4.** A session keeps the text it was given. No notification changes it. A new connection
 gets text built from the catalogue as it is then.
@@ -249,12 +247,12 @@ line. With no library selected, the text is the footer alone.
 
 | Mode | Footer |
 |---|---|
-| Resources (default) | `Read a listed skill at skill://<library>/<path>/SKILL.md; read its _manifest in place of SKILL.md for the other files it ships.` |
-| Tools | `Read these with read_resource.` |
+| Resources (`resources` resolved `on`) | `Read a listed skill at skill://<library>/<path>/SKILL.md; read its _manifest in place of SKILL.md for the other files it ships.` |
+| Tools (`resources` resolved `off`, a VS Code client with no setting included) | `Read these with read_resource.` |
 
 **INS-16.** With a resource prefix, every address in the description, the notes, the pointer and
-the resources footer is written with the prefix in front (`kb+skill://…`). kb writes the prefix
-over the whole text with the plugin layer's writer (GW-11), and its rules are SKL-40 and SKL-41
+the resources footer is written with the prefix in front (`kb+skill://…`). kubed-mcp writes the prefix
+over the whole text kb's instructions hook returns (DLV-11), by SKL-40 and SKL-41
 ([skills.md](skills.md)).
 
 **INS-17.** One library selected, names listed, a prefix of `kb+`:

@@ -1,11 +1,10 @@
 """What the current request says about itself.
 
-Two kinds of question, both answered from the HTTP request and both meaningless off it:
-*what slice of the catalogue may this client see*, and *which MCP features
-can it use natively*. They
-are read here rather than in the handlers because both halves of the server --
-the resources and the tools that mirror them -- have to agree on the answers,
-and a second reader is how the two halves drift apart.
+One question, answered from the HTTP request and meaningless off it: *what
+slice of the catalogue may this client see*. It is read here rather than in the
+handlers because both halves of the server -- the resources and kubed-mcp's
+tools that mirror them -- have to agree on the answer, and a second reader is
+how the two halves drift apart.
 
 Every helper degrades to the permissive default outside an HTTP request, which
 is what stdio is: no headers, no query string, nothing to narrow by.
@@ -13,7 +12,6 @@ is what stdio is: no headers, no query string, nothing to narrow by.
 
 from __future__ import annotations
 
-from kubed.mcp.protocol import client_supports_extension
 from kubed.mcp.request import request_values
 
 from .scope import Scope
@@ -37,28 +35,6 @@ TAG_PARAM = "tag"
 TAG_HEADER = "kb-tag"
 TAG_ALIAS = "x-skill-tags"
 TAG_PARAM_ALIAS = "tags"
-
-# How a client declares it cannot use MCP prompts, and so wants them as tools.
-# kb's own header first, as kubed-mcp reads its ``Kb-`` inputs (DLV-16).
-PROMPTS_PARAM = "prompts"
-PROMPTS_HEADER = "x-mcp-prompts"
-PROMPTS_KB_HEADER = "kb-prompts"
-
-# How a client declares it cannot read resources: what kubed-mcp lists its
-# resource mirror by (DLV-6), and what the instructions are worded for.
-RESOURCES_PARAM = "resources"
-RESOURCES_HEADER = "x-mcp-resources"
-RESOURCES_KB_HEADER = "kb-resources"
-_OFF = ("off", "false", "0", "no", "none")
-
-# How a skill-syncing client asks for every skill in the listing. Off by default
-# because it is the expensive shape and almost nothing needs it.
-LISTING_PARAM = "listing"
-LISTING_HEADER = "kb-listing"
-LISTING_ALIAS = "x-skill-listing"
-LISTING_PARAM_ALIAS = "skills"
-_FULL = "full"
-
 
 def _read(
     header: str,
@@ -107,64 +83,3 @@ def requested_scope() -> Scope:
         ),
         _read(TAG_HEADER, TAG_PARAM, TAG_ALIAS, TAG_PARAM_ALIAS),
     )
-
-
-def _declared_on(header: str, param: str, kb_header: str) -> bool:
-    """True unless the client said ``off`` for this capability.
-
-    ``Kb-<Name>`` wins over ``X-MCP-<Name>``, then the query parameter.
-    """
-    declared = _read(kb_header, param, header)
-    return not declared or declared[0].strip().lower() not in _OFF
-
-
-def client_uses_prompts() -> bool:
-    """Whether this caller can be expected to use MCP prompts natively.
-
-    The protocol has no client-side signal for it -- prompts are a server
-    capability -- so, like resources, a client that cannot says so:
-    ``?prompts=off`` or ``X-MCP-Prompts: off``.
-    """
-    return _declared_on(PROMPTS_HEADER, PROMPTS_PARAM, PROMPTS_KB_HEADER)
-
-
-def client_reads_resources() -> bool:
-    """Whether this caller can be expected to read MCP resources.
-
-    Defaults to true -- the assumption is that a client is spec-complete, and a
-    client that is not says so, with ``?resources=off`` on the MCP URL or an
-    ``X-MCP-Resources: off`` header.
-    """
-    return _declared_on(RESOURCES_HEADER, RESOURCES_PARAM, RESOURCES_KB_HEADER)
-
-
-def full_listing() -> bool:
-    """Whether to list every skill rather than just the indexes.
-
-    A tool that syncs skills to disk (FastMCP's ``sync_skills`` and friends)
-    finds them only by scanning ``resources/list`` for ``/SKILL.md``, so for
-    those clients the cheap listing is an empty one. Everything else pays ~16k
-    tokens per listing for rows it was going to narrow down anyway, which is why
-    this is opt-in: ``?listing=full`` or a ``Kb-Listing: full`` header
-    (``?skills=full`` and ``X-Skill-Listing`` also work).
-    """
-    declared = _read(
-        LISTING_HEADER, LISTING_PARAM, LISTING_ALIAS, LISTING_PARAM_ALIAS
-    )
-    return bool(declared) and declared[0].strip().lower() == _FULL
-
-
-def declared_on_initialize(context) -> bool:
-    """Whether the ``initialize`` request declared the Skills extension."""
-    params = getattr(getattr(context, "message", None), "params", None)
-    extensions = getattr(getattr(params, "capabilities", None), "extensions", None)
-    return bool(extensions) and EXTENSION_ID in extensions
-
-
-def declared_on_discover(context) -> bool:
-    """Whether a 2026-07-28 request's ``_meta`` declared it; no session, no."""
-    try:
-        session = context.fastmcp_context.session
-        return client_supports_extension(session, EXTENSION_ID)
-    except (RuntimeError, AttributeError):  # no context or session: not declared
-        return False

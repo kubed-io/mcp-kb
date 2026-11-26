@@ -2,8 +2,10 @@
 
 What a client is told on connecting depends on its scope, whether it reads
 resources and whether it declared the Skills extension, so there is no one text
-to hand FastMCP at construction. Both handshakes carry it: ``initialize`` for
-handshake-era clients and ``server/discover`` for the rest.
+to hand FastMCP at construction. kubed-mcp calls ``ScopedInstructions`` with
+each ``initialize`` and ``server/discover`` request's resolution, so the
+footer follows its resolved ``resources`` setting and the Skills extension is
+the one it resolved. The prefix is kubed-mcp's to write over the text returned.
 
 The text is built from one snapshot, read once per answer: its catalogue for
 the skills, and its ``folders`` for where the prompts and agents are served
@@ -17,51 +19,29 @@ of a generation the layer is not serving to that request.
 from __future__ import annotations
 
 from collections.abc import Callable
-
-from kubed.mcp import Middleware
-from kubed.mcp.gateway import prefix, prefixed
+from typing import TYPE_CHECKING
 
 from ..catalogue.instructions import build_instructions
 from ..catalogue.snapshot import Snapshot
-from .request import (
-    client_reads_resources,
-    declared_on_discover,
-    declared_on_initialize,
-    requested_scope,
-)
+from .request import EXTENSION_ID, requested_scope
+
+if TYPE_CHECKING:
+    from kubed.mcp.delivery import Resolved
 
 
-class ScopedInstructions(Middleware):
-    """Set ``instructions`` on every initialize and discover answer."""
+class ScopedInstructions:
+    """The ``instructions`` hook: the text for one resolved request, unprefixed."""
 
     def __init__(self, snapshot: Callable[[], Snapshot]):
         self._snapshot = snapshot
 
-    def _text(self, declared: bool) -> str:
+    def __call__(self, delivery: Resolved) -> str:
         snapshot = self._snapshot()
         scope = requested_scope()
-        text = build_instructions(
+        return build_instructions(
             snapshot.catalogue,
             scope,
-            resources=client_reads_resources(),
-            skills_extension=declared,
+            resources=delivery.resources == "on",
+            skills_extension=EXTENSION_ID in (delivery.extensions or ()),
             folders=snapshot.folders(scope),
         )
-        return prefixed(text, prefix())
-
-    async def on_initialize(self, context, call_next):
-        result = await call_next(context)
-        if result is not None:
-            result.instructions = self._text(declared_on_initialize(context))
-        return result
-
-    async def on_discover(self, context, call_next):
-        result = await call_next(context)
-        if result is None:
-            return result
-        text = self._text(declared_on_discover(context))
-        if isinstance(result, dict):
-            result["instructions"] = text
-        else:
-            result.instructions = text
-        return result

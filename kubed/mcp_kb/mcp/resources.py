@@ -1,9 +1,9 @@
 """The catalogue, served as MCP resources.
 
 MCP already has a primitive for "material an agent reads", and it is the
-resource, not the tool. So this is the real interface and ``tools.py`` is a
-mirror of it, kept for the clients -- n8n above all -- to which a resource-only
-server looks empty.
+resource, not the tool. So this is the real interface and kubed-mcp's resource
+tools (``tools.py``) are a mirror of it, kept for the clients -- n8n above all --
+to which a resource-only server looks empty.
 
 One provider serves the whole address space rather than one provider per skill.
 FastMCP's ``SkillsDirectoryProvider`` is the obvious alternative, and it is
@@ -13,12 +13,13 @@ wrong here for two reasons that only show up at scale:
   become one, and the loser is not merely shadowed but absent from the
   server. With four libraries and ninety skills that is a matter of time,
   not luck.
-- It lists every skill and every manifest on every ``resources/list`` -- 77KB
-  for this catalogue, paid by every client on every listing. That is the same
-  expense this server rejects ``ResourcesAsTools`` for.
+- It lists every skill and every manifest, a second copy of what the plugin
+  layer already lists.
 
-``Catalogue`` fixes both by listing *indexes* and resolving content on demand,
-which is the resource half of progressive disclosure. A library and a folder
+The listing is the plugin layer's, one ``SKILL.md`` row per skill, plus this
+provider's ``_files.md`` rows; the indexes read and are not listed. ``Catalogue``
+resolves content on demand, which is the resource half of progressive
+disclosure. A library and a folder
 are directories too: ``CatalogueProvider.children`` lists one for
 ``resources/directory/read`` and ``_index.json``, from the same scoped
 ``Catalogue.directory``.
@@ -52,14 +53,14 @@ from kubed.mcp.protocol import INVALID_PARAMS, MCPError, Provider, VersionSpec, 
 from kubed.mcp.skills import FolderNotFound, NameTheIndex
 
 from ..catalogue.uris import INDEX_JSON, SCHEME, Catalogue, climbs, resolved
-from .request import full_listing, requested_scope
+from .request import requested_scope
 
 TEMPLATE_URI = "skill://{library}/{+path}"
 
 TEMPLATE_DESCRIPTION = (
     "A skill, index or file this server serves: {library} is a library's name"
     " and {path} a path below it. Start at skill://{library}/_index.md;"
-    " resources/list names the libraries."
+    " resources/list lists each skill's SKILL.md by default."
 )
 
 
@@ -97,7 +98,7 @@ class CatalogueProvider(Provider):
         self._catalogue = catalogue
 
     async def _list_resources(self) -> Sequence[Resource]:
-        entries = self._catalogue().entries(requested_scope(), full=full_listing())
+        entries = self._catalogue().entries(requested_scope())
         p = prefix()
         return [
             TextResource(
@@ -250,39 +251,6 @@ class NameTheFileToRead(Middleware):
                 message=f"Resource not found: {uri!r}. {hint}",
                 data={"uri": uri},
             ) from None
-
-
-class HideMirrorTools(Middleware):
-    """Drop the mirroring tools from ``tools/list`` for clients that have the
-    native feature each one mirrors.
-
-    Every tool this server has is a mirror: ``list_prompts``/``get_prompt``
-    stand in for MCP prompts, and kubed-mcp's ``list_resources``/
-    ``read_resource`` for MCP resources, which kubed-mcp hides itself (DLV-6).
-    Advertising both shapes to a client that has the real one is noise -- two
-    ways to ask one question, and the model has to pick one.
-
-    Filtering the listing rather than registering conditionally is what keeps
-    one server object correct for every client at once. The decision depends on
-    who is asking, so it can only be made per request; registration happens once
-    at boot, when there is no asker.
-
-    They stay *callable* either way. Hiding a tool from a listing is a
-    presentation choice; refusing to run one a client already knows about would
-    be a different and worse contract.
-    """
-
-    def __init__(self, mirrors: dict[str, Callable[[], bool]]):
-        # tool name -> "does this client have the native feature it mirrors?"
-        self.mirrors = dict(mirrors)
-
-    async def on_list_tools(self, context, call_next):
-        tools = await call_next(context)
-        return [
-            tool
-            for tool in tools
-            if tool.name not in self.mirrors or not self.mirrors[tool.name]()
-        ]
 
 
 def register(mcp: QuickMCP, catalogue: Callable[[], Catalogue]) -> None:
