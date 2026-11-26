@@ -358,12 +358,12 @@ the URI the client sent.
 
 **SKL-44.** Once the server serves a plugin with a skill, it declares
 `io.modelcontextprotocol/skills` (value `{"directoryRead": true}`) on `server/discover` and on
-`initialize`, whether or not the client declared it (HTTP-27), and goes on declaring it for the
+legacy `initialize` alike, whether or not the client declared it (HTTP-27), and goes on declaring it for the
 life of the process. The extension is FastMCP's, through kubed-mcp's plugin layer (SKL-58), and
 adds nothing to `resources/list`. Until then (a deployment whose plugins serve only prompts or
 agents, or a cold start with every source down) `server/discover` does not declare it, and
-`skills/list` and `skills/get` answer `-32601` `Method not found`; legacy `initialize` declares it
-all the same.
+`skills/list` and `skills/get` answer `-32601` `Method not found`, and legacy `initialize`
+does not declare it either.
 
 **SKL-45.** Every served skill passes FastMCP's checks: strict YAML frontmatter that converts to
 JSON, a `name` matching its address's last segment, a `description` of 1 to 1024 characters,

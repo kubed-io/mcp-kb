@@ -16,7 +16,7 @@ plugin's agents mean in kb what they mean there.
 
 **AGT-1.** Once the server serves a plugin with a skill, an agent or a prompt file, it declares
 `io.modelcontextprotocol/agents` with `{"listChanged": false}` on both `server/discover` and
-legacy `initialize`, beside `io.modelcontextprotocol/skills` as SKL-44 declares it (HTTP-27), and
+legacy `initialize` alike, beside `io.modelcontextprotocol/skills` as SKL-44 declares it (HTTP-27), and
 goes on declaring it for the life of the process. A plugin with only prompt files brings it too,
 with no agent to list. Until then (a cold start with every source down, or a config whose plugins
 have none of the three) neither answer declares it, and `agents/list` and `agents/get` answer

@@ -15,6 +15,10 @@
 > `fn` that never fails (INS-23, the parent's addition), and legacy `initialize` advertising what
 > `server/discover` advertises (N17). `ScopedInstructions` keeps its name, because #86 kept it as
 > the hook. The notes ruled out keeping it as a middleware, and it no longer is one.
+>
+> **Implementation found kubed-mcp 0.3.0 already mirrors Skills onto legacy `initialize`.** Its
+> `skills.serve` adds `AdvertiseLegacyExtensions` unless one is present, so kb's fix for N17 was
+> only removing its own unconditional middleware from `app.py`. D5's `_advertise_skills` was not built.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

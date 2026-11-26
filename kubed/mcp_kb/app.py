@@ -16,8 +16,6 @@ cannot read resources, and they are the server's only tools.
 from __future__ import annotations
 
 from kubed.mcp import QuickMCP
-from kubed.mcp.protocol import AdvertiseLegacyExtensions
-from kubed.mcp.skills import SkillsExtension
 
 from . import routes
 from .catalogue.uris import Catalogue
@@ -84,13 +82,6 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
     mcp.singleton(SkillServing, instance=serving)
 
     resources.register(mcp, catalogue)
-    # initialize carries what server/discover does: the skills id with
-    # directoryRead. The agents id is kubed-mcp's to advertise.
-    mcp.add_middleware(
-        AdvertiseLegacyExtensions(
-            {SkillsExtension.identifier: SkillsExtension().settings()}
-        )
-    )
     # The snapshot the plugin layer serves, not kb's: the handshake pins no
     # build, so its pointers name what is served (INS-19).
     mcp.instructions(ScopedInstructions(serving.served_snapshot, config.secrets))

@@ -18,10 +18,11 @@ from kubed.mcp.protocol import MCPError, RequestParams, types
 from pydantic import ConfigDict, TypeAdapter
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.mcp.request import EXTENSION_ID
+from kubed.mcp_kb.mcp.request import AGENTS_EXTENSION_ID, EXTENSION_ID
 from kubed.mcp_kb.mcp.scope import Scope
 from tests.conftest import DEEP_YAML, make_config, server_of
 from tests.test_header_scope import server_url  # noqa: F401 - shared HTTP fixture
+from tests.test_plugin_serving import market
 
 ALPHA = "skill://flatsource/alpha/SKILL.md"
 
@@ -546,3 +547,65 @@ async def test_dot_segments_resolve_for_reads_and_escaped_slashes_for_nothing(
         )
         assert miss.is_error
         assert f"read {root}/references/_index.md to list it" in miss.content[0].text
+
+
+_SKILL = "---\nname: x\ndescription: D.\n---\nBody.\n"
+_PROMPT = "---\ndescription: D.\n---\nBody.\n"
+_AGENT = "---\nname: helper\ndescription: H.\n---\nB.\n"
+
+
+def _handshake_config(tmp_path, kind):
+    if kind == "nothing":
+        return make_config()
+    files = {
+        "skills": {"skills/x/SKILL.md": _SKILL},
+        "prompts-only": {"commands/hello.md": _PROMPT},
+        "agents-only": {"agents/helper.md": _AGENT},
+    }[kind]
+    return market(tmp_path, [{"name": "p", "source": "./"}], files)
+
+
+async def _extensions(server, mode):
+    async with Client(server_of(server), mode=mode) as client:
+        found = client.session.server_capabilities.extensions or {}
+        # The ui id is FastMCP's own and outside SKL-44, AGT-1 and HTTP-27, so the
+        # comparison is of the two ids those rows govern, by design.
+        ids = (EXTENSION_ID, AGENTS_EXTENSION_ID)
+        return {k: v for k, v in found.items() if k in ids}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("kind", ["skills", "prompts-only", "agents-only", "nothing"])
+async def test_both_handshakes_advertise_the_same_extensions(tmp_path, kind):
+    kb = KnowledgeBase(_handshake_config(tmp_path, kind), tmp_path / "cache")
+    legacy, current = await _extensions(kb, "legacy"), await _extensions(kb, "auto")
+    assert legacy == current
+    assert (EXTENSION_ID in legacy) == (kind == "skills")
+    assert (AGENTS_EXTENSION_ID in legacy) == (kind != "nothing")
+
+
+@pytest.mark.unit
+async def test_a_refresh_moves_both_handshakes_alike(tmp_path):
+    kb = KnowledgeBase(_handshake_config(tmp_path, "prompts-only"), tmp_path / "cache")
+    server = server_of(kb)
+
+    async def both():
+        out = []
+        for mode in ("legacy", "auto"):
+            async with Client(server, mode=mode) as client:
+                out.append(
+                    (client.session.server_capabilities.extensions or {}).get(
+                        EXTENSION_ID
+                    )
+                )
+        return out
+
+    assert await both() == [None, None]
+    skill = tmp_path / "lib" / "skills" / "x" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(_SKILL)
+    kb.refresh(force=True)
+    assert await both() == [{"directoryRead": True}, {"directoryRead": True}]
+    skill.unlink()
+    kb.refresh(force=True)
+    assert await both() == [{"directoryRead": True}, {"directoryRead": True}]

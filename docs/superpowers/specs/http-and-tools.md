@@ -145,7 +145,7 @@ clients, which open with `initialize` and may hold a session (`mcp-session-id`),
 for the caller, as in [scoping-and-instructions.md](scoping-and-instructions.md), in the shape
 the request's Via gives (INS-20).
 
-**HTTP-27.** Both answers advertise the `io.modelcontextprotocol/skills` and
+**HTTP-27.** Both handshakes alike advertise the `io.modelcontextprotocol/skills` and
 `io.modelcontextprotocol/agents` extensions: the first once a plugin with a skill is served
 (SKL-44), the second once one with a skill, an agent or a prompt file is (AGT-1). Their methods are in [skills.md](skills.md) and [agents.md](agents.md).
 
