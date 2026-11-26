@@ -22,11 +22,13 @@ Each is read per MCP request from an HTTP header or a query parameter on the MCP
 | Tag | `Kb-Tag` | `tag` | `X-Skill-Tags` | `tags` |
 | Resource prefix | `Kb-Resource-Prefix` | `prefix` | `X-MCP-Resource-Prefix` | — |
 | Resources | `Kb-Resources` | `resources` | `X-MCP-Resources` | — |
+| Via | `Kb-Via` | `via` | `X-MCP-Via` | — |
 
 **SCP-3.** The resource prefix and the resources setting are read by the same rules as the
-scope (SCP-4 to SCP-7). The resource prefix, the resources setting and the listed setting are
-kubed-mcp's own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its
-`X-MCP-` alias (DLV-16). What the listed setting and the
+scope (SCP-4 to SCP-7). The resource prefix, the resources setting, the listed setting and Via
+are kubed-mcp's own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its
+`X-MCP-` alias (DLV-16). Via is `mcp` (the default), `extension` or `local`, matched without
+regard to case; any other value resolves to `mcp`. What the listed setting and the
 prefix do is specified in [skills.md](skills.md), and the resources setting in
 [http-and-tools.md](http-and-tools.md).
 
@@ -174,8 +176,9 @@ are built for that request. The same request gets the same text from either.
 
 **INS-2.** The text is built from the current catalogue, the request's scope, whether the client
 reads resources, which is kubed-mcp's resolved `resources` setting for the request (DLV-2,
-DLV-15; see [http-and-tools.md](http-and-tools.md)), whether the client declared the Skills
-extension, and the request's resource prefix.
+DLV-15; see [http-and-tools.md](http-and-tools.md)), its resolved `via` and `extensions`
+(whether the client declared the Skills extension), and the request's resource prefix, which is
+INS-16's.
 
 **INS-3.** The client declared the Skills extension when `io.modelcontextprotocol/skills` is
 among the extensions kubed-mcp resolved for the request (DLV-11).
@@ -195,18 +198,19 @@ library with only prompts or library files in scope is not selected.
 ### A library's section
 
 **INS-8.** A section is, in order: the library's resolved description, its `notes`, and a
-pointer line. The description and the notes are each left out when empty. What the resolved
-description is: [plugins-and-libraries.md](plugins-and-libraries.md).
+pointer line. The description and the notes are each left out when empty. Under Via `local` there
+is no pointer line (INS-20). What the resolved description is:
+[plugins-and-libraries.md](plugins-and-libraries.md).
 
 **INS-9.** Blank lines and trailing whitespace are removed from the description and the notes, so
 neither can open a new section.
 
-**INS-10.** The pointer names the library's index: `Skills: skill://<library>/_index.md`. INS-19
-adds the prompt and agent pointers after it.
+**INS-10.** Under Via `mcp` and `extension`, the pointer names the library's index:
+`Skills: skill://<library>/_index.md`. INS-19 adds the prompt and agent pointers after it.
 
-**INS-11.** The pointer also lists skill names when all of these hold: exactly one library is
-selected, that library's `listSkills` is true, and the client has not declared the Skills
-extension. It then reads `Skills (skill://<library>/_index.md): <names>`.
+**INS-11.** The pointer also lists skill names when all of these hold: the request's Via is `mcp`
+(INS-20), exactly one library is selected, that library's `listSkills` is true, and the client has
+not declared the Skills extension. It then reads `Skills (skill://<library>/_index.md): <names>`.
 
 **INS-12.** The names are the paths below the library of the skills in scope, sorted, joined by
 `, `. A scope narrowed by tag lists only the skills it admits.
@@ -224,8 +228,8 @@ else the one it serves now.
   the scope one of that kind. Only then is that folder there (kubed-mcp's PLUG-68).
 - Otherwise the line names the `_index.md` of each plugin namespace that serves one, in the
   library's plugin order, joined by `, `.
-- The lines are written in both modes, whether or not the client declared an extension, and in
-  the INS-11 form. INS-6 still decides which libraries have a section.
+- The lines are written under `mcp` and `extension` (INS-20), whether or not the client declared
+  an extension, and in the INS-11 form. INS-6 still decides which libraries have a section.
 - The prefix is written as INS-16 says.
 
 ```
@@ -238,21 +242,50 @@ Agents: agents://grafana/k6/_index.md
 
 INS-17 and INS-18 stay as they are: their libraries are shown without prompts or agents.
 
+### Via
+
+**INS-20.** The text takes one of three shapes, by the request's Via:
+
+| Via | Description and notes | `Skills:` pointer, `Prompts:` and `Agents:` lines | Skill names (INS-11) | Footer |
+|---|---|---|---|---|
+| `mcp` | yes | yes | per INS-11 | INS-15 |
+| `extension` | yes | yes | never | INS-21 |
+| `local` | yes | no | never | none |
+
+INS-6 (which libraries), INS-7 (their order) and INS-13 (a `[<library>]` heading when several are
+selected) hold under every Via.
+
+**INS-21.** Under `extension` the footer is fixed, whatever `resources` resolved to:
+`Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its _manifest lists the other files it ships.`
+It is written with the prefix as INS-16 says.
+
+**INS-22.** Under `local` a library whose description and notes are both empty has no section, and
+no heading either. A `local` text is therefore empty when no library is selected, and can be empty
+when libraries are selected.
+
+**INS-23.** Building the text never fails a handshake. When the build fails, the traceback is
+logged at ERROR with credentials masked, and the text is the footer of the request's Via (INS-15
+or INS-21), or empty under `local`.
+
 ### Layout and footer
 
 **INS-14.** Sections are separated by one blank line, and the footer comes last after one blank
-line. With no library selected, the text is the footer alone.
+line. With no library selected, the text is the footer alone under `mcp` and `extension`, and
+empty under `local` (INS-22).
 
-**INS-15.** The footer follows the client's mode and is not configurable:
+**INS-15.** Under `mcp`, the footer follows the client's mode and is not configurable:
 
 | Mode | Footer |
 |---|---|
 | Resources (`resources` resolved `on`) | `Read a listed skill at skill://<library>/<path>/SKILL.md; read its _manifest in place of SKILL.md for the other files it ships.` |
 | Tools (`resources` resolved `off`, a VS Code client with no setting included) | `Read these with read_resource.` |
 
-**INS-16.** With a resource prefix, every address in the description, the notes, the pointer and
-the resources footer is written with the prefix in front (`kb+skill://…`). kubed-mcp writes the prefix
-over the whole text kb's instructions hook returns (DLV-11), by SKL-40 and SKL-41
+INS-21 gives the footer under `extension`, and `local` has none.
+
+**INS-16.** With a resource prefix, every address in the description, the notes, the pointer, the
+`Prompts:` and `Agents:` lines and the footer is written with the prefix in front (`kb+skill://…`):
+the resources footer (INS-15) and the extension footer (INS-21) each carry one. kubed-mcp writes the
+prefix over the whole text kb's instructions hook returns (DLV-11), by SKL-40 and SKL-41
 ([skills.md](skills.md)).
 
 **INS-17.** One library selected, names listed, a prefix of `kb+`:
@@ -277,4 +310,19 @@ Penpot design tooling.
 Skills: skill://penpot/_index.md
 
 Read these with read_resource.
+```
+
+**Example.** Two libraries selected under `extension`, a library with prompts:
+
+```
+[grafana]
+Grafana, Loki and the rest of the LGTM stack.
+Skills: skill://grafana/_index.md
+Prompts: prompts://grafana/_index.md
+
+[penpot]
+Penpot design tooling.
+Skills: skill://penpot/_index.md
+
+Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its _manifest lists the other files it ships.
 ```

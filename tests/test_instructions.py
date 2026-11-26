@@ -17,7 +17,12 @@ from kubed.mcp.protocol import types
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import harvest
-from kubed.mcp_kb.catalogue.instructions import build_instructions, kind_pointer
+from kubed.mcp_kb.catalogue.instructions import (
+    EXTENSION_FOOTER,
+    build_instructions,
+    footer,
+    kind_pointer,
+)
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex, load_skills
 from kubed.mcp_kb.catalogue.snapshot import Folders
 from kubed.mcp_kb.catalogue.uris import Catalogue, LibraryText
@@ -63,7 +68,12 @@ def _catalogue(tmp_path, libraries):
 
 
 def _build(
-    catalogue, scope=EVERYTHING, resources=True, skills_extension=False, folders=None
+    catalogue,
+    scope=EVERYTHING,
+    resources=True,
+    skills_extension=False,
+    folders=None,
+    **via,
 ):
     return build_instructions(
         catalogue,
@@ -71,6 +81,7 @@ def _build(
         resources=resources,
         skills_extension=skills_extension,
         folders=folders,
+        **via,
     )
 
 
@@ -526,18 +537,25 @@ async def test_the_text_a_library_is_told_and_its_index_open_alike(
 def test_the_fn_builds_from_the_resolution(tmp_path):
     cat = _catalogue(tmp_path, {LibraryText("penpot"): ["router"]})
     fn = ScopedInstructions(
-        lambda: SimpleNamespace(catalogue=cat, folders=lambda scope: {})
+        lambda: SimpleNamespace(catalogue=cat, folders=lambda scope: {}), list
     )
-    on = SimpleNamespace(resources="on", extensions=None, prefix="kb+")
+    on = SimpleNamespace(resources="on", extensions=None, prefix="kb+", via="mcp")
     # unprefixed: kubed-mcp writes the prefix over what the fn returns
     assert fn(on).startswith("Skills (skill://penpot/_index.md)")
     assert fn(on).endswith(RES_FOOTER)
-    off = SimpleNamespace(resources="off", extensions=frozenset(), prefix=None)
+    off = SimpleNamespace(
+        resources="off", extensions=frozenset(), prefix=None, via="mcp"
+    )
     assert fn(off).endswith(TOOLS_FOOTER)
     declared = SimpleNamespace(
-        resources="on", extensions=frozenset({EXTENSION_ID}), prefix=None
+        resources="on", extensions=frozenset({EXTENSION_ID}), prefix=None, via="mcp"
     )
     assert fn(declared).startswith("Skills: skill://penpot/_index.md")
+    extension = SimpleNamespace(resources="on", extensions=None, prefix=None, via="extension")
+    text = fn(extension)
+    assert text.endswith(EXTENSION_FOOTER) and "Skills (" not in text
+    local = SimpleNamespace(resources="on", extensions=None, prefix=None, via="local")
+    assert fn(local) == ""  # a library with no description or notes
 
 
 async def _tools(url, mode, headers=None):
@@ -616,8 +634,9 @@ def test_the_text_is_built_unprefixed(tmp_path):
     for scope in (EVERYTHING, Scope(library="a")):
         for resources in (True, False):
             for ext in (True, False):
-                kw = {"resources": resources, "skills_extension": ext}
-                assert "kb+" not in build_instructions(cat, scope, **kw)
+                for via in ("mcp", "extension", "local"):
+                    kw = {"resources": resources, "skills_extension": ext, "via": via}
+                    assert "kb+" not in build_instructions(cat, scope, **kw)
     assert _build(cat, Scope(library="a")).endswith(RES_FOOTER)
 
 
@@ -798,8 +817,8 @@ def test_a_refresh_between_the_pin_and_the_instructions(tmp_path):
     kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
     server_of(kb)
     serving = serving_of(kb)
-    instructions = ScopedInstructions(serving.served_snapshot)
-    on = SimpleNamespace(resources="on", extensions=None, prefix=None)
+    instructions = ScopedInstructions(serving.served_snapshot, list)
+    on = SimpleNamespace(resources="on", extensions=None, prefix=None, via="mcp")
     request = contextvars.copy_context()
     request.run(serving.view)  # pins the published state, off-request: everything
 
@@ -823,3 +842,387 @@ async def test_the_lines_carry_the_prefix(tmp_path, mode):
         text = await told(url, mode, {"Kb-Resource-Prefix": "kb+"})
     assert "Prompts: kb+prompts://lib/_index.md" in text.splitlines()
     assert "Agents: kb+agents://lib/b/_index.md" in text.splitlines()
+
+
+# -- kubed-mcp's Via, as pinned -----------------------------------------------
+
+VIA_INPUTS = [
+    ({"Kb-Via": "local"}, "", "local"),
+    ({"X-MCP-Via": "extension"}, "", "extension"),
+    ({}, "?via=local", "local"),
+    ({"Kb-Via": "extension", "X-MCP-Via": "local"}, "", "extension"),  # Kb- first (DLV-16)
+    ({"Kb-Via": "EXTENSION"}, "", "extension"),  # case-insensitive (SCP-3)
+    ({"Kb-Via": "nonsense"}, "", "mcp"),
+    ({}, "", "mcp"),
+]
+
+
+def _via_client(url, mode, headers=None):
+    kwargs = {"mode": "legacy"} if mode == "legacy" else {}
+    return Client(StreamableHttpTransport(url, headers=headers or {}), **kwargs)
+
+
+@pytest.mark.integration
+@ERAS
+@pytest.mark.parametrize(("headers", "query", "via"), VIA_INPUTS)
+async def test_via_is_read_under_kb_names(tmp_path, mode, headers, query, via):
+    from tests.test_server import delivery
+
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    with served(kb) as url:
+        async with _via_client(url + query, mode, headers) as client:
+            assert (await delivery(client, mode))["via"] == via
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("via", ["extension", "local"])
+async def test_via_presets_list_no_plugin_prompts(tmp_path, via):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    with served(kb) as url:
+        async with _via_client(url, "default", {"Kb-Via": via}) as client:
+            assert [p.name for p in await client.list_prompts()] == []
+        async with _via_client(url, "default") as client:
+            names = sorted(p.name for p in await client.list_prompts())
+    assert names == ["lib_hello", "lib_top"]
+
+
+def _skill_rows(resources):
+    return sorted(str(r.uri) for r in resources if str(r.uri).endswith("/SKILL.md"))
+
+
+SKILL_ROWS = [
+    "skill://lib/a/sa/SKILL.md",
+    "skill://lib/b/sb/SKILL.md",
+    "skill://lib/m/SKILL.md",
+]
+
+
+@pytest.mark.integration
+async def test_via_presets_list_no_skill_rows(tmp_path):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    rows = {}
+    with served(kb) as url:
+        for via in ("mcp", "extension", "local"):
+            async with _via_client(url, "default", {"Kb-Via": via}) as client:
+                rows[via] = _skill_rows(await client.list_resources())
+    assert rows == {"mcp": SKILL_ROWS, "extension": [], "local": []}
+
+
+LISTED_OVER_VIA = [
+    ({"Kb-Via": "extension", "Kb-Listed": "skills"}, "", SKILL_ROWS),
+    ({"Kb-Via": "local", "Kb-Listed": "skills"}, "", SKILL_ROWS),
+    ({"Kb-Listed": "skills"}, "?via=extension", SKILL_ROWS),  # an earlier level
+    ({"Kb-Via": "extension", "X-MCP-Listed": "skills"}, "", []),  # a later one
+    ({"Kb-Via": "local"}, "?listed=skills", []),
+]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("headers", "query", "rows"), LISTED_OVER_VIA)
+async def test_a_listed_at_vias_level_or_before_overrides_the_preset(
+    tmp_path, headers, query, rows
+):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    with served(kb) as url:
+        async with _via_client(url + query, "default", headers) as client:
+            assert _skill_rows(await client.list_resources()) == rows
+
+
+@pytest.mark.integration
+async def test_local_unlists_skills_and_agents_and_extension_does_not(tmp_path):
+    from tests.test_skills_extension import request
+
+    cases = {
+        "mcp": {"Kb-Via": "mcp"},
+        "extension": {"Kb-Via": "extension"},
+        "local": {"Kb-Via": "local"},
+        "local, listed": {"Kb-Via": "local", "Kb-Listed": "skills,agents"},
+    }
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    listed = {}
+    with served(kb) as url:
+        for case, headers in cases.items():
+            async with _via_client(url, "default", headers) as client:
+                skills = await request(client, "skills/list")
+                agents = await request(client, "agents/list")
+                skill = await request(client, "skills/get", uri=SKILL_ROWS[0])
+                agent = await request(client, "agents/get", name="lib_helper")
+            listed[case] = (
+                sorted(s["uri"] for s in skills["skills"]),
+                [a["name"] for a in agents["agents"]],
+                skill["skill"]["uri"],
+                agent["agent"],
+            )
+    found = (SKILL_ROWS[0], "lib_helper")
+    assert listed["mcp"] == (SKILL_ROWS, ["lib_helper"], *found)
+    assert listed["extension"] == listed["mcp"]
+    assert listed["local"] == ([], [], *found)
+    assert listed["local, listed"] == listed["local"]
+
+
+# -- the three shapes (INS-20 to INS-22) --------------------------------------
+
+
+@pytest.mark.unit
+def test_extension_keeps_pointer_and_lines_but_never_names(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("lib", "L.", "N."): ["x"]})
+    folders = {"lib": Folders(prompts=("lib",), agents=("lib/b",))}
+    assert _build(cat, folders=folders, via="extension") == (
+        "L.\nN.\nSkills: skill://lib/_index.md\nPrompts: prompts://lib/_index.md\n"
+        "Agents: agents://lib/b/_index.md\n\n" + EXTENSION_FOOTER
+    )
+
+
+@pytest.mark.unit
+def test_extension_footer_ignores_resources(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("lib", "L."): ["x"]})
+    assert _build(cat, resources=False, via="extension").endswith(EXTENSION_FOOTER)
+    assert _build(cat, resources=True, via="extension").endswith(EXTENSION_FOOTER)
+    assert TOOLS_FOOTER not in _build(cat, resources=False, via="extension")
+
+
+@pytest.mark.unit
+def test_local_is_description_and_notes_only(tmp_path):
+    a, b = LibraryText("a", "A.", "N."), LibraryText("b", "B.")
+    cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
+    folders = {
+        "a": Folders(prompts=("a",), agents=("a",)),
+        "b": Folders(prompts=("b",)),
+    }
+    assert _build(cat, folders=folders, via="local") == "[a]\nA.\nN.\n\n[b]\nB."
+
+
+@pytest.mark.unit
+def test_local_drops_a_library_with_nothing_to_say(tmp_path):
+    bare = LibraryText("bare")
+    assert _build(_catalogue(tmp_path / "one", {bare: ["x"]}), via="local") == ""
+    both = _catalogue(tmp_path / "two", {bare: ["x"], LibraryText("a", "A."): ["y"]})
+    assert _build(both, via="local") == "[a]\nA."
+
+
+@pytest.mark.unit
+def test_local_with_nothing_selected_is_empty(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("penpot"): ["router"]})
+    nothing = Scope(library="absent")
+    assert _build(cat, nothing, via="local") == ""
+    assert _build(cat, nothing, via="extension") == EXTENSION_FOOTER
+
+
+@pytest.mark.unit
+def test_footer_per_mode():
+    assert footer(resources=True) == RES_FOOTER
+    assert footer(resources=False) == TOOLS_FOOTER
+    for resources in (True, False):
+        assert footer(resources=resources, via="extension") == EXTENSION_FOOTER
+        assert footer(resources=resources, via="local") == ""
+
+
+@pytest.mark.unit
+def test_via_mcp_is_the_default(tmp_path):
+    a, b = LibraryText("a", "A."), LibraryText("b", "B.")
+    cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
+    for scope in (EVERYTHING, Scope(library="a")):
+        for resources in (True, False):
+            for ext in (True, False):
+                kw = {"resources": resources, "skills_extension": ext}
+                assert _build(cat, scope, via="mcp", **kw) == _build(cat, scope, **kw)
+
+
+# -- the hook reads Via, and never fails (INS-20, INS-23) ---------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("via", "resources", "expected"),
+    [
+        ("mcp", "on", RES_FOOTER),
+        ("mcp", "off", TOOLS_FOOTER),
+        ("extension", "off", EXTENSION_FOOTER),
+        ("local", "on", ""),
+    ],
+)
+def test_a_failing_build_logs_and_answers_the_footer(
+    monkeypatch, caplog, via, resources, expected
+):
+    secret = "s3cret-token"
+
+    def boom(*args, **kwargs):
+        raise RuntimeError(f"broke on {secret} at https://user:pw@host/x")
+
+    monkeypatch.setattr("kubed.mcp_kb.mcp.instructions.build_instructions", boom)
+    fn = ScopedInstructions(
+        lambda: SimpleNamespace(catalogue=None, folders=lambda s: {}), lambda: [secret]
+    )
+    got = fn(SimpleNamespace(resources=resources, extensions=None, prefix=None, via=via))
+    assert got == expected
+    [record] = [r for r in caplog.records if r.name == "kubed.mcp_kb.mcp.instructions"]
+    assert record.levelname == "ERROR"
+    assert "Traceback" in record.getMessage() and "RuntimeError" in record.getMessage()
+    assert secret not in record.getMessage() and "user:pw" not in record.getMessage()
+
+
+@pytest.mark.unit
+def test_a_failing_snapshot_read_is_caught_too(caplog):
+    def broken():
+        raise RuntimeError("no snapshot")
+
+    fn = ScopedInstructions(broken, list)
+    got = fn(SimpleNamespace(resources="on", extensions=None, prefix=None, via="mcp"))
+    assert got == RES_FOOTER
+    assert [r.levelname for r in caplog.records] == ["ERROR"]
+
+
+@pytest.mark.integration
+@ERAS
+async def test_each_via_on_both_handshakes(tmp_path, mode):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    with served(kb) as url:
+        mcp = await told(url, mode)
+        extension = await told(url, mode, {"Kb-Via": "extension"})
+        local = await told(url, mode, {"Kb-Via": "local"})
+        scoped = await told(url + "?library=lib", mode, {"Kb-Via": "extension"})
+        same = [
+            await told(url, mode, {"X-MCP-Via": "extension"}),
+            await told(url + "?via=extension", mode),
+        ]
+        same_local = [
+            await told(url, mode, {"X-MCP-Via": "local"}),
+            await told(url + "?via=local", mode),
+        ]
+    assert _pointers(mcp) and mcp.endswith(RES_FOOTER)
+    assert _pointers(extension) == _pointers(mcp)
+    assert extension.endswith(EXTENSION_FOOTER)
+    assert "Skills (" not in scoped
+    assert _pointers(local) == []
+    assert "Skills:" not in local and "Skills (" not in local
+    assert RES_FOOTER not in local and EXTENSION_FOOTER not in local
+    assert same == [extension, extension]
+    assert same_local == [local, local]
+
+
+@pytest.mark.integration
+@ERAS
+async def test_extension_text_carries_the_prefix_once(tmp_path, mode):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    with served(kb) as url:
+        text = await told(
+            url, mode, {"Kb-Via": "extension", "Kb-Resource-Prefix": "kb+"}
+        )
+    lines = text.splitlines()
+    assert "Skills: kb+skill://lib/_index.md" in lines
+    assert "Prompts: kb+prompts://lib/_index.md" in lines
+    assert lines[-1] == prefixed(EXTENSION_FOOTER, "kb+")
+    assert "kb+kb+" not in text
+
+
+@pytest.mark.integration
+@ERAS
+async def test_local_with_nothing_to_say_is_empty(tmp_path, mode):
+    kb = KnowledgeBase(make_config(), tmp_path / "cache")
+    with served(kb) as url:
+        assert await told(url, mode, {"Kb-Via": "local"}) == ""
+
+
+@pytest.mark.integration
+@ERAS
+@pytest.mark.parametrize("via", ["mcp", "extension", "local"])
+async def test_a_refused_scope_fails_under_every_via(server_url, mode, via):  # noqa: F811
+    with pytest.raises(Exception, match="no such library"):
+        await told(server_url, mode, {"Kb-Library": "nope", "Kb-Via": via})
+
+
+@pytest.mark.integration
+@ERAS
+@pytest.mark.parametrize("via", ["extension", "local"])
+async def test_via_follows_a_refresh(tmp_path, mode, via):
+    root = tmp_path / "market"
+    _market(root, "One.", "alpha")
+    kb = KnowledgeBase(_library_config(root), tmp_path / "cache")
+    headers = {"Kb-Via": via}
+    with served(kb) as url:
+        assert "One." in await told(url, mode, headers)
+        _market(root, "Two.", "alpha")
+        kb.refresh(force=True)
+        text = await told(url, mode, headers)
+    assert "Two." in text
+    assert "One." not in text
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("via", ["extension", "local"])
+async def test_a_hidden_prompt_still_gets_under_via(tmp_path, via):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    with served(kb) as url:
+        async with _via_client(url, "default", {"Kb-Via": via}) as client:
+            assert await client.list_prompts() == []
+            got = await client.get_prompt("lib_top")
+    assert "Body." in got.messages[0].content.text
+
+
+# -- the ``mcp`` text, pinned as captured before Via existed -------------------
+
+_DEEP = "Skills: skill://deepsource/_index.md\nPrompts: prompts://deepsource/deepsource-prompts/_index.md"
+_FLAT = "Skills: skill://flatsource/_index.md\nPrompts: prompts://flatsource/flatsource-prompts/_index.md"
+_FLAT_PROMPTS = "Prompts: prompts://flatsource/flatsource-prompts/_index.md"
+
+# case -> (query, headers, extension declared, expected text)
+MCP_TEXTS = {
+    "unscoped": ("", {}, False, f"[deepsource]\n{_DEEP}\n\n[flatsource]\n{_FLAT}\n\n" + RES_FOOTER),
+    "flatsource": (
+        "",
+        {"Kb-Library": "flatsource"},
+        False,
+        f"Skills (skill://flatsource/_index.md): alpha, beta\n{_FLAT_PROMPTS}\n\n" + RES_FOOTER,
+    ),
+    "deepsource": (
+        "",
+        {"Kb-Library": "deepsource"},
+        False,
+        "Skills (skill://deepsource/_index.md): plugin-a/gamma, plugin-b/delta\n"
+        "Prompts: prompts://deepsource/deepsource-prompts/_index.md\n\n" + RES_FOOTER,
+    ),
+    "tag": (
+        "",
+        {"Kb-Tag": "flat"},
+        False,
+        "Skills (skill://flatsource/_index.md): alpha, beta\n\n" + RES_FOOTER,
+    ),
+    "tags": (
+        "?tag=flat&tag=deep",
+        {},
+        False,
+        "[deepsource]\nSkills: skill://deepsource/_index.md\n\n"
+        "[flatsource]\nSkills: skill://flatsource/_index.md\n\n" + RES_FOOTER,
+    ),
+    "resources-off": (
+        "",
+        {"X-MCP-Resources": "off"},
+        False,
+        f"[deepsource]\n{_DEEP}\n\n[flatsource]\n{_FLAT}\n\n" + TOOLS_FOOTER,
+    ),
+    "extension": (
+        "",
+        {"Kb-Library": "flatsource"},
+        True,
+        f"{_FLAT}\n\n" + RES_FOOTER,
+    ),
+}
+
+MCP_WAYS = {
+    "as-is": ({}, None),
+    "via-mcp": ({"Kb-Via": "mcp"}, None),
+    "prefixed": ({"Kb-Resource-Prefix": "kb+"}, "kb+"),
+}
+
+
+@pytest.mark.integration
+@ERAS
+@pytest.mark.parametrize("way", MCP_WAYS)
+@pytest.mark.parametrize("case", MCP_TEXTS)
+async def test_mcp_text_is_unchanged(server_url, mode, case, way):  # noqa: F811
+    query, headers, extension, expected = MCP_TEXTS[case]
+    extra, prefix = MCP_WAYS[way]
+    text = await told(
+        server_url + query, mode, {**headers, **extra}, extension=extension
+    )
+    assert text == (prefixed(expected, prefix) if prefix else expected)

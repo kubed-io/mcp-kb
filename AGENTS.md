@@ -69,7 +69,7 @@ installer's, against whatever image tag it chooses.
 | ⤷⤷ `detect.py` | which dialect a file is, strongest signal first |
 | ⤷⤷ `mcpkb.py`, `claude.py`, `copilot.py` | one module per dialect: `parse` into `Parsed`, `substitute` back out |
 | ⤷ `placeholders.py` | the two `${CLAUDE_*}` placeholders this server is the authority on |
-| ⤷ `instructions.py` | `build_instructions` — the server `instructions` for a scope and mode, as text. Imports no FastMCP |
+| ⤷ `instructions.py` | `build_instructions` — the server `instructions` for a scope, mode and Via mode, as text. Imports no FastMCP |
 | ⤷ `index.py` | `Index`, `FetchRecord`: the on-disk `index.json`, the fetch records a cold start keeps |
 | ⤷ `snapshot.py` | `Snapshot`, `Harvest`, `build_snapshot`: the immutable view every request reads, and the in-memory harvest it is built from |
 | ⤷ `refresh.py` | when a fetch is due to be looked at again, bounded to the shortest configured interval, and what a failure does to the last good one |
@@ -79,7 +79,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead` |
 | ⤷ `tools.py`, `prompts.py` | `prompts.py` `MCPFilePrompt` and `adapt`, the `Prompt` kb's reader hands the plugin layer; `tools.py` names kubed-mcp's resource pair (DLV-6) and the delivery inputs for the wiki, and defines no tool |
 | ⤷ `request.py`, `scope.py` | what the current request says about itself, and the `Scope` it becomes |
-| ⤷ `instructions.py` | `ScopedInstructions`: the `instructions` hook kubed-mcp calls with each `initialize` and `server/discover` request's resolution |
+| ⤷ `instructions.py` | `ScopedInstructions`: the `instructions` hook kubed-mcp calls with each `initialize` and `server/discover` request's resolution, passing its Via on, and never fails a handshake: a failure is logged, credentials masked, and answered with the mode's footer |
 | ⤷ `announce.py` | `AnnounceChanges` — telling a session its listing moved |
 | ⤷ `pins.py` | `RefuseEmptyScope` — a scope that names nothing fails every request, saying what there is |
 | `kubed/mcp_kb/spec/` | `builder.py`, the OpenAPI document for the HTTP surface |
@@ -279,8 +279,8 @@ quick-mcp).
 
 kubed-mcp's own types and naming apply to a skill's files: a file that is not
 UTF-8 text, or has no or an unknown extension, is a blob (SKL-22), its media type is the plugin layer's (SKL-23), and
-`_manifest` names the skill by its `name` (SKL-24). Both `server/discover` and
-legacy `initialize` advertise the Skills extension with `directoryRead`.
+`_manifest` names the skill by its `name` (SKL-24). Once a skill is served, `server/discover` and
+legacy `initialize` both advertise the Skills extension with `directoryRead` (kubed-mcp mirrors it onto legacy `initialize`, so kb adds no middleware of its own for it).
 
 The **Agents extension** is kubed-mcp's too: `agents/list` and `agents/get` serve
 the subagents Claude-format plugins ship, from the same plugin set, and add no
