@@ -224,7 +224,7 @@ else the one it serves now.
   the scope one of that kind. Only then is that folder there (kubed-mcp's PLUG-68).
 - Otherwise the line names the `_index.md` of each plugin namespace that serves one, in the
   library's plugin order, joined by `, `.
-- The lines are written in both modes, whether or not the client declared an extension, and in
+- The lines are written under `mcp` and `extension` (INS-20), whether or not the client declared an extension, and in
   the INS-11 form. INS-6 still decides which libraries have a section.
 - The prefix is written as INS-16 says.
 
@@ -238,17 +238,41 @@ Agents: agents://grafana/k6/_index.md
 
 INS-17 and INS-18 stay as they are: their libraries are shown without prompts or agents.
 
+### Via
+
+**INS-20.** The text takes one of three shapes, by the request's Via:
+
+| Via | Description and notes | `Skills:` pointer, `Prompts:` and `Agents:` lines | Skill names (INS-11) | Footer |
+|---|---|---|---|---|
+| `mcp` | yes | yes | per INS-11 | INS-15 |
+| `extension` | yes | yes | never | INS-21 |
+| `local` | yes | no | never | none |
+
+INS-6 (which libraries), INS-7 (their order) and INS-13 (a `[<library>]` heading when several are
+selected) hold under every Via.
+
+**INS-21.** Under `extension` the footer is fixed, whatever `resources` resolved to:
+`Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its _manifest lists the other files it ships.`
+It is written with the prefix as INS-16 says.
+
+**INS-22.** Under `local` a library whose description and notes are both empty has no section, and
+no heading either. A `local` text is therefore empty when no library is selected, and can be empty
+when libraries are selected.
+
 ### Layout and footer
 
 **INS-14.** Sections are separated by one blank line, and the footer comes last after one blank
-line. With no library selected, the text is the footer alone.
+line. With no library selected, the text is the footer alone under `mcp` and `extension`, and
+empty under `local` (INS-22).
 
-**INS-15.** The footer follows the client's mode and is not configurable:
+**INS-15.** Under `mcp`, the footer follows the client's mode and is not configurable:
 
 | Mode | Footer |
 |---|---|
 | Resources (`resources` resolved `on`) | `Read a listed skill at skill://<library>/<path>/SKILL.md; read its _manifest in place of SKILL.md for the other files it ships.` |
 | Tools (`resources` resolved `off`, a VS Code client with no setting included) | `Read these with read_resource.` |
+
+INS-21 gives the footer under `extension`, and `local` has none.
 
 **INS-16.** With a resource prefix, every address in the description, the notes, the pointer and
 the resources footer is written with the prefix in front (`kb+skill://…`). kubed-mcp writes the prefix
@@ -277,4 +301,19 @@ Penpot design tooling.
 Skills: skill://penpot/_index.md
 
 Read these with read_resource.
+```
+
+**Example.** Two libraries selected under `extension`, a library with prompts:
+
+```
+[grafana]
+Grafana, Loki and the rest of the LGTM stack.
+Skills: skill://grafana/_index.md
+Prompts: prompts://grafana/_index.md
+
+[penpot]
+Penpot design tooling.
+Skills: skill://penpot/_index.md
+
+Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its _manifest lists the other files it ships.
 ```

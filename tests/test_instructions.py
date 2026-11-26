@@ -17,7 +17,12 @@ from kubed.mcp.protocol import types
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import harvest
-from kubed.mcp_kb.catalogue.instructions import build_instructions, kind_pointer
+from kubed.mcp_kb.catalogue.instructions import (
+    EXTENSION_FOOTER,
+    build_instructions,
+    footer,
+    kind_pointer,
+)
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex, load_skills
 from kubed.mcp_kb.catalogue.snapshot import Folders
 from kubed.mcp_kb.catalogue.uris import Catalogue, LibraryText
@@ -63,7 +68,12 @@ def _catalogue(tmp_path, libraries):
 
 
 def _build(
-    catalogue, scope=EVERYTHING, resources=True, skills_extension=False, folders=None
+    catalogue,
+    scope=EVERYTHING,
+    resources=True,
+    skills_extension=False,
+    folders=None,
+    **via,
 ):
     return build_instructions(
         catalogue,
@@ -71,6 +81,7 @@ def _build(
         resources=resources,
         skills_extension=skills_extension,
         folders=folders,
+        **via,
     )
 
 
@@ -616,8 +627,9 @@ def test_the_text_is_built_unprefixed(tmp_path):
     for scope in (EVERYTHING, Scope(library="a")):
         for resources in (True, False):
             for ext in (True, False):
-                kw = {"resources": resources, "skills_extension": ext}
-                assert "kb+" not in build_instructions(cat, scope, **kw)
+                for via in ("mcp", "extension", "local"):
+                    kw = {"resources": resources, "skills_extension": ext, "via": via}
+                    assert "kb+" not in build_instructions(cat, scope, **kw)
     assert _build(cat, Scope(library="a")).endswith(RES_FOOTER)
 
 
@@ -864,3 +876,140 @@ async def test_via_presets_list_no_plugin_prompts(tmp_path, via):
         async with _via_client(url, "default") as client:
             names = sorted(p.name for p in await client.list_prompts())
     assert names == ["lib_hello", "lib_top"]
+
+
+# -- the three shapes (INS-20 to INS-22) --------------------------------------
+
+
+@pytest.mark.unit
+def test_extension_keeps_pointer_and_lines_but_never_names(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("lib", "L.", "N."): ["x"]})
+    folders = {"lib": Folders(prompts=("lib",), agents=("lib/b",))}
+    assert _build(cat, folders=folders, via="extension") == (
+        "L.\nN.\nSkills: skill://lib/_index.md\nPrompts: prompts://lib/_index.md\n"
+        "Agents: agents://lib/b/_index.md\n\n" + EXTENSION_FOOTER
+    )
+
+
+@pytest.mark.unit
+def test_extension_footer_ignores_resources(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("lib", "L."): ["x"]})
+    assert _build(cat, resources=False, via="extension").endswith(EXTENSION_FOOTER)
+    assert _build(cat, resources=True, via="extension").endswith(EXTENSION_FOOTER)
+    assert TOOLS_FOOTER not in _build(cat, resources=False, via="extension")
+
+
+@pytest.mark.unit
+def test_local_is_description_and_notes_only(tmp_path):
+    a, b = LibraryText("a", "A.", "N."), LibraryText("b", "B.")
+    cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
+    folders = {
+        "a": Folders(prompts=("a",), agents=("a",)),
+        "b": Folders(prompts=("b",)),
+    }
+    assert _build(cat, folders=folders, via="local") == "[a]\nA.\nN.\n\n[b]\nB."
+
+
+@pytest.mark.unit
+def test_local_drops_a_library_with_nothing_to_say(tmp_path):
+    bare = LibraryText("bare")
+    assert _build(_catalogue(tmp_path / "one", {bare: ["x"]}), via="local") == ""
+    both = _catalogue(tmp_path / "two", {bare: ["x"], LibraryText("a", "A."): ["y"]})
+    assert _build(both, via="local") == "[a]\nA."
+
+
+@pytest.mark.unit
+def test_local_with_nothing_selected_is_empty(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("penpot"): ["router"]})
+    nothing = Scope(library="absent")
+    assert _build(cat, nothing, via="local") == ""
+    assert _build(cat, nothing, via="extension") == EXTENSION_FOOTER
+
+
+@pytest.mark.unit
+def test_footer_per_mode():
+    assert footer(resources=True) == RES_FOOTER
+    assert footer(resources=False) == TOOLS_FOOTER
+    for resources in (True, False):
+        assert footer(resources=resources, via="extension") == EXTENSION_FOOTER
+        assert footer(resources=resources, via="local") == ""
+
+
+@pytest.mark.unit
+def test_via_mcp_is_the_default(tmp_path):
+    a, b = LibraryText("a", "A."), LibraryText("b", "B.")
+    cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
+    for scope in (EVERYTHING, Scope(library="a")):
+        for resources in (True, False):
+            for ext in (True, False):
+                kw = {"resources": resources, "skills_extension": ext}
+                assert _build(cat, scope, via="mcp", **kw) == _build(cat, scope, **kw)
+
+
+# -- the ``mcp`` text, pinned as captured before Via existed -------------------
+
+_DEEP = "Skills: skill://deepsource/_index.md\nPrompts: prompts://deepsource/deepsource-prompts/_index.md"
+_FLAT = "Skills: skill://flatsource/_index.md\nPrompts: prompts://flatsource/flatsource-prompts/_index.md"
+_FLAT_PROMPTS = "Prompts: prompts://flatsource/flatsource-prompts/_index.md"
+
+# case -> (query, headers, extension declared, expected text)
+MCP_TEXTS = {
+    "unscoped": ("", {}, False, f"[deepsource]\n{_DEEP}\n\n[flatsource]\n{_FLAT}\n\n" + RES_FOOTER),
+    "flatsource": (
+        "",
+        {"Kb-Library": "flatsource"},
+        False,
+        f"Skills (skill://flatsource/_index.md): alpha, beta\n{_FLAT_PROMPTS}\n\n" + RES_FOOTER,
+    ),
+    "deepsource": (
+        "",
+        {"Kb-Library": "deepsource"},
+        False,
+        "Skills (skill://deepsource/_index.md): plugin-a/gamma, plugin-b/delta\n"
+        "Prompts: prompts://deepsource/deepsource-prompts/_index.md\n\n" + RES_FOOTER,
+    ),
+    "tag": (
+        "",
+        {"Kb-Tag": "flat"},
+        False,
+        "Skills (skill://flatsource/_index.md): alpha, beta\n\n" + RES_FOOTER,
+    ),
+    "tags": (
+        "?tag=flat&tag=deep",
+        {},
+        False,
+        "[deepsource]\nSkills: skill://deepsource/_index.md\n\n"
+        "[flatsource]\nSkills: skill://flatsource/_index.md\n\n" + RES_FOOTER,
+    ),
+    "resources-off": (
+        "",
+        {"X-MCP-Resources": "off"},
+        False,
+        f"[deepsource]\n{_DEEP}\n\n[flatsource]\n{_FLAT}\n\n" + TOOLS_FOOTER,
+    ),
+    "extension": (
+        "",
+        {"Kb-Library": "flatsource"},
+        True,
+        f"{_FLAT}\n\n" + RES_FOOTER,
+    ),
+}
+
+MCP_WAYS = {
+    "as-is": ({}, None),
+    "via-mcp": ({"Kb-Via": "mcp"}, None),
+    "prefixed": ({"Kb-Resource-Prefix": "kb+"}, "kb+"),
+}
+
+
+@pytest.mark.integration
+@ERAS
+@pytest.mark.parametrize("way", MCP_WAYS)
+@pytest.mark.parametrize("case", MCP_TEXTS)
+async def test_mcp_text_is_unchanged(server_url, mode, case, way):  # noqa: F811
+    query, headers, extension, expected = MCP_TEXTS[case]
+    extra, prefix = MCP_WAYS[way]
+    text = await told(
+        server_url + query, mode, {**headers, **extra}, extension=extension
+    )
+    assert text == (prefixed(expected, prefix) if prefix else expected)
