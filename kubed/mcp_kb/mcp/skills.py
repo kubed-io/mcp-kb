@@ -1017,7 +1017,7 @@ class SkillServing:
                 accounted.add(path)
                 rows.setdefault(path, self._clean(why, plugin))
             elif why.startswith(_AGENT_META_FAILED):
-                # The layer logs its own refusal on every add; kb says it once.
+                # kb says it once; the layer's line is filtered (HTTP-45).
                 self._note(
                     noted,
                     f"agent file {self._clean(path, plugin)} of plugin {plugin.id}"

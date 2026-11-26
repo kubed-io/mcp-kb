@@ -249,9 +249,10 @@ it, at `<version>.1`, then `.2`, and so on.
 rest are deleted once their mtime is 15 minutes old. Leftover `.tmp-` and `.discard-` directories
 go too, and `.work/` files 15 minutes old.
 
-**SRC-30.** `<cache>/index.json` holds every fetch and plugin record of the served snapshot. It is
-written atomically at boot and after every rebuild. When it cannot be written, the server logs a
-warning and serves on.
+**SRC-30.** `<cache>/index.json` holds the fetch records of the served snapshot: each fetch's
+key, status, root, fingerprint, `built` and error. It holds no plugin: a plugin is harvested from
+its tree on disk (SRC-37). It is written atomically at boot and after every rebuild. When it
+cannot be written, the server logs a warning and serves on.
 
 ## Fingerprints
 
@@ -279,11 +280,13 @@ fingerprints like a plain tree.
 
 **SRC-36.** Boot reuses `index.json` only when the server reads its format version and its config
 hash equals that of the parsed config, so formatting and comments do not count. The hash leaves
-`telemetry` out, so editing that section costs no refetch.
+`telemetry` out, so editing that section costs no refetch. The server writes version 12. It also
+reads version 11, for its `fetches` alone, ignoring its `plugins`, until every deployment has
+written 12.
 
 **SRC-37.** From a reused index, boot keeps each `ok` or `stale` fetch record whose tree is on
-disk, and the plugin records of those fetches while their lists and root still match (SRC-48). It
-builds the rest.
+disk, and builds the rest. Every plugin is harvested again from its fetch's tree, which touches no
+network.
 
 **SRC-38.** Boot takes no fingerprints. The first background pass, started with the server,
 fingerprints every fetch.
@@ -323,14 +326,11 @@ outside boot is handled the same way. With no tree on disk, the fetch is `failed
 **SRC-47.** A rebuild that ends in the status and error the record already holds is not a change,
 and a pass with no change leaves the generation where it is.
 
-**SRC-48.** On a change, the plugins of every rebuilt fetch are harvested again, every marketplace
+**SRC-48.** On a change, every plugin is harvested again from its tree on disk, every marketplace
 is re-read from disk, any fetch a marketplace starts needing is built, and a snapshot with the
-next generation replaces the served one in one assignment. A plugin whose effective lists or root
-changed is harvested again too, though its own fetch did not move: a marketplace entry on another
-repository takes its `skills`, `commands` and `agents` from the marketplace's fetch, and a
-`git-subdir` entry's `path` is its root and no part of the fetch key. Each plugin record keeps the
-lists and root it was harvested with, and is reused only while they match. A request in flight
-finishes on the snapshot it started with.
+next generation replaces the served one in one assignment. So a marketplace entry on another
+repository serves its edited `skills`, `commands`, `agents` or `git-subdir` `path` though its own
+fetch did not move. A request in flight finishes on the snapshot it started with.
 
 **SRC-49.** Refreshes are serialised. A background pass that raises is logged and the loop goes on.
 

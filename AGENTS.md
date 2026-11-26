@@ -70,12 +70,12 @@ installer's, against whatever image tag it chooses.
 | ⤷⤷ `mcpkb.py`, `claude.py`, `copilot.py` | one module per dialect: `parse` into `Parsed`, `substitute` back out |
 | ⤷ `placeholders.py` | the two `${CLAUDE_*}` placeholders this server is the authority on |
 | ⤷ `instructions.py` | `build_instructions` — the server `instructions` for a scope and mode, as text. Imports no FastMCP |
-| ⤷ `index.py` | `Index`, `FetchRecord`, `PluginRecord` — the on-disk `index.json` a cold start reads |
-| ⤷ `snapshot.py` | `Snapshot`, `build_snapshot` — the immutable view every request reads |
+| ⤷ `index.py` | `Index`, `FetchRecord`: the on-disk `index.json`, the fetch records a cold start keeps |
+| ⤷ `snapshot.py` | `Snapshot`, `Harvest`, `build_snapshot`: the immutable view every request reads, and the in-memory harvest it is built from |
 | ⤷ `refresh.py` | when a fetch is due to be looked at again, bounded to the shortest configured interval, and what a failure does to the last good one |
 | `kubed/mcp_kb/sources/` | where bytes come from, one `Fetch` at a time — a loader per source in `__init__.py`, over `file.py`, `git.py`, `webdav.py`, the shared per-version `export.py`, `errors.py`, and `live.py`, because revalidation is a source concern; and `ServedTrees`, the one loader kubed-mcp is handed, which answers a plugin's address with the tree kb is serving for it and never fetches |
 | `kubed/mcp_kb/mcp/` | what an agent sees |
-| ⤷ `skills.py` | `SkillServing` — the skills, agents and prompts, served by kubed-mcp's plugin layer: `publish` adds every plugin to a plugin set each generation, its `commands` exactly kb's prompt files (`entry_for`), `view` is kb's scope, `rewrite` its one rewriter (a command's body included), `read_command` kb's dialect reader, `agent_meta` adds kb's `_meta` key, the parity guard narrows the catalogue to what is served, and the live re-read; `QuietSelection`, the log filter for a file kb left out |
+| ⤷ `skills.py` | `SkillServing` — the skills, agents and prompts, served by kubed-mcp's plugin layer: `publish` adds every plugin to a plugin set each generation, its `commands` exactly kb's prompt files (`entry_for`), `view` is kb's scope, `rewrite` its one rewriter (a command's body included), `read_command` kb's dialect reader, `agent_meta` adds kb's `_meta` key, the parity guard narrows the catalogue to what is served, and the live re-read; `QuietSelection`, the log filter that drops the layer's own line for each skip kb reports, and for a file kb left out |
 | ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `HideMirrorTools` |
 | ⤷ `tools.py`, `prompts.py` | `prompts.py` `MCPFilePrompt` and `adapt`, the `Prompt` kb's reader hands the plugin layer, and the prompt mirror pair; `tools.py` names kubed-mcp's resource pair (DLV-6) and holds the read-only annotations |
 | ⤷ `request.py`, `scope.py` | what the current request says about itself, and the `Scope` it becomes |
@@ -264,8 +264,9 @@ one set of bytes:
   reader read as the set was staged, kept to the names kubed-mcp serves, so
   `/health`'s counts and the scope refusal read what is served. A plugin
   kubed-mcp refuses is a conflict in its library (LIB-29), a prompt name an
-  earlier plugin serves included. What it cannot cover is a skill that fails one view's
-  build alone (N15): that one is still named in kb's indexes under that view.
+  earlier plugin serves included. A live re-read narrows the catalogue again
+  and logs what it changed, as a refresh does. What it cannot cover is a skill that fails one
+  view's build alone (N15): that one is still named in kb's indexes under that view.
 
 kubed-mcp's own types and naming apply to a skill's files: a file that is not
 UTF-8 text, or has no or an unknown extension, is a blob (SKL-22), its media type is the plugin layer's (SKL-23), and
@@ -334,8 +335,8 @@ why `tests/test_header_scope.py` runs a real uvicorn server.
 generation and when it was built, and three maps: `libraries` (what each serves,
 what it could not resolve, and the agents it `renamed` or left `unserved`),
 `plugins` (keyed by id — `<entry>@<library>` for a marketplace entry — with its
-fetch, category, tags and what it yielded) and `fetches` (one per materialised
-tree, with its status and fingerprint). `POST /reindex` returns the same
+fetch, category, tags, what the plugin layer serves of it and what it skipped) and `fetches` (one
+per materialised tree, with its status and fingerprint). `POST /reindex` returns the same
 payload plus `rebuilt`, the fetch keys. Between them they answer the three
 questions worth asking of a running instance: did everything configured load,
 which generation is being served, and has a refresh picked up an edit yet.

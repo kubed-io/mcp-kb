@@ -102,8 +102,10 @@ class Harvest:
 
     ``skills`` carry no library and no folder: those are the library's, and
     each library takes its copy of a skill with ``dataclasses.replace``, so a
-    plugin in two libraries is one harvest served twice. Every path but
-    ``skill_dirs`` is root-relative, in the order the harvest found it.
+    plugin in two libraries is one harvest served twice. ``prompts``,
+    ``claude_prompts``, ``command_dirs``, ``files``, ``agents`` and
+    ``agent_paths`` are root-relative; ``root``, ``skill_dirs`` and each
+    skill's paths are absolute. All are in the order the harvest found them.
     """
 
     id: str

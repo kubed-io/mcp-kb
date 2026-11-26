@@ -9,6 +9,21 @@
 > layer serves. The design is below. There is no separate design file. Two points in the notes
 > could not be built as written against kubed-mcp `v0.3.0`'s source. D4 and D6 say what replaces
 > each.
+>
+> **Approved 2026-11-25.** Task 0 corrected two facts under 0.3.0. The layer does log a skill
+> folder it rejects, at `ERROR` on `kubed.mcp.skills`, which the plan said it did not. And its
+> reason for a folder of 513 files is `BIG_REASON = "A skill may contain at most 512 files"`.
+>
+> **Shipped 2026-11-25**, Tasks 0 to 3. D6 is built as Dr K ruled, not as written below: one log
+> line per skip, kb's. `QuietSelection` drops the layer's own line for each skip kb reports,
+> matched on its template and its number of args, the rejected-skill `ERROR` and the
+> `agent_meta` refusal included, and keeps the layer's nested-`SKILL.md` line. A skill folder or
+> agent file the layer skips that kb's harvest never found is said once by kb, with no row. An
+> unselected command file the layer skips before kb's reader, and the skips of a plugin refused
+> in every library, are now said by nobody. Task 2's review added two fixes: a live re-read logs
+> what it changed through `log_changes`, and a `skills: ["."]` plugin's unselected command files
+> stay quiet (P8). The spec is HTTP-9 and HTTP-44 to HTTP-47, with SRC-30, SRC-36, SRC-37,
+> SRC-48, PRM-18, AGT-6, AGT-14, PLG-18 and LIB-33 reworded.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use skill://superpowers/subagent-driven-development/SKILL.md (recommended) or skill://superpowers/executing-plans/SKILL.md to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

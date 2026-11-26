@@ -54,12 +54,40 @@ plugin or library that failed is reported inside the body, never as a failed req
 
 **HTTP-9.** The shape of each `libraries`, `plugins` and `fetches` entry is the one the OpenAPI
 document publishes (`LibraryStatus`, `PluginStatus`, `FetchStatus`). A real response MUST validate
-against it.
+against it. A plugin's `skills`, `prompts` and `agents` are what the plugin layer serves for it,
+from the first library that adds it, and `0` for an `ok` plugin that no library adds. Its `files`
+are what kb's harvest admitted, whether or not a library serves the plugin. Its `skipped` holds
+kb's rows (PLG-18), then the plugin layer's rows for its skill folders, prompt files and agent
+files, one row per path, each path plugin-relative and no reason naming a cache path. A
+`SKILL.md` deeper than a skill folder is no row. A plugin whose root is its one skill may have a
+reason that names that folder's own name, which for a git fetch is the export's version folder.
+Its `built` is when this generation harvested it.
 
 **HTTP-10.** A `cache: live` fetch's counters (`revalidated`, `fetched`, `cooling`) are read when
 `/health` is called, not when the snapshot was built.
 
 **HTTP-11.** Nothing in a `/health` body names a cache path or carries a credential.
+
+**HTTP-44.** Each row of a plugin's `skipped` is logged once, at `WARNING`, when it first appears:
+`plugin <id> skips '<path>': <reason>`, at boot or at the refresh that adds it. A live re-read
+(SKL-37) logs what it changes as a refresh does.
+
+**HTTP-45.** Each skip kb reports logs one line, kb's. The plugin layer's own line for that skip is
+dropped, matched on its template and its number of arguments: a skipped command file, a skipped
+agent file (of a plugin or of the whole set), a duplicate claim, a duplicate skill folder, an
+`agent_meta` refusal, and the `ERROR` for a skill folder it does not load. The layer's line for a
+`SKILL.md` deeper than a skill folder is kept.
+
+**HTTP-46.** A skill folder or agent file the plugin layer skips that kb's harvest never found is
+no row. kb logs it once, `'<path>' of plugin <id> is not served: <reason>`, unless it is an agent
+`agent_meta` refused, which AGT-6 logs, or one whose rename is taken, which the library's
+`unserved` line says.
+
+**HTTP-47.** Three kinds of skip are logged by nobody: a command file kb did not select (PRM-4),
+whether kb's reader skips it or the plugin layer does before the reader sees it; each skip met
+by a plugin the layer refuses in every library, whose conflict line (LIB-29) says it serves
+nothing; and each skill folder or agent file kb never found, in a plugin whose `commands`
+entries include `.`, which covers every path.
 
 ## `POST /reindex`
 
