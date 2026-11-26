@@ -217,6 +217,22 @@ PLG-25 gives. Each later one is skipped with the reason `prompt <name> is alread
 plugins: the plugin layer refuses the later plugin (PLUG-18), reported as LIB-29 says in
 [plugins-and-libraries.md](plugins-and-libraries.md).
 
+## As a resource
+
+**PRM-63.** A served prompt's file also reads, unlisted, at `prompts://<namespace>/<place>`. The
+namespace is its plugin's (SKL-59). The place is its path below the commands folder it was read
+from: `commands/db/migrate.md` reads at `prompts://lib/db/migrate.md`. For a file a manifest lists
+by path, the place is that path: `./prompts/x.md` of plugin `b` reads at
+`prompts://lib/b/prompts/x.md`. It reads as the plugin layer builds it, frontmatter kept, after
+kb's rewriter and the prefix. Every folder holding one is a directory with `_index.md` and
+`_index.json`; `prompts://<library>` is one only when the main plugin serves a prompt (kubed-mcp's
+PLUG-66 to PLUG-68). It is held to the scope as `prompts/get` is, and out of scope it fails as an
+absent address does. It is listed only when `Listed` names `prompts` (DLV-8). Two files of one
+plugin at one place serve the first in kb's path order (`harvest.command_entries`), and the later
+one is skipped whole, its prompt included, with its reason in `/health`'s `skipped`:
+`prompts://lib/prompts/x.md is already served by commands/prompts/x.md`. This is kubed-mcp's limit,
+reported to quick-mcp. The instructions point at the index (INS-19).
+
 ## Rendering
 
 **PRM-45.** An argument whose value is missing, `null` or the empty string counts as not given. A

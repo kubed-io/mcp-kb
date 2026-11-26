@@ -92,7 +92,9 @@ def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
             {SkillsExtension.identifier: SkillsExtension().settings()}
         )
     )
-    mcp.add_middleware(ScopedInstructions(catalogue))
+    # The snapshot the plugin layer serves, not kb's: the handshake pins no
+    # build, so its pointers name what is served (INS-19).
+    mcp.add_middleware(ScopedInstructions(serving.served_snapshot))
     prompt_tools = prompts.register(mcp)
     mcp.add_middleware(
         RefuseEmptyScope(

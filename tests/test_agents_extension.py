@@ -188,7 +188,8 @@ async def _surface(server, mode) -> dict:
 @pytest.mark.unit
 @ERAS
 async def test_nothing_else_changes(tmp_path, mode):
-    """AGT-2: the same tree with every ``agents/`` gone serves the same rest."""
+    """AGT-2: the same tree with every ``agents/`` gone serves the same rest,
+    but for the instructions' ``Agents:`` line (INS-19)."""
     with_agents = agents_tree(tmp_path / "with")
     without = agents_tree(tmp_path / "without")
     for tree in (with_agents, without):
@@ -206,6 +207,11 @@ async def test_nothing_else_changes(tmp_path, mode):
 
     assert served["prompts"]
     assert served["resources"]
+    told = served.pop("instructions").splitlines()
+    assert [line for line in told if line.startswith("Agents:")]
+    assert [line for line in told if not line.startswith("Agents:")] == (
+        bare.pop("instructions").splitlines()
+    )
     assert served == bare
 
 

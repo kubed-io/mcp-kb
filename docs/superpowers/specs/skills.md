@@ -41,7 +41,7 @@ one library are a conflict, as in [plugins-and-libraries.md](plugins-and-librari
 
 ## Addresses
 
-**SKL-8.** Everything in this area is a `skill://` URI:
+**SKL-8.** A skill's and a library's addresses are `skill://` URIs:
 
 | URI | Reads as |
 |---|---|
@@ -54,6 +54,10 @@ one library are a conflict, as in [plugins-and-libraries.md](plugins-and-librari
 | `skill://<library>/<folder>/<name>[/<dir>]/_index.md`, `…/_index.json` | the children of the skill's root or of a folder inside it (SKL-57) |
 | `skill://<library>/_files.md` | the library's files outside every skill |
 | `skill://<library>/<path>` | one of those files |
+
+**SKL-61.** `prompts://` and `agents://` are the plugin layer's address spaces beside `skill://`,
+by the same namespaces (SKL-59): PRM-63 and AGT-18 to AGT-19. kb's `Catalogue` answers neither. The
+prefix is accepted and written on them as on `skill://` (GW-4, SKL-41).
 
 **SKL-9.** `<library>` is the library's name, so a plugin served by two libraries has its skills at
 two addresses. A skill's **address** is `<library>/<folder>/<name>`, without an empty folder.

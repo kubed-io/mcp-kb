@@ -1,9 +1,11 @@
 """The instructions text: built from a catalogue alone (unit), then served over HTTP."""
 
 import contextlib
+import contextvars
 import json
 import socket
 import threading
+from types import SimpleNamespace
 
 import pytest
 import uvicorn
@@ -14,15 +16,23 @@ from kubed.mcp.gateway import prefixed
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.catalogue import harvest
-from kubed.mcp_kb.catalogue.instructions import build_instructions
+from kubed.mcp_kb.catalogue.instructions import build_instructions, kind_pointer
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex, load_skills
+from kubed.mcp_kb.catalogue.snapshot import Folders
 from kubed.mcp_kb.catalogue.uris import Catalogue, LibraryText
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.instructions import ScopedInstructions
 from kubed.mcp_kb.mcp.request import declared_on_initialize
 from kubed.mcp_kb.mcp.scope import EVERYTHING, Scope
-from tests.conftest import FLAT_FOLDERS, fake_plugin, make_config, server_of
+from tests.conftest import (
+    FLAT_FOLDERS,
+    fake_plugin,
+    make_config,
+    server_of,
+    serving_of,
+)
 from tests.test_header_scope import server_url  # noqa: F401 - shared HTTP fixture
+from tests.test_plugin_serving import market
 
 RES_FOOTER = (
     "Read a listed skill at skill://<library>/<path>/SKILL.md; read its "
@@ -51,9 +61,15 @@ def _catalogue(tmp_path, libraries):
     return Catalogue(SkillIndex(skills), LibraryFiles(), libraries=list(libraries))
 
 
-def _build(catalogue, scope=EVERYTHING, resources=True, skills_extension=False):
+def _build(
+    catalogue, scope=EVERYTHING, resources=True, skills_extension=False, folders=None
+):
     return build_instructions(
-        catalogue, scope, resources=resources, skills_extension=skills_extension
+        catalogue,
+        scope,
+        resources=resources,
+        skills_extension=skills_extension,
+        folders=folders,
     )
 
 
@@ -140,6 +156,79 @@ def test_blank_lines_inside_a_description_cannot_open_a_section(tmp_path):
     assert first == "[a]\nPara one.\n[b]\nfake heading\nSkills: skill://a/_index.md"
     body = cat.read("skill://a/_index.md")
     assert "Para one.\n[b]\nfake heading\n" in body
+
+
+# -- the prompt and agent pointers (INS-19) -----------------------------------
+
+
+@pytest.mark.unit
+def test_kind_pointer_names_the_library_index_when_the_main_plugin_serves():
+    assert kind_pointer("Prompts", "prompts", "lib", ("lib", "lib/a")) == (
+        "Prompts: prompts://lib/_index.md"
+    )
+
+
+@pytest.mark.unit
+def test_the_pointer_falls_back_to_each_plugin_folder():
+    assert kind_pointer("Agents", "agents", "lib", ("lib/a", "lib/b")) == (
+        "Agents: agents://lib/a/_index.md, agents://lib/b/_index.md"
+    )
+    assert kind_pointer("Agents", "agents", "lib", ()) is None
+
+
+@pytest.mark.unit
+def test_prompt_and_agent_lines_follow_the_skills_pointer(tmp_path):
+    text = LibraryText("lib", "L.", list_skills=False)
+    cat = _catalogue(tmp_path, {text: ["x"]})
+    folders = {"lib": Folders(prompts=("lib",), agents=("lib/a", "lib/b"))}
+    assert _build(cat, folders=folders) == (
+        "L.\nSkills: skill://lib/_index.md\nPrompts: prompts://lib/_index.md\n"
+        "Agents: agents://lib/a/_index.md, agents://lib/b/_index.md\n\n" + RES_FOOTER
+    )
+
+
+@pytest.mark.unit
+def test_the_names_form_keeps_the_lines(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("lib"): ["x"]})
+    out = _build(cat, folders={"lib": Folders(prompts=("lib",))})
+    assert out.startswith(
+        "Skills (skill://lib/_index.md): x\nPrompts: prompts://lib/_index.md\n\n"
+    )
+
+
+@pytest.mark.unit
+def test_each_section_gets_its_own_lines_and_an_unselected_library_none(tmp_path):
+    a, b = LibraryText("a", "A."), LibraryText("b", "B.")
+    cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
+    folders = {"b": Folders(agents=("b",)), "c": Folders(prompts=("c",))}
+    assert _build(cat, folders=folders) == (
+        "[a]\nA.\nSkills: skill://a/_index.md\n\n"
+        "[b]\nB.\nSkills: skill://b/_index.md\nAgents: agents://b/_index.md\n\n"
+        + RES_FOOTER
+    )
+    assert _build(cat, folders=folders, resources=False).endswith(
+        "Agents: agents://b/_index.md\n\n" + TOOLS_FOOTER
+    )
+
+
+@pytest.mark.unit
+def test_a_declared_skills_extension_keeps_the_lines(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("lib"): ["x"]})
+    folders = {"lib": Folders(prompts=("lib",), agents=("lib/b",))}
+    assert _build(cat, skills_extension=True, folders=folders) == (
+        "Skills: skill://lib/_index.md\nPrompts: prompts://lib/_index.md\n"
+        "Agents: agents://lib/b/_index.md\n\n" + RES_FOOTER
+    )
+
+
+@pytest.mark.unit
+def test_the_lines_are_prefixed_once(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("lib", list_skills=False): ["x"]})
+    folders = {"lib": Folders(prompts=("lib",), agents=("lib",))}
+    out = prefixed(_build(cat, folders=folders), "kb+")
+    assert "Prompts: kb+prompts://lib/_index.md" in out.splitlines()
+    assert "Agents: kb+agents://lib/_index.md" in out.splitlines()
+    assert "kb+kb+" not in prefixed(out, "kb+")
 
 
 # -- served on connect, over HTTP, in both protocol eras ----------------------
@@ -448,7 +537,9 @@ async def test_a_missing_message_still_gets_instructions(tmp_path):
     async def call_next(_context):
         return result
 
-    mw = ScopedInstructions(lambda: cat)
+    mw = ScopedInstructions(
+        lambda: SimpleNamespace(catalogue=cat, folders=lambda scope: {})
+    )
     assert await mw.on_initialize(_Context(), call_next) is result
     assert result.instructions.startswith("Skills (skill://penpot/_index.md)")
     # discover has no message to read, and a None answer must not raise either
@@ -534,3 +625,185 @@ async def test_instructions_follow_headers(server_url, mode):  # noqa: F811
         "Read a listed skill at kb+skill://<library>/<path>/SKILL.md; read its "
         "_manifest in place of SKILL.md for the other files it ships."
     )
+
+
+# -- the prompt and agent pointers, served (INS-19) ----------------------------
+
+
+def _skill(name):
+    return f"---\nname: {name}\ndescription: d\n---\nB.\n"
+
+
+CMD = "---\ndescription: D.\n---\nBody.\n"
+HELPER = "---\nname: helper\ndescription: H.\n---\nB.\n"
+
+
+def _three(tmp_path):
+    """``lib``: its main plugin and ``a`` serve a prompt each, ``b`` an agent."""
+    return market(
+        tmp_path,
+        [
+            {"name": "lib", "source": "./main"},
+            {"name": "a", "source": "./a", "tags": ["t"]},
+            {"name": "b", "source": "./b"},
+        ],
+        {
+            "main/skills/m/SKILL.md": _skill("m"),
+            "main/commands/top.md": CMD,
+            "a/skills/sa/SKILL.md": _skill("sa"),
+            "a/commands/hello.md": CMD,
+            "b/skills/sb/SKILL.md": _skill("sb"),
+            "b/agents/helper.md": HELPER,
+        },
+    )
+
+
+def _pointers(text):
+    """The ``Prompts:`` and ``Agents:`` lines of ``text``, in order."""
+    return [
+        line for line in text.splitlines() if line.startswith(("Prompts:", "Agents:"))
+    ]
+
+
+def _addresses(lines):
+    return [a for line in lines for a in line.split(": ", 1)[1].split(", ")]
+
+
+async def _read(url, mode, uri):
+    kwargs = {"mode": "legacy"} if mode == "legacy" else {}
+    async with Client(StreamableHttpTransport(url), **kwargs) as client:
+        return await client.read_resource(uri)
+
+
+async def _miss(url, mode, uri):
+    """The error a read of ``uri`` fails with, the address written as ``<uri>``."""
+    with pytest.raises(Exception) as error:
+        await _read(url, mode, uri)
+    return type(error.value), str(error.value).replace(uri, "<uri>")
+
+
+@pytest.mark.unit
+def test_folders_are_the_namespaces_serving_each_kind(tmp_path):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    server_of(kb)  # the plugin set is published, and its prompts and agents read
+    assert kb.snapshot.folders() == {
+        "lib": Folders(prompts=("lib", "lib/a"), agents=("lib/b",))
+    }
+    assert kb.snapshot.folders(Scope.parse(tags="t")) == {
+        "lib": Folders(prompts=("lib/a",))
+    }
+    assert kb.snapshot.folders(Scope.parse(library="else")) == {}
+
+
+@pytest.mark.integration
+@ERAS
+async def test_every_pointed_index_reads(tmp_path, mode):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    expected = {
+        "": ["Prompts: prompts://lib/_index.md", "Agents: agents://lib/b/_index.md"],
+        "?tag=t": ["Prompts: prompts://lib/a/_index.md"],
+        "?library=lib": [
+            "Prompts: prompts://lib/_index.md",
+            "Agents: agents://lib/b/_index.md",
+        ],
+    }
+    with served(kb) as url:
+        for query, lines in expected.items():
+            pointers = _pointers(await told(url + query, mode))
+            assert pointers == lines, query
+            for uri in _addresses(pointers):
+                assert (await _read(url + query, mode, uri))[0].text, (query, uri)
+        # Out of scope reads as absent does (SCP-27).
+        scoped = url + "?tag=t"
+        assert await _miss(scoped, mode, "prompts://lib/_index.md") == (
+            await _miss(scoped, mode, "prompts://nope/_index.md")
+        )
+
+
+@pytest.mark.integration
+async def test_a_library_without_a_main_plugin_points_at_its_folders(tmp_path):
+    config = market(
+        tmp_path,
+        [{"name": "a", "source": "./a"}, {"name": "c", "source": "./c"}],
+        {
+            "a/skills/sa/SKILL.md": _skill("sa"),
+            "a/commands/one.md": CMD,
+            "c/skills/sc/SKILL.md": _skill("sc"),
+            "c/commands/two.md": CMD,
+        },
+    )
+    kb = KnowledgeBase(config, tmp_path / "cache")
+    with served(kb) as url:
+        pointers = _pointers(await told(url, "default"))
+        assert pointers == [
+            "Prompts: prompts://lib/a/_index.md, prompts://lib/c/_index.md"
+        ]
+        for uri in _addresses(pointers):
+            assert (await _read(url, "default", uri))[0].text
+
+
+@pytest.mark.unit
+def test_a_refused_plugin_adds_no_folder(tmp_path):
+    config = market(
+        tmp_path,
+        [{"name": "a", "source": "./a"}, {"name": "c", "source": "./c"}],
+        {
+            "a/skills/sa/SKILL.md": _skill("sa"),
+            "a/commands/hello.md": CMD,
+            "c/skills/sc/SKILL.md": _skill("sc"),
+            "c/commands/hello.md": CMD,
+        },
+    )
+    kb = KnowledgeBase(config, tmp_path / "cache")
+    server_of(kb)
+    # Both name lib_hello: "c" is refused (LIB-29, PRM-44), so serves no folder.
+    conflict = kb.status["libraries"]["lib"]["conflicts"]["c@lib"]
+    assert conflict.startswith("conflict: prompt lib_hello is already served by plugin")
+    assert kb.snapshot.folders()["lib"].prompts == ("lib/a",)
+
+
+@pytest.mark.integration
+@ERAS
+async def test_a_refresh_drops_the_prompts_line(tmp_path, mode):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    with served(kb) as url:
+        assert "Prompts: prompts://lib/_index.md" in await told(url, mode)
+        (tmp_path / "lib" / "main" / "commands" / "top.md").unlink()
+        (tmp_path / "lib" / "a" / "commands" / "hello.md").unlink()
+        kb.refresh(force=True)
+        text = await told(url, mode)
+    assert not [line for line in text.splitlines() if line.startswith("Prompts:")]
+    assert "Agents: agents://lib/b/_index.md" in text.splitlines()
+
+
+@pytest.mark.unit
+def test_a_refresh_between_the_pin_and_the_instructions(tmp_path):
+    """The instructions read the generation the request pinned, when it pinned
+    one, and else the one the plugin layer serves (INS-19)."""
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    server_of(kb)
+    serving = serving_of(kb)
+    instructions = ScopedInstructions(serving.served_snapshot)
+    request = contextvars.copy_context()
+    request.run(serving.view)  # pins the published state, off-request: everything
+
+    (tmp_path / "lib" / "main" / "commands" / "top.md").unlink()
+    (tmp_path / "lib" / "a" / "commands" / "hello.md").unlink()
+    kb.refresh(force=True)
+    assert kb.snapshot.folders() == {"lib": Folders(agents=("lib/b",))}
+
+    pinned = request.run(instructions._text, False)
+    assert "Prompts: prompts://lib/_index.md" in pinned.splitlines()
+    fresh = contextvars.Context().run(instructions._text, False)
+    assert not [line for line in fresh.splitlines() if line.startswith("Prompts:")]
+    assert "Agents: agents://lib/b/_index.md" in fresh.splitlines()
+
+
+@pytest.mark.integration
+@ERAS
+async def test_the_lines_carry_the_prefix(tmp_path, mode):
+    kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    with served(kb) as url:
+        text = await told(url, mode, {"Kb-Resource-Prefix": "kb+"})
+    assert "Prompts: kb+prompts://lib/_index.md" in text.splitlines()
+    assert "Agents: kb+agents://lib/b/_index.md" in text.splitlines()

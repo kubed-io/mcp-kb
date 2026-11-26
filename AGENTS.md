@@ -268,6 +268,15 @@ one set of bytes:
   and logs what it changed, as a refresh does. What it cannot cover is a skill that fails one
   view's build alone (N15): that one is still named in kb's indexes under that view.
 
+A served prompt's file reads, unlisted, at `prompts://<namespace>/<place>`, the place being its path
+below the commands folder it was read from, or the path its manifest lists it by (PRM-63), and an
+agent's at `agents://<namespace>/<path>`. Every folder holding one has `_index.md` and
+`_index.json`. All of it is kubed-mcp's, and kb serves neither scheme. `prompts://<library>` (and
+`agents://<library>`) is a folder only when the library's main plugin serves that kind, which is why
+INS-19 can point at plugin folders. Two files of one plugin at one place: the first in kb's path
+order serves, and the other is a `skipped` row on `/health` (kubed-mcp's limit, reported to
+quick-mcp).
+
 kubed-mcp's own types and naming apply to a skill's files: a file that is not
 UTF-8 text, or has no or an unknown extension, is a blob (SKL-22), its media type is the plugin layer's (SKL-23), and
 `_manifest` names the skill by its `name` (SKL-24). Both `server/discover` and
@@ -275,8 +284,10 @@ legacy `initialize` advertise the Skills extension with `directoryRead`.
 
 The **Agents extension** is kubed-mcp's too: `agents/list` and `agents/get` serve
 the subagents Claude-format plugins ship, from the same plugin set, and add no
-listing row, no tool and no line of instructions. kb's rewriter renders an
-agent's body (AGT-17, PRM-48), and `SkillServing.agent_meta` adds kb's
+listing row and no tool; an agent's file reads, unlisted, at
+`agents://<namespace>/<path>`, and the instructions name the folder index
+(INS-19). kb's rewriter renders an agent's body (AGT-17, PRM-48), and
+`SkillServing.agent_meta` adds kb's
 `io.kubed.mcp-kb/agent` key beside kubed-mcp's `io.kubed/agent`, its
 `frontmatter` read through kubed-mcp's own `parse_agent`, so kb parses no agent
 itself; its `skills` names the agent's own plugin's skills alone, because it
@@ -287,11 +298,11 @@ set skips that agent. `ServedTrees` hands the layer a directory, and cannot leav
 one file of it out.
 An agent's name is its library's, claimed in the order kb adds plugins — a later
 plugin's clash is `<name>@<plugin>` — and no owner is stored anywhere, so a
-plugin appended to a library renames nothing. An agent's file also reads at an
-unlisted `agents://<namespace>/<path>` (AGT-18), but never through the
-plugin-root fallback: one reads at a `skill://` address only when an operator's
-`files:` glob names it. No method takes a scope param; the connection's scope
-is the only filter, and out of scope is `Agent not found`, as absent is.
+plugin appended to a library renames nothing. That `agents://` address is
+AGT-18's, and an agent never reads through the plugin-root fallback: one reads
+at a `skill://` address only when an operator's `files:` glob names it. No
+method takes a scope param; the connection's scope is the only filter, and out
+of scope is `Agent not found`, as absent is.
 Commands are kb's prompts, and the plugin layer serves them through kb's
 `read_command`, kb's dialect reader. kb hands the layer exactly its selection
 of prompt files as each entry's `commands`, and the reader holds the layer to
@@ -376,9 +387,11 @@ which generation is being served, and has a refresh picked up an edit yet.
   anything.
 - **A provider that stores a `Catalogue` serves the old generation forever** —
   read through the getter (the `catalogue()` `create_app` defines, which returns
-  `knowledge_base.snapshot.catalogue` and is handed to `resources.register`
-  and `ScopedInstructions`), or take the container's `Catalogue` transient,
-  never a captured reference. A
+  `knowledge_base.snapshot.catalogue` and is handed to `resources.register`),
+  or take the container's `Catalogue` transient, never a captured reference.
+  `ScopedInstructions` takes `SkillServing.served_snapshot` instead, which
+  reads `_reading()`: the pinned state inside a request that pinned, else the
+  published one. A
   `Revalidator` has the same shape of bug and a nastier
   symptom: a refresh exports a source to a *new* directory, so one that outlives
   its snapshot goes on revalidating into a tree nothing is serving, and the edit
