@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -24,7 +25,7 @@ from .address import Address, parse_address
 
 if TYPE_CHECKING:
     from ..config import BasicAuth, Config, LibraryConfig, PluginConfig, SourceConfig
-    from .manifest import CommandEntry, Components
+    from .manifest import Components
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,11 @@ class Globs:
     manifest decides, and failing that the conventions. An empty tuple is a
     decision -- serve none of that kind.
 
+    ``skills`` is not globs but the declared skill *folders*, each a skill or
+    the parent of skills (``harvest.skill_dirs``), searched after the
+    conventional ``skills/``: ``None`` declares none, so ``skills/`` alone is
+    read, and ``()`` serves no skill at all.
+
     ``commands`` is not a kind and serves nothing: it is which of the
     ``prompts`` patterns came from a *command* declaration -- a manifest's
     ``commands`` or an entry's -- because that is a Claude signal and the file
@@ -77,8 +83,7 @@ class Globs:
     ``prompts:`` glob is not a command declaration and leaves it empty.
     Only a declared *folder* is a pattern; ``command_files`` are the ``.md``
     files those declarations list, read as paths and served beside
-    ``prompts`` (PLG-21). ``command_dirs`` are the folders as written, and
-    ``command_map`` the object-map commands, which name no pattern at all.
+    ``prompts`` (PLG-21). ``command_dirs`` are the folders as written.
 
     ``agents`` is ``None`` for the default ``agents/`` scan, as the other kinds
     are, and ``()`` for a plugin that is not Claude-format and so has none.
@@ -91,7 +96,6 @@ class Globs:
     agents: tuple[str, ...] | None = None
     command_dirs: tuple[str, ...] = ()
     command_files: tuple[str, ...] = ()
-    command_map: tuple[CommandEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -113,14 +117,27 @@ class Plugin:
     # A marketplace entry's own components; None for a declared plugin.
     entry: Components | None = None
     strict: bool = True
-    # The entry's source is the marketplace's own subdir in its own fetch.
-    root_entry: bool = False
     # Set by ``with_manifest``: it has a plugin.json or is a marketplace entry,
     # the MCP server names it declares (read, never run), and what its
     # manifest and entry got wrong without failing it.
     claude_format: bool = False
     servers: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
+    # A marketplace entry as its catalogue publishes it, less ``source``: what
+    # kubed-mcp merges with the plugin's ``plugin.json``. None for a declared
+    # plugin. Not compared or hashed, as a dict cannot be, and everything it
+    # says is in the fields above.
+    manifest_entry: Mapping[str, object] | None = field(
+        default=None, compare=False, repr=False
+    )
+
+    @property
+    def address(self) -> str:
+        """``<scheme>://<path>[//<subdir>][?ref=<ref>]``: kb's own address for
+        the plugin, which kubed-mcp is handed in place of any cache path."""
+        key, mark, ref = self.fetch.key.partition("?")
+        subdir = f"//{self.subdir}" if self.subdir else ""
+        return f"{key}{subdir}{mark}{ref}"
 
     @property
     def labels(self) -> frozenset[str]:

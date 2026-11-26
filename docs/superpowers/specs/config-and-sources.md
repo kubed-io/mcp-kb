@@ -15,8 +15,10 @@ is [http-and-tools.md](http-and-tools.md).
 | `--config` | `CONFIG` | `/etc/mcp-kb/config.yaml` |
 | `--cache-dir` | `CACHE_DIR` | `/var/cache/mcp-kb` |
 
-**CFG-2.** The config file says what to serve; flags and environment say how to run. No setting
-exists in both. Transport, host and port are in [http-and-tools.md](http-and-tools.md).
+**CFG-2.** The config file says what to serve, and in its `telemetry` section what the process
+reports; flags and environment say how to run. No setting exists in both. The `OTEL_*`, `POD_NAME`
+and `POD_NAMESPACE` variables are read by kubed-mcp's telemetry and the OpenTelemetry SDK, never by
+kb, and are no kb setting. Transport, host and port are in [http-and-tools.md](http-and-tools.md).
 
 **CFG-3.** `mcp-kb schema` prints the config's JSON Schema and exits 0 without reading a config.
 `config.schema.json` in the repository is the same document.
@@ -24,7 +26,8 @@ exists in both. Transport, host and port are in [http-and-tools.md](http-and-too
 ## The config file
 
 **CFG-4.** The file is YAML with three optional top-level lists, `sources`, `plugins` and
-`libraries`. An empty file is a valid config with all three empty.
+`libraries`, and an optional `telemetry` mapping (CFG-15). An empty file is a valid config with all
+three lists empty and every telemetry signal off.
 
 ```yaml
 sources:
@@ -48,6 +51,9 @@ is not YAML or fails validation exits with code 2 and `mcp-kb: <reason>` on stde
 
 **CFG-8.** A validation error that quotes a URL has its `user:password@` masked as `***@`.
 
+**CFG-14.** A plugin's `skills` item is a folder, never a glob. Loading the config refuses an item
+holding `*`, `?` or `[` with `skills item '<item>' is a folder, not a glob` (PLG-9).
+
 ## Credentials
 
 **CFG-9.** A source's `auth` is `{username, password}`. `password` MUST be an `{env: NAME}`
@@ -68,6 +74,25 @@ load time.
 **CFG-12.** Logs of a failed refresh or reindex mask every resolved credential and URL userinfo.
 
 **CFG-13.** No credential is written under the cache directory, a clone's remote URL included.
+
+## Telemetry
+
+**CFG-15.** The optional `telemetry` mapping is kubed-mcp's `TelemetrySettings`, which the server
+kubed-mcp builds reads off the config: `profiles` (a Pyroscope address; setting it turns profiles
+on), `profile_cpu` and `profile_memory` (both `true` by default), `otel` (`false` by default;
+OpenTelemetry traces and call metrics, configured by the standard `OTEL_*` variables) and `tags` (a
+string map of labels). Absent, every signal is off. An unknown key in it is a config error (CFG-5),
+and so is a `profiles` address carrying userinfo, as a source URL is (SRC-3). Profiles, traces and
+metrics carry the service name `OTEL_SERVICE_NAME`, else `mcp-kb`. Metrics leave as
+`OTEL_METRICS_EXPORTER` says: pushed over OTLP, or scraped from the exporter's own port with
+`prometheus`. The server adds no metrics route.
+
+```yaml
+telemetry:
+  profiles: http://pyroscope.example.com:4040
+  otel: true
+  tags: {team: platform}
+```
 
 ## Sources
 
@@ -118,14 +143,16 @@ address has no auth, `cache: snapshot` and no `refresh`.
 **SRC-10.** A failure to materialise or fingerprint a fetch is recorded on that fetch alone, and
 its error names the fetch key, never a cache path.
 
-**SRC-53.** Each declared source, and `file`, has one loader: a kubed-mcp `PluginLoader` whose
-scheme is the source's name, made with the source (its URL and `auth`) and the cache directory.
-`materialise(address)` is the folder holding the plugin, the fetch's tree with the subdir inside
-it ([SRC-8](#addresses-and-fetches)); a subdir that is not a directory in it fails with
-`<subdir> is not a directory in <key>`. A failure is a `ValueError`, which kubed-mcp's
-`add_plugin` reports as the plugin's refusal. kb's `file` loader cannot be registered with
-kubed-mcp, which has its own `LocalLoader` for `file` built in. That one is no substitute: it
-guards no subdir symlink out of the tree and ignores `?ref=`.
+**SRC-53.** Each declared source, and `file`, has one fetcher: a loader whose scheme is the
+source's name, made with the source (its URL and `auth`) and the cache directory, which kb
+materialises and fingerprints its fetches through. kubed-mcp is never handed one. It reads every
+plugin through one loader of kb's, the **served-tree loader**, registered for `file` and for every
+declared source's name, in place of kubed-mcp's own `LocalLoader`. The served-tree loader is never
+a fetcher: it clones, exports and copies nothing. `materialise(address)` is the tree kb serves for
+the address's fetch now, the last good one included, with the subdir inside it
+([SRC-8](#addresses-and-fetches)). A fetch kb serves no tree for fails with
+`<key> is not materialised`, and a subdir that is not a directory in the tree fails with
+`<subdir> is not a directory in <key>`. kubed-mcp is handed kb's own address, never a cache path.
 
 ## git
 
@@ -175,15 +202,18 @@ revalidated like any other.
 
 **SRC-20.** A file fetch is served in place; nothing is copied. A path that is not a directory
 fails the fetch with `<path> is not a directory`. A skill's files are read once per generation,
-so an edit to one in place is served from the next refresh (or `POST /reindex`); a library file
-or a prompt is read off disk each time.
+so an edit to one in place is served from the next refresh (or `POST /reindex`); a prompt file is
+read when its plugin is added to the plugin layer, once per generation, like a skill's files; a
+library file is read off disk each time.
 
 ## `cache: live`
 
-**SRC-21.** On a live fetch, each read of one of its files (library file, prompt) first
-revalidates that file, and each request that reads skills first revalidates every file of the live
-skills in its scope (SKL-37): one request for its ETag, and a download only if the ETag differs
-from the local copy's.
+**SRC-21.** On a live fetch, each read of one of its library files first
+revalidates that file, and each request that reads skills, agents or prompts first revalidates
+every file of the live skills, and each agent and prompt file, of the plugins its scope admits
+(SKL-37): one request for its ETag, and a download only if the ETag differs from the local copy's.
+A skill's, an agent's or a prompt's edit found that way is served from the next request on, not to
+the request that found it.
 
 **SRC-22.** A download is staged in `<cache>/src/<slug>/.work/` and renamed over the local copy in
 one step, so a reader sees one whole version of the file.
@@ -219,9 +249,10 @@ it, at `<version>.1`, then `.2`, and so on.
 rest are deleted once their mtime is 15 minutes old. Leftover `.tmp-` and `.discard-` directories
 go too, and `.work/` files 15 minutes old.
 
-**SRC-30.** `<cache>/index.json` holds every fetch and plugin record of the served snapshot. It is
-written atomically at boot and after every rebuild. When it cannot be written, the server logs a
-warning and serves on.
+**SRC-30.** `<cache>/index.json` holds the fetch records of the served snapshot: each fetch's
+key, status, root, fingerprint, `built` and error. It holds no plugin: a plugin is harvested from
+its tree on disk (SRC-37). It is written atomically at boot and after every rebuild. When it
+cannot be written, the server logs a warning and serves on.
 
 ## Fingerprints
 
@@ -248,11 +279,14 @@ fingerprints like a plain tree.
 **SRC-35.** The catalogue is built before the server binds its port.
 
 **SRC-36.** Boot reuses `index.json` only when the server reads its format version and its config
-hash equals that of the parsed config, so formatting and comments do not count.
+hash equals that of the parsed config, so formatting and comments do not count. The hash leaves
+`telemetry` out, so editing that section costs no refetch. The server writes version 12. It also
+reads version 11, for its `fetches` alone, ignoring its `plugins`, until every deployment has
+written 12.
 
 **SRC-37.** From a reused index, boot keeps each `ok` or `stale` fetch record whose tree is on
-disk, and the plugin records of those fetches while their lists and root still match (SRC-48). It
-builds the rest.
+disk, and builds the rest. Every plugin is harvested again from its fetch's tree, which touches no
+network.
 
 **SRC-38.** Boot takes no fingerprints. The first background pass, started with the server,
 fingerprints every fetch.
@@ -292,14 +326,11 @@ outside boot is handled the same way. With no tree on disk, the fetch is `failed
 **SRC-47.** A rebuild that ends in the status and error the record already holds is not a change,
 and a pass with no change leaves the generation where it is.
 
-**SRC-48.** On a change, the plugins of every rebuilt fetch are harvested again, every marketplace
+**SRC-48.** On a change, every plugin is harvested again from its tree on disk, every marketplace
 is re-read from disk, any fetch a marketplace starts needing is built, and a snapshot with the
-next generation replaces the served one in one assignment. A plugin whose effective lists or root
-changed is harvested again too, though its own fetch did not move: a marketplace entry on another
-repository takes its `skills`, `commands` and `agents` from the marketplace's fetch, and a
-`git-subdir` entry's `path` is its root and no part of the fetch key. Each plugin record keeps the
-lists and root it was harvested with, and is reused only while they match. A request in flight
-finishes on the snapshot it started with.
+next generation replaces the served one in one assignment. So a marketplace entry on another
+repository serves its edited `skills`, `commands`, `agents` or `git-subdir` `path` though its own
+fetch did not move. A request in flight finishes on the snapshot it started with.
 
 **SRC-49.** Refreshes are serialised. A background pass that raises is logged and the loop goes on.
 

@@ -98,7 +98,6 @@ def _config(origin, ref=None, subdir="", auth=None, **plugin):
                 {
                     "name": "library",
                     "source": address,
-                    "skills": ["skills/*/SKILL.md"],
                     **plugin,
                 }
             ],
@@ -178,7 +177,7 @@ def test_an_unknown_commit_is_a_source_error(origin, tmp_path):
 def test_a_subdirectory_is_the_plugins_root_and_not_the_fetchs(origin, tmp_path):
     """``lab://repo//skills`` exports the whole repository once and roots the
     plugin at ``skills`` inside it, so the skill sits at the library's top."""
-    config = _config(origin, subdir="skills", skills=["*/SKILL.md"])
+    config = _config(origin, subdir="skills", skills=["."])
     knowledge_base = KnowledgeBase(config, tmp_path / "cache")
 
     fetch = knowledge_base.status["plugins"]["library"]["fetch"]
@@ -466,7 +465,6 @@ def _pointing_at(base):
                 {
                     "name": "library",
                     "source": "lab://repo",
-                    "skills": ["skills/*/SKILL.md"],
                 }
             ],
             "libraries": [{"name": "library", "plugins": ["library"]}],

@@ -7,7 +7,7 @@ is the worst failure a config file has. The models are also the published
 schema: ``config.schema.json`` is ``Config.model_json_schema()`` and a test
 fails when the two drift.
 
-Three lists, each answering one question:
+Three lists and a section, each answering one question:
 
 - a **source** is a backend, named once: where bytes come from and how to log
   in. A plugin never carries a credential, so a token is declared in exactly
@@ -19,6 +19,9 @@ Three lists, each answering one question:
   the same kind of thing.
 - a **library** is a saved query over plugins, and the first segment of every
   URI served: a marketplace, a list of plugin names, or a ``pluginSelector``.
+- the **telemetry** section is kubed-mcp's ``TelemetrySettings``, as it is: what
+  the process reports, never what it serves. A setting for it is added
+  upstream, never here.
 
 The shape of a source follows PEP 610's direct-URL data structure: a URL and a
 credential that is a *reference* (``{env: NAME}``) rather than a value, so the
@@ -37,6 +40,7 @@ from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 
 import yaml
+from kubed.mcp import TelemetrySettings
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -49,6 +53,9 @@ from pydantic import (
 
 if TYPE_CHECKING:  # the one direction that would be a cycle at runtime
     from .plugins.address import Address
+
+SERVER_NAME = "mcp-kb"
+"""The MCP server's own name, which ``create_app`` hands to ``QuickMCP``."""
 
 NAME = r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$"
 
@@ -94,6 +101,9 @@ def redact(text: str, secrets: list[str]) -> str:
     for secret in sorted(set(secrets), key=len, reverse=True):
         text = text.replace(secret, "***")
     return text
+
+
+CREDENTIAL_REFUSAL = "telemetry.profiles must not embed a credential"
 
 
 class ConfigError(ValueError):
@@ -252,14 +262,20 @@ class Selector(Strict):
         return _groups(self.tags)
 
 
+# What makes a string a glob to ``Path.glob``: refused in a skills folder.
+GLOB_CHARS = frozenset("*?[")
+
+
 class PluginConfig(Strict):
     """A folder of skills and prompts: a path under a source, plus its metadata.
 
     The metadata fields are Claude's marketplace-entry fields, so a plugin
     declared here and one read out of a ``marketplace.json`` carry the same
-    shape and a selector cannot tell them apart. The glob lists are this
-    server's own: omitted, a kind is the conventions and the plugin's own
-    ``plugin.json`` and entry, merged per kind as Claude Code merges them.
+    shape and a selector cannot tell them apart. ``prompts`` and ``files``
+    are this server's own glob lists: omitted, a kind is the conventions and
+    the plugin's own ``plugin.json`` and entry, merged per kind as Claude Code
+    merges them. ``skills`` lists folders, added to ``skills/`` as Claude
+    Code adds a manifest's.
     """
 
     name: str = Field(pattern=NAME)
@@ -269,7 +285,14 @@ class PluginConfig(Strict):
     keywords: list[str] = Field(default_factory=list)
     version: str | None = None
     source: str
-    skills: list[str] | None = None
+    skills: list[str] | None = Field(
+        default=None,
+        description=(
+            "Folders, not globs: each is a skill, or holds skills one level down,"
+            " and adds to the skills/ folder every plugin is read from. [] serves"
+            " no skill."
+        ),
+    )
     prompts: list[str] | None = None
     files: list[str] | None = None
     dialect: Literal["auto", "mcp-kb", "claude", "copilot"] = "auto"
@@ -296,6 +319,17 @@ class PluginConfig(Strict):
                 msg = f"pattern {pattern!r} must be a relative path without '..'"
                 raise ValueError(msg)
         return patterns
+
+    @field_validator("skills")
+    @classmethod
+    def _folders(cls, folders: list[str] | None) -> list[str] | None:
+        # A skills item is a folder, as Claude Code and kubed-mcp read one: a
+        # glob is a config written for the old reading, and served nothing now.
+        for folder in folders or []:
+            if any(c in folder for c in GLOB_CHARS):
+                msg = f"skills item {folder!r} is a folder, not a glob"
+                raise ValueError(msg)
+        return folders
 
     @property
     def address(self) -> Address:
@@ -329,6 +363,17 @@ class LibraryConfig(Strict):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    @field_validator("name")
+    @classmethod
+    def _not_the_servers_name(cls, name: str) -> str:
+        if name == SERVER_NAME:
+            msg = (
+                f"library name {name!r} is the server's own name, whose prompts "
+                "the plugin layer would not prefix"
+            )
+            raise ValueError(msg)
+        return name
+
     @field_validator("categories")
     @classmethod
     def _no_comma_in_category(cls, categories: list[str]) -> list[str]:
@@ -359,11 +404,38 @@ class LibraryConfig(Strict):
 
 
 class Config(Strict):
-    """The whole config file: the sources, the plugins under them, the libraries."""
+    """The whole config file: the sources, the plugins under them, the libraries,
+    and the process's telemetry."""
 
     sources: list[SourceConfig] = Field(default_factory=list)
     plugins: list[PluginConfig] = Field(default_factory=list)
     libraries: list[LibraryConfig] = Field(default_factory=list)
+    telemetry: TelemetrySettings = Field(
+        default_factory=TelemetrySettings,
+        description=(
+            "What the process reports: kubed-mcp's profiles, traces and metrics. "
+            "Absent, every signal is off."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _telemetry_carries_no_credential(self) -> Config:
+        """The profiles address is published, so it may not carry a login.
+
+        The message does not quote the address back: it is the credential. One
+        urlsplit cannot parse (an unclosed or misplaced bracket) is refused the
+        same way when it holds an ``@``, or its error would quote it instead.
+        """
+        profiles = self.telemetry.profiles or ""
+        try:
+            parts = urlsplit(profiles)
+        except ValueError:
+            if "@" in profiles:
+                raise ValueError(CREDENTIAL_REFUSAL) from None
+            raise
+        if parts.username or parts.password:
+            raise ValueError(CREDENTIAL_REFUSAL)
+        return self
 
     @model_validator(mode="after")
     def _names_are_unique(self) -> Config:
@@ -502,6 +574,12 @@ def load_config(path: Path) -> Config:
     except yaml.YAMLError as exc:
         raise ConfigError(f"{path} is not YAML: {exc}") from exc
     except ValidationError as exc:
+        if any(CREDENTIAL_REFUSAL in e["msg"] for e in exc.errors()):
+            # That validator runs on the whole Config, so pydantic echoes the whole
+            # input, truncated, and the cut can drop the "://" the mask keys on.
+            # Hiding inputs on Config would also hide the nested ones the other
+            # refusals quote, so only this one is reported without its input.
+            raise ConfigError(f"{path}: {CREDENTIAL_REFUSAL}") from None
         raise ConfigError(f"{path}: {USERINFO.sub('***@', str(exc))}") from exc
 
 

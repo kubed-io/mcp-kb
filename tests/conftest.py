@@ -1,5 +1,6 @@
 """Shared fixtures: a synthetic skills tree covering both nesting depths."""
 
+import contextlib
 import weakref
 from pathlib import Path
 
@@ -8,7 +9,7 @@ import pytest
 
 from kubed.mcp_kb.app import create_app
 from kubed.mcp_kb.catalogue import harvest
-from kubed.mcp_kb.catalogue.prompts import load_prompts
+from kubed.mcp_kb.catalogue.prompts import parse_prompt, stem
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, load_skills
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.plugins import Fetch, Globs, Plugin
@@ -20,17 +21,77 @@ from tests.webdav_server import webdav  # noqa: F401 - a fixture, used by name
 FLAT = {"alpha": "First skill.", "beta": "Second skill."}
 NESTED = {"plugin-a": {"gamma": "Third skill."}, "plugin-b": {"delta": "Fourth skill."}}
 
-# Each synthetic library is one plugin whose root is that library's directory,
-# so the globs are relative to it rather than to the tree root. "**/SKILL.md"
-# finds a skill at any depth under a library -- flatsource lays its directly
-# under itself, deepsource one level deeper under a folder -- and
-# harvest.folder_of() (via SKILL_ROOTS) gives the nested ones their folder.
-SKILLS_GLOBS = Globs(skills=("**/SKILL.md",), files=("**/*",))
-LIBRARY_GLOBS = {"flatsource": SKILLS_GLOBS, "deepsource": SKILLS_GLOBS}
-PROMPT_GLOBS = Globs(skills=(), prompts=("*.md",))
+# Each synthetic library is its directory's plugins, every one rooted at that
+# directory, so their skill folders are relative to it rather than to the tree
+# root. flatsource is one plugin, named like its library and so its main one,
+# which lays its skills directly under itself and declares that folder (".").
+# deepsource is three: its own -- the main plugin, serving the library's files
+# and prompts and no skill -- and one per folder below skills/, named like the
+# folder, which is what puts their skills at deepsource/<plugin>/<name>.
+FLAT_FOLDERS = (".",)
+DEEP_FILES = ("README.md", "shared/**/*")
 
-# What each synthetic skills plugin declares about itself. A tag per plugin, so
-# a tag scope can tell the two apart the way a library scope can.
+
+def library_plugins(library: str, nested=tuple(NESTED)) -> dict[str, Globs]:
+    """The plugins a synthetic library's directory is declared as, by name.
+
+    ``nested`` is deepsource's plugins below its own: one per folder below
+    ``skills/``, declared whether or not the folder is there yet.
+    """
+    if library != "deepsource":
+        return {library: Globs(skills=FLAT_FOLDERS, files=("**/*",))}
+    return {
+        library: Globs(skills=(), files=DEEP_FILES),
+        **{
+            name: Globs(skills=(f"./skills/{name}",), prompts=(), files=())
+            for name in nested
+        },
+    }
+
+
+# One plugin row of index.json exactly as v11 wrote it: flatsource's, as a boot
+# over ``make_config`` recorded it. Index v12 holds no plugin rows, and reads a
+# v11 file for its ``fetches`` alone (SRC-37), so nothing here is ever read; it
+# is what a real upgrade finds on disk, and what proves the row is never looked at.
+V11_PLUGIN_ROW = {
+    "id": "flatsource",
+    "fetch": "file:///skills/flatsource",
+    "root": "/skills/flatsource",
+    "status": "ok",
+    "error": None,
+    "built": "2026-11-25T00:00:00Z",
+    "skills": [
+        {
+            "name": "alpha",
+            "description": "First skill.",
+            "path": "/skills/flatsource/alpha",
+        },
+        {
+            "name": "beta",
+            "description": "Second skill.",
+            "path": "/skills/flatsource/beta",
+        },
+    ],
+    "prompts": [],
+    "files": [],
+    "skill_dirs": ["/skills/flatsource/alpha", "/skills/flatsource/beta"],
+    "skipped": [],
+    "agents": [],
+    "agent_paths": [],
+    "globs": {
+        "skills": ["."],
+        "prompts": None,
+        "files": ["**/*"],
+        "commands": [],
+        "agents": [],
+        "command_dirs": [],
+        "command_files": [],
+    },
+    "claude_prompts": [],
+}
+
+# What each synthetic library's plugins declare about themselves. A tag per
+# library, so a tag scope can tell the two apart the way a library scope can.
 PLUGIN_TAGS = {"flatsource": ("flat",), "deepsource": ("deep",)}
 
 # One app per knowledge base, so a test that reaches the server twice -- a route
@@ -49,22 +110,109 @@ def server_of(knowledge_base):
     return _APPS[knowledge_base].server
 
 
+def serving_of(knowledge_base):
+    """The ``SkillServing`` publishing ``knowledge_base``'s plugin set."""
+    from kubed.mcp_kb.mcp.skills import SkillServing
+
+    server_of(knowledge_base)
+    return _APPS[knowledge_base]._container.values[SkillServing]
+
+
 def served(catalogue, uri: str, scope=None) -> str | None:
     """``uri`` as the server serves it from ``catalogue``, under ``scope``.
 
-    A skill's file comes from the skills provider's build, as production serves
-    it; anything else from ``Catalogue.read``. For a test below MCP.
+    A skill's file is its raw text, its ``SKILL.md`` through
+    ``Catalogue.instructions`` as kb's rewriter renders it; anything else from
+    ``Catalogue.read``. For a test below MCP.
+
+    It diverges from production, which kubed-mcp's plugin layer serves: there is
+    no gateway prefix, no CRLF normalisation (SKL-22), no media type or blob
+    (N16), and none of FastMCP's refusals (a misnamed folder, a symlink, N14)
+    or of kb's parity guard. It does follow N13: a skill holding a hidden path
+    serves nothing.
     """
     from kubed.mcp_kb.mcp.scope import EVERYTHING
-    from kubed.mcp_kb.mcp.skill_catalogue import SkillCatalogue
+    from kubed.mcp_kb.mcp.skills import holds_hidden
 
     scope = EVERYTHING if scope is None else scope
-    for address, skill in SkillCatalogue(lambda: catalogue).skills(scope).items():
-        root = f"skill://{address}/"
-        if uri.startswith(root):
-            data = skill.files.get(uri[len(root) :])
-            return None if data is None else data.decode("utf-8")
+    for skill in catalogue.visible_skills(scope):
+        root = f"skill://{skill.address}/"
+        if not uri.startswith(root):
+            continue
+        if holds_hidden(skill.path):
+            return None
+        rel = uri[len(root) :]
+        target = skill.path / rel
+        if rel.startswith(".") or "/." in rel or not target.is_file():
+            break
+        text = target.read_text(encoding="utf-8", errors="replace")
+        if rel == "SKILL.md":
+            return catalogue.instructions(skill.address, text, scope)
+        return text
     return catalogue.read(uri, scope)
+
+
+async def ext_request(client, method, **params):
+    """An extension method (``skills/*``, ``agents/*``) sent as is."""
+    from kubed.mcp.protocol import RequestParams, types
+    from pydantic import ConfigDict, TypeAdapter
+
+    class Params(RequestParams):
+        model_config = ConfigDict(extra="allow")
+
+    return await client.session.send_request(
+        types.Request(method=method, params=Params(**params)), TypeAdapter(dict)
+    )
+
+
+def run_client(knowledge_base, fn):
+    """``await fn(client)`` over an in-memory client, from sync or async code."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    from fastmcp import Client
+
+    async def go():
+        async with Client(server_of(knowledge_base)) as client:
+            return await fn(client)
+
+    with ThreadPoolExecutor(1) as pool:
+        return pool.submit(asyncio.run, go()).result()
+
+
+@contextlib.contextmanager
+def serve_http(knowledge_base):
+    """``knowledge_base``'s app on a loopback port; yields its MCP URL."""
+    import socket
+    import threading
+
+    import uvicorn
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    app = server_of(knowledge_base).http_app()
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.started:
+            break
+        threading.Event().wait(0.05)
+    try:
+        yield f"http://127.0.0.1:{port}/mcp"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def http_client(url, headers=None):
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+
+    return Client(StreamableHttpTransport(url, headers=headers or {}))
 
 
 def read_served(knowledge_base, uri: str) -> str | None:
@@ -147,58 +295,53 @@ def fake_plugin(name: str, root: Path, **overrides) -> Plugin:
     return Plugin(**fields)
 
 
-def load_all_skills(root):
-    """Harvest and load every synthetic library under ``root``, as one catalogue."""
-    skills = []
-    for library, globs in LIBRARY_GLOBS.items():
+def _synthetic_plugins(root):
+    """Each synthetic plugin under ``root``: library, name, root and globs."""
+    for library in PLUGIN_TAGS:
         library_root = root / library
         if library_root.is_dir():
-            dirs = harvest.skill_dirs(library_root, globs)
-            skills += load_skills(
-                dirs,
-                library=library,
-                plugin=fake_plugin(library, library_root),
-                root=library_root,
-            )
+            for name, globs in library_plugins(library).items():
+                yield library, name, library_root, globs
+
+
+def load_all_skills(root):
+    """Harvest and load every synthetic library under ``root``, as one catalogue.
+
+    A plugin named like its library is its main one, as ``assemble_libraries``
+    decides it for these libraries; every other sits in a folder of its name.
+    """
+    skills = []
+    for library, name, library_root, globs in _synthetic_plugins(root):
+        dirs = harvest.skill_dirs(library_root, globs.skills)
+        skills += load_skills(
+            dirs,
+            library=library,
+            plugin=fake_plugin(name, library_root, tags=PLUGIN_TAGS[library]),
+            root=library_root,
+            folder="" if name == library else name,
+        )
     return skills
 
 
 def build_library_files(root):
     """A ``LibraryFiles`` fed from every synthetic library under ``root``."""
     resources = LibraryFiles()
-    for library, globs in LIBRARY_GLOBS.items():
-        library_root = root / library
-        if library_root.is_dir():
-            dirs = harvest.skill_dirs(library_root, globs)
-            files = harvest.library_files(library_root, globs, dirs)
-            resources.add(
-                library,
-                library_root,
-                files,
-                dirs,
-                plugin=fake_plugin(library, library_root),
-            )
+    for library, name, library_root, globs in _synthetic_plugins(root):
+        dirs = harvest.skill_dirs(library_root, globs.skills)
+        files = harvest.library_files(library_root, globs, dirs)
+        resources.add(
+            library,
+            library_root,
+            files,
+            dirs,
+            plugin=fake_plugin(name, library_root, tags=PLUGIN_TAGS[library]),
+        )
     return resources
 
 
-def load_library_prompts(root, library):
-    """The prompts harvested from one library's own prompt root under ``root``."""
-    library_root = root / library
-    if not library_root.is_dir():
-        return []
-    files = harvest.prompt_files(library_root, PROMPT_GLOBS)
-    return load_prompts(files, library=library, plugin=f"{library}-prompts")
-
-
-def load_all_prompts(root):
-    """Every library's prompts under ``root``, combined."""
-    prompts = []
-    for library in LIBRARY_GLOBS:
-        prompts += load_library_prompts(root, library)
-    return prompts
-
-
-def make_config(skills_dir=None, prompts_dir=None, libraries=None, refresh=None):
+def make_config(
+    skills_dir=None, prompts_dir=None, libraries=None, refresh=None, nested=None
+):
     """A ``Config`` whose ``file://`` plugins mirror the fixture trees above.
 
     One plugin per top-level directory under ``skills_dir`` and one
@@ -211,7 +354,12 @@ def make_config(skills_dir=None, prompts_dir=None, libraries=None, refresh=None)
     ``refresh`` puts the plugins behind a declared ``local`` source carrying
     that interval instead of the built-in ``file://`` scheme, which carries
     none -- the shape a test of the refresh loop needs.
+
+    ``nested`` is deepsource's plugins below its own, in place of one per
+    folder of ``NESTED``: a plugin declared before its folder exists is how a
+    refresh picks up a new one.
     """
+    nested = tuple(NESTED) if nested is None else tuple(nested)
     plugins = []
     members: dict[str, list[str]] = {}
     for base, is_prompts in ((skills_dir, False), (prompts_dir, True)):
@@ -223,22 +371,27 @@ def make_config(skills_dir=None, prompts_dir=None, libraries=None, refresh=None)
             path = base / name
             source = f"file://{path}" if refresh is None else f"local://{path.relative_to('/')}"
             if is_prompts:
-                plugin = {
-                    "name": f"{name}-prompts",
-                    "source": source,
-                    "skills": [],
-                    "prompts": ["*.md"],
-                }
+                declared = [
+                    {
+                        "name": f"{name}-prompts",
+                        "source": source,
+                        "prompts": ["*.md"],
+                    }
+                ]
             else:
-                plugin = {
-                    "name": name,
-                    "source": source,
-                    "tags": list(PLUGIN_TAGS.get(name, ())),
-                    "skills": ["**/SKILL.md"],
-                    "files": ["**/*"],
-                }
-            plugins.append(plugin)
-            members.setdefault(name, []).append(plugin["name"])
+                declared = [
+                    {
+                        "name": plugin,
+                        "source": source,
+                        "tags": list(PLUGIN_TAGS.get(name, ())),
+                        "skills": list(globs.skills),
+                        **({} if globs.prompts is None else {"prompts": []}),
+                        "files": list(globs.files),
+                    }
+                    for plugin, globs in library_plugins(name, nested).items()
+                ]
+            plugins += declared
+            members.setdefault(name, []).extend(p["name"] for p in declared)
     sources = [] if refresh is None else [
         {"name": "local", "url": "file:///", "refresh": refresh}
     ]
@@ -259,7 +412,7 @@ def _build_tree(root):
         _write(root / "flatsource" / name, name, desc)
     for plugin, skills in NESTED.items():
         for name, desc in skills.items():
-            _write(root / "deepsource" / plugin / name, name, desc)
+            _write(root / "deepsource" / "skills" / plugin / name, name, desc)
     # Library-level files: outside every skill directory, so not skills themselves.
     (root / "deepsource" / "README.md").write_text("not a skill\n")
     shared = root / "deepsource" / "shared"
@@ -324,7 +477,7 @@ def skills_dir(tmp_path):
     """A skills root holding one flat plugin and one two-level plugin.
 
     Mirrors the real libraries: n8n is ``<root>/<skill>/`` while grafana is
-    ``<root>/<folder>/<skill>/``.
+    ``<root>/skills/<folder>/<skill>/``.
     """
     return _build_tree(tmp_path)
 
@@ -357,3 +510,14 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.get_closest_marker("live"):
             item.add_marker(skip)
+
+
+def read_prompt(path: Path, library: str = "lib", **kwargs):
+    """A prompt file parsed from its text, named ``<library>_<stem>``."""
+    return parse_prompt(
+        path.read_text(encoding="utf-8"),
+        path,
+        name=f"{library}_{stem(path)}",
+        library=library,
+        **kwargs,
+    )

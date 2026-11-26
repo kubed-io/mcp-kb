@@ -5,7 +5,7 @@ Three pages describe things the code defines exactly once, and a hand-written
 copy of any of them would be wrong within a month:
 
     Configuration.md   every field of every config model, from config.schema()
-    Tools.md           the four mirror tools, from a live server's tool list
+    Tools.md           the two resource tools, from a live server's tool list
     Endpoints.md       the HTTP surface, from spec.build_spec()
 
 They are built in-process, from the installed package, rather than read off
@@ -39,8 +39,6 @@ sys.path.insert(0, str(REPO))
 from kubed.mcp_kb import config as config_module  # noqa: E402
 from kubed.mcp_kb.app import create_app  # noqa: E402
 from kubed.mcp_kb.config import Config, schema  # noqa: E402
-from kubed.mcp_kb.mcp import prompts as prompts_module  # noqa: E402
-from kubed.mcp_kb.mcp import request as request_module  # noqa: E402
 from kubed.mcp_kb.mcp import tools as tools_module  # noqa: E402
 from kubed.mcp_kb.server import KnowledgeBase  # noqa: E402
 from kubed.mcp_kb.spec import build_spec  # noqa: E402
@@ -67,8 +65,8 @@ FOOTER_LINKS = "[Home](Home) · [Installing](Installing) · [Deployment](Deploym
 
 # The config models, in the order a reader meets them: the file itself, then
 # its three lists, then the selector a library may carry, then the two small
-# things a source points at. `Config` is the schema's root; the rest are its
-# `$defs`.
+# things a source points at, then the telemetry section, which is kubed-mcp's.
+# `Config` is the schema's root; the rest are its `$defs`.
 MODELS = [
     "Config",
     "SourceConfig",
@@ -77,6 +75,7 @@ MODELS = [
     "Selector",
     "BasicAuth",
     "EnvRef",
+    "TelemetrySettings",
 ]
 
 
@@ -319,8 +318,7 @@ def _kinds() -> list[tuple[str, str]]:
 def _live_tools() -> list:
     """The tool list of a real server, built over a throwaway `file://` plugin.
 
-    A tool's schema is assembled by FastMCP from the registered functions and
-    the prompt transform, so the only way to describe the four accurately is to
+    The pair is kubed-mcp's, so the only way to describe it accurately is to
     stand a server up and ask it. The source is one skill in a temporary
     directory: enough for the server to boot, and nothing that reaches a tool
     schema, which is the same for an empty catalogue and a full one.
@@ -339,30 +337,31 @@ def _live_tools() -> list:
             }
         )
         app = create_app(KnowledgeBase(config, tmp / "cache"))
-        found = asyncio.run(app.server.list_tools(run_middleware=False))
+
+        async def tools():
+            # kubed-mcp's resource pair (DLV-6), which it lists only to a
+            # client that turned resources off. kb registers no tool, so
+            # nothing else is listed.
+            found = [await app.get_tool(name) for name in tools_module.RESOURCE_TOOLS]
+            return found + await app.server.list_tools(run_middleware=False)
+
+        found = asyncio.run(tools())
         return [tool.to_mcp_tool() for tool in found]
 
 
 def _reveals() -> dict[str, tuple[str, str, str]]:
-    """Tool name -> (the pair's title, its URL parameter, its header).
+    """Tool name -> (what it mirrors, its URL parameter, its header).
 
-    Read from the modules that own each set rather than written out here, so a
-    tool that joins one of the pairs is described by this page without the page
-    being edited.
+    Read from the module that owns the names rather than written out here, so a
+    tool that joins the pair is described by this page without the page being
+    edited.
     """
     resources = (
         "Resource mirror",
-        request_module.RESOURCES_PARAM,
-        request_module.RESOURCES_HEADER,
+        tools_module.RESOURCES_PARAM,
+        tools_module.RESOURCES_HEADER,
     )
-    prompts = (
-        "Prompt mirror",
-        request_module.PROMPTS_PARAM,
-        request_module.PROMPTS_HEADER,
-    )
-    pairs = dict.fromkeys(sorted(tools_module.MIRROR_TOOLS), resources)
-    pairs.update(dict.fromkeys(sorted(prompts_module.PROMPT_TOOLS), prompts))
-    return pairs
+    return dict.fromkeys(sorted(tools_module.RESOURCE_TOOLS), resources)
 
 
 def _arguments(tool) -> str:
@@ -396,7 +395,7 @@ def _annotations(tool) -> str:
 
 
 def tools_page() -> str:
-    """The four mirror tools, from a live server's `list_tools`."""
+    """The two resource tools, from a live server."""
     reveals = _reveals()
     found = _live_tools()
     unknown = sorted(t.name for t in found if t.name not in reveals)
@@ -419,12 +418,15 @@ def tools_page() -> str:
     sections = []
     for tool in found:
         _, param, header = reveals[tool.name]
+        listed = f"`?{param}=off` or `{header_name(header)}: off`"
+        if tool.name in tools_module.RESOURCE_TOOLS:
+            listed += ", or one kubed-mcp knows as VS Code"
         sections.append(
             f"""## `{tool.name}`
 
 {clean(tool.description)}
 
-Listed only for a client that sent `?{param}=off` or `{header_name(header)}: off`.
+Listed only for a client that sent {listed}.
 It is callable either way — hiding a tool from a listing is a presentation
 choice, not a refusal to run it.
 
@@ -442,17 +444,21 @@ choice, not a refusal to run it.
 
 # Tools
 
-Every tool this server has is a **mirror**. The catalogue is MCP resources and
-MCP prompts; these four exist for the clients that implement neither, to which a
+This server has two tools, and both are a **mirror**. The catalogue is MCP
+resources; these two exist for the clients that cannot read them, to which a
 resource-only server looks empty. n8n's MCP Client Tool is the one that made
 them necessary.
 
-Each pair is revealed separately, because a client may have one feature and not
-the other. A client says so on the MCP URL, or in a header that beats the URL:
+A client that cannot read resources says so on the MCP URL, or in a header that
+beats the URL:
 
 ```
-http://mcp-kb.flow.svc.cluster.local:8000/mcp?resources=off&prompts=off
+http://mcp-kb.flow.svc.cluster.local:8000/mcp?resources=off
 ```
+
+Prompt files are resources too. A tools-only client lists them with
+`?listed=prompts` (or `Kb-Listed: prompts`) and reads one at its `prompts://`
+address with `read_resource`.
 
 {summary}
 

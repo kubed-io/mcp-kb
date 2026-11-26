@@ -1,162 +1,37 @@
-"""The tools, which are a mirror of the resources and nothing else.
+"""The tools: kubed-mcp's resource pair, and nothing else.
 
-Two tools, whatever the catalogue holds, and both are the resource interface
-wearing a tool's clothes: ``list_resources`` returns the rows ``resources/list``
-returns, ``read_resource`` takes the URI ``resources/read`` takes. An agent that
-knows how to drive MCP resources already knows how to drive these, because the
-vocabulary is the same one -- list addresses, read an address.
+``list_resources`` returns the rows ``resources/list`` returns and
+``read_resource`` takes the URI ``resources/read`` takes, over every resource
+this server has -- the plugin layer's ``SKILL.md`` rows, kb's ``_files.md`` and
+every file read, alike. Both are kubed-mcp's (DLV-6): it lists the pair only for
+a client that turned resources off (``?resources=off``, ``Kb-Resources: off`` or
+``X-MCP-Resources: off``), and refuses a server tool of either name (DLV-7), so
+kb defines neither and registers no tool. A client with no resources reads a
+prompt's file the same way, once ``Kb-Listed: prompts`` lists it.
 
-That is the whole design rule here. A second vocabulary for the same act --
-``read_skill(skill, file)`` beside ``read_library_file(library, file)`` -- makes
-a model learn where a file lives before it can ask for it, and a reference
-inside a SKILL.md does not say which side of that line it falls on.
-
-Progressive disclosure survives the collapse, because it moved into the address
-space rather than into the tool list::
+An agent that knows how to drive MCP resources already knows how to drive these,
+because the vocabulary is the same one -- list addresses, read an address -- and
+progressive disclosure lives in the address space rather than in the tool list::
 
     list_resources()
-        -> ~12 indexes, one per library and folder
+        -> a SKILL.md row per skill, and each library's _files.md
     read_resource("skill://grafana/grafana-lgtm/_index.md")
-        -> that folder's skills, as URIs
+        -> that folder's skills, as URIs (an index reads and is not listed)
     read_resource("skill://grafana/grafana-lgtm/loki/SKILL.md")
         -> the instructions to follow
-
-Both tools are hidden from a client that reads resources; see
-``resources.HideMirrorTools``.
 """
 
 from __future__ import annotations
 
-import logging
+# kubed-mcp's resource pair (DLV-6): named here for the wiki's tool page, and
+# never defined here.
+RESOURCE_TOOLS = ("list_resources", "read_resource")
 
-from kubed.mcp import Context, Inject, NotFoundError, QuickMCP, ToolError
-from kubed.mcp.skills import FolderNotFound
-
-from ..catalogue.uris import Catalogue
-from .request import full_listing, requested_addressing, requested_scope
-from .resources import canonical
-
-LIST_TOOL = "list_resources"
-READ_TOOL = "read_resource"
-MIRROR_TOOLS = {LIST_TOOL, READ_TOOL}
-
-# Both only read the catalogue this pod already harvested: nothing changes, a
-# repeat call gives the same answer, and no source is reached to serve one. Left
-# off, MCP's defaults advertise a tool as destructive, and a client may confirm
-# every read.
-READ_ONLY = {
-    "read_only_hint": True,
-    "destructive_hint": False,
-    "idempotent_hint": True,
-    "open_world_hint": False,
-}
-
-
-def register(mcp: QuickMCP) -> set[str]:
-    """Register the mirror tools; return their names for the listing filter.
-
-    Each call is handed the ``Catalogue`` serving now, injected rather than
-    closed over: a closure over the object would pin these tools to the
-    generation they were registered in. The container builds it once per call,
-    so one call reads one generation, and it is no part of either tool's schema.
-
-    ``read_resource`` reads through the server's own resources, so a skill's
-    file, its ``_manifest`` and a folder's ``_index.json`` are the bytes
-    ``resources/read`` returns, whichever provider serves them.
-    """
-
-    @mcp.tool(annotations={"title": "List skill resources", **READ_ONLY})
-    def list_resources(catalogue: Inject[Catalogue]) -> list[dict[str, str]]:
-        """List the skill resources available, as `uri`/`name`/`description`.
-
-        Start here. The listing is indexes, not skills: a
-        `skill://<library>/_index.md` per library, a
-        `skill://<library>/<folder>/_index.md` per top-level folder, and a
-        `skill://<library>/_files.md` for a library that ships files outside
-        its skills. Read an index for the URIs inside it, then read a skill's
-        `SKILL.md` URI for its instructions. What is listed is what this
-        connection's scope admits: `?library=`, `?category=` and `?tag=` on the
-        MCP URL (or the `Kb-Library`, `Kb-Category` and `Kb-Tag` headers)
-        narrow it, and that ceiling is not yours to widen.
-
-        This returns exactly what an MCP `resources/list` would, so a `uri` from
-        here can be read with `read_resource` or with your own resource reader.
-        """
-        entries = catalogue.entries(requested_scope(), full=full_listing())
-        a = requested_addressing()
-        # A tool result is text, so the gateway prefix applies to the rows.
-        return [
-            {
-                **entry.as_dict(),
-                "uri": a.text(entry.uri),
-                "description": a.text(entry.description),
-            }
-            for entry in entries
-        ]
-
-    @mcp.tool(annotations={"title": "Read a skill resource", **READ_ONLY})
-    async def read_resource(
-        uri: str, catalogue: Inject[Catalogue], ctx: Context
-    ) -> str:
-        """Read one `skill://` URI: an index, a skill's file, or a library's file.
-
-        Args:
-            uri: A URI from list_resources or an index, or one built from this
-                grammar, where `<folder>` may be empty or several segments:
-                `skill://<library>/_index.md` or
-                `skill://<library>/<folder>/_index.md` for an index of skills,
-                `skill://<library>/<folder>/<skill>/SKILL.md` for a skill's
-                instructions,
-                `skill://<library>/<folder>/<skill>/_manifest` for what else it
-                ships, and `skill://<library>/<folder>/<skill>/<path>` for one
-                of those files,
-                `skill://<library>/_files.md` for the files a library ships
-                outside its skills, and `skill://<library>/<path>` for one of
-                those.
-
-        Only files are read. A library, a folder or a skill without a file
-        named after it is a directory, and reading one says which file to read
-        instead.
-
-        Reads only what was asked for. A skill's instructions may cite
-        `references/FOO.md`; citing it does not fetch it, so fetch it only if
-        you are going to use it.
-        """
-        scope = requested_scope()
-        a = requested_addressing()
-        try:
-            # Past the middleware: this call already went through it, and the
-            # miss below is worded for a tool, not as a resource error.
-            result = await ctx.fastmcp.read_resource(
-                canonical(uri, a), run_middleware=False
-            )
-        except NotFoundError:
-            result = None
-        if result is not None:
-            return "".join(
-                c.content if isinstance(c.content, str) else c.content.decode()
-                for c in result.contents
-            )
-        hint = catalogue.hint(a.canonical(uri), scope)
-        if hint is None:
-            hint = await _folder_hint(ctx, canonical(uri, a))
-        hint = hint or (
-            "Call list_resources() for the indexes, then read one to see the URIs"
-            " inside it."
-        )
-        hint = a.text(hint)
-        # An error result, so a caller that branches on isError can tell a miss
-        # from a file; the hint rides in its message. The caller's mistake, not
-        # the server's, so it logs at DEBUG and never as a traceback.
-        raise ToolError(f"No resource at '{uri}'. {hint}", log_level=logging.DEBUG)
-
-    return MIRROR_TOOLS
-
-
-async def _folder_hint(ctx: Context, uri: str) -> str | None:
-    """A folder inside a skill names its ``_index.md``, as a resource read does."""
-    for provider in ctx.fastmcp.providers:
-        children = getattr(provider, "children", None)
-        if children is not None and await children(uri) is not None:
-            return FolderNotFound(uri).hint
-    return None
+# The names kubed-mcp reads its delivery inputs under with kb's ``Kb`` prefix
+# (DLV-16): for the wiki's generator and its test, never to read a request.
+RESOURCES_PARAM = "resources"
+RESOURCES_HEADER = "kb-resources"
+LISTED_PARAM = "listed"
+LISTED_HEADER = "kb-listed"
+VIA_PARAM = "via"
+VIA_HEADER = "kb-via"

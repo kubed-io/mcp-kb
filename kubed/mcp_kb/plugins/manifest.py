@@ -18,23 +18,12 @@ import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from ..catalogue.harvest import readable, usable_name
+from ..catalogue.harvest import readable
 
 MANIFEST_FILES = (".claude-plugin/plugin.json", "plugin.json")
 
 
 COMPONENT_KEYS = ("skills", "commands", "agents", "hooks", "outputStyles", "themes")
-
-
-@dataclass(frozen=True)
-class CommandEntry:
-    """One item of an object-map ``commands``: a name, and a file or a body."""
-
-    name: str
-    source: str | None
-    content: str | None
-    description: str | None
-    argument_hint: str | None
 
 
 @dataclass(frozen=True)
@@ -47,7 +36,6 @@ class Components:
     commands: tuple[str, ...] | None = None
     command_files: tuple[str, ...] = ()  # listed .md files: paths, not globs
     command_dirs: tuple[str, ...] = ()  # the listed folders, as written
-    command_map: tuple[CommandEntry, ...] = ()
     agents: tuple[str, ...] | None = None  # .md files only
     mcp_servers: tuple[str, ...] = ()  # names from an inline object
     mcp_files: tuple[str, ...] = ()  # paths a string mcpServers names
@@ -66,9 +54,6 @@ class Manifest:
 
 def manifest_file(root: Path) -> str | None:
     """Which of ``MANIFEST_FILES`` the plugin ships, root-relative: the one read.
-
-    Also what an inline object-map command is named by in ``/health``, since
-    the manifest is the only file it has.
     """
     return next((name for name in MANIFEST_FILES if readable(root, name)), None)
 
@@ -117,9 +102,7 @@ def read_components(data: dict) -> Components:
     """
     notes: list[str] = []
     skills = _paths(data.get("skills"), "skills", notes)
-    commands, command_files, command_dirs, command_map = _commands(
-        data.get("commands"), notes
-    )
+    commands, command_files, command_dirs = _commands(data.get("commands"), notes)
     agents = _agents(data.get("agents"), notes)
     servers, files = _mcp(data.get("mcpServers"), notes)
     return Components(
@@ -127,7 +110,6 @@ def read_components(data: dict) -> Components:
         commands=commands,
         command_files=command_files,
         command_dirs=command_dirs,
-        command_map=command_map,
         agents=agents,
         mcp_servers=servers,
         mcp_files=files,
@@ -147,9 +129,12 @@ def _paths(value: object, field: str, notes: list[str]) -> tuple[str, ...] | Non
 def _commands(
     value: object, notes: list[str]
 ) -> tuple[
-    tuple[str, ...] | None, tuple[str, ...], tuple[str, ...], tuple[CommandEntry, ...]
+    tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]
 ]:
-    """A ``commands`` key: folder patterns, listed files, the folders, the map.
+    """A ``commands`` key: folder patterns, listed files and the folders.
+
+    An object map serves nothing, and says so; like any declared ``commands``
+    it still replaces the conventions (PLG-21).
 
     Every listed path is a path, as Claude Code reads it: a ``.md`` path names
     that one file (``cmds/[draft].md`` is that file, not a character class),
@@ -157,10 +142,11 @@ def _commands(
     recursively, so ``v[1]`` is that folder and not ``v1/``.
     """
     if isinstance(value, dict):
-        return (), (), (), _command_map(value, notes)
+        notes.append("commands object map is not served")
+        return (), (), ()
     found = _paths(value, "commands", notes)
     if found is None:
-        return None, (), (), ()
+        return None, (), ()
     patterns: list[str] = []
     files: list[str] = []
     dirs: list[str] = []
@@ -170,47 +156,7 @@ def _commands(
             continue
         dirs.append(path)
         patterns.append("**/*.md" if path == "." else f"{glob.escape(path)}/**/*.md")
-    return tuple(patterns), tuple(files), tuple(dirs), ()
-
-
-def _command_map(value: dict, notes: list[str]) -> tuple[CommandEntry, ...]:
-    entries = []
-    for name, item in value.items():
-        # The key is the served prompt's name and a log line: quoted by repr,
-        # which escapes a newline, and every note below quotes a good one.
-        if not usable_name(name):
-            notes.append(f"commands entry {name!r} is not a usable name")
-            continue
-        if not isinstance(item, dict):
-            notes.append(f"commands entry '{name}' is not an object")
-            continue
-        source, content = item.get("source"), item.get("content")
-        if (source is None) == (content is None):
-            notes.append(
-                f"commands entry '{name}' needs exactly one of source and content"
-            )
-            continue
-        if source is not None:
-            if isinstance(source, str):
-                source = _inside(source, "commands", notes)
-            else:
-                source = ""
-            if not source:
-                notes.append(f"commands entry '{name}' has no usable source")
-                continue
-        elif not isinstance(content, str):
-            notes.append(f"commands entry '{name}' content is not text")
-            continue
-        entries.append(
-            CommandEntry(
-                name=str(name),
-                source=source,
-                content=content,
-                description=_text(item.get("description")),
-                argument_hint=_text(item.get("argumentHint")),
-            )
-        )
-    return tuple(entries)
+    return tuple(patterns), tuple(files), tuple(dirs)
 
 
 def _agents(value: object, notes: list[str]) -> tuple[str, ...] | None:

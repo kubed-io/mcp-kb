@@ -9,8 +9,8 @@ model already knows how to drive it: list the resources, read a URI. A server
 that invents ``read_skill(skill, file)`` alongside it is asking the model to
 learn a second vocabulary for the same act. So the catalogue below is written
 once, in URIs, and both halves of the protocol are thin projections of it --
-``resources.py`` serves it as resources, ``tools.py`` as two tools with the same
-shape for clients that have no resources.
+``resources.py`` serves it as resources, and kubed-mcp's ``list_resources`` and
+``read_resource`` read those same resources for clients that have none.
 
 The grammar follows the MCP Skills extension (SEP-2640), which is the whole
 API::
@@ -23,16 +23,19 @@ API::
     skill://<library>/_files.md                   files outside every skill
     skill://<library>/<file>                      one of those
 
-``<folder>`` is the skill's directory below its plugin's skill root, and may
-be empty or several segments deep; the last segment before the file is always
-the skill's name. A skill is found by the longest prefix of the path that
-names one, so a nested skill wins over the skill whose directory holds it.
+``<folder>`` is the skill's plugin's place in the library: empty for the
+library's main plugin, the plugin's name for any other
+(``snapshot.folder_for``). It never comes from where the skill sits inside its
+plugin. The last segment before the file is always the skill's name. A skill is
+found by the longest prefix of the path that names one, so a nested skill wins
+over the skill whose directory holds it.
 
-An index lists what is *directly* under it: each folder as its own
-``_index.md``, with how many skills are below it, and each skill in no deeper
-folder as its ``SKILL.md``. A library of fifty skills in seven folders is then
-seven lines, and the reader chooses which one to open, rather than paying for
-every skill's description to find the folder it wanted.
+An index lists what is *directly* under it: a library's, each folder as its own
+``_index.md`` with how many skills are in it, then each of the main plugin's
+skills as its ``SKILL.md``; a folder's, its plugin's skills. A library of fifty
+skills in seven folders is then seven lines, and the reader chooses which one to
+open, rather than paying for every skill's description to find the folder it
+wanted.
 
 Every other address is a directory -- a library, a folder, a skill's root --
 and serves nothing, as on any other skill server. ``hint`` says which file to
@@ -40,26 +43,25 @@ read instead, for the error a caller sees, and ``directory`` lists a library's
 or a folder's direct children, for ``resources/directory/read`` and
 ``_index.json``.
 
-A skill's own files, its ``_manifest`` and its folders' indexes are served by
-FastMCP's skills provider, from the text ``skill_files`` gives it (MD-55):
-this module decides what they are, and the provider serves them.
+A skill's own files, its ``_manifest`` and the folders inside it are served by
+kubed-mcp's plugin layer, which reads each plugin itself; kb's rewriter
+renders a ``SKILL.md`` through ``instructions`` and an agent's body through
+``agent_instructions``, and ``agent_meta`` is kb's key in an agent's ``_meta``.
 
 Nothing here imports FastMCP. Absent content is ``None``, never an exception, so
-a caller in the resource half can raise and a caller in the tool half can
-explain -- and the scoping rule stays in one place either way.
+the resource half raises on it -- and the scoping rule stays in one place.
 """
 
 from __future__ import annotations
 
 import logging
 import mimetypes
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from ..mcp.scope import EVERYTHING, Scope
 from . import placeholders
-from .agents import Agent, AgentRoster, ParsedAgent, parse_agent, routing_hint
 from .harvest import hidden, readable
 from .names import QualifiedNames, split_frontmatter
 from .skills import LibraryFiles, Skill, SkillIndex
@@ -97,12 +99,11 @@ class Entry:
     """One row of a resource listing -- the shape both halves publish.
 
     ``uri``, ``name``, ``description`` and ``mime_type`` are the four fields
-    ``resources/list`` returns, so the tool mirror is the same rows and not a
+    ``resources/list`` returns, so the resource tools are the same rows and not a
     translation of them. ``tags`` rides alongside for ``resources.py`` to carry
     onto the ``TextResource`` it builds; it is not one of the four and never
-    appears in ``as_dict``. An index row is tagged with its library and
-    ``"index"``; a full row (one skill, in the ``full=True`` listing) carries
-    its library and its plugin's labels.
+    appears in ``as_dict``. A ``_files.md`` row is tagged with its library and
+    ``"index"``.
     """
 
     uri: str
@@ -144,6 +145,33 @@ def parse(uri: str) -> tuple[str, str] | None:
     return head, _remove_dot_segments(tail)
 
 
+def resolved(uri: str) -> str | None:
+    """The address ``parse`` reads: ``skill://<library>/<path>``, dots resolved.
+
+    A bare library is ``skill://<library>``. None when ``parse`` gives None.
+    """
+    parsed = parse(uri)
+    if parsed is None:
+        return None
+    library, path = parsed
+    return f"{SCHEME}{library}/{path}" if path else f"{SCHEME}{library}"
+
+
+def climbs(uri: str) -> bool:
+    """Whether the dot segments of ``uri``, resolved over the whole path, leave
+    an address other than the one ``resolved`` names.
+
+    ``resolved`` clamps a ``..`` at the library; a resolver that counts the
+    library as a segment does not, so a ``..`` that reaches it names another
+    address there. False for anything ``resolved`` cannot read.
+    """
+    address = resolved(uri)
+    if address is None:
+        return False
+    whole = _remove_dot_segments(uri[len(SCHEME) :].strip("/"))
+    return whole != address[len(SCHEME) :]
+
+
 def _remove_dot_segments(path: str) -> str:
     """RFC 3986 ``remove_dot_segments`` on the path below the library.
 
@@ -177,15 +205,10 @@ def _in(skill: Skill, folder: str) -> bool:
     return not folder or skill.folder == folder or skill.folder.startswith(f"{folder}/")
 
 
-def _under(skills: list[Skill], folder: str) -> int:
-    return sum(1 for s in skills if _in(s, folder))
-
-
 def _children(skills: list[Skill], folder: str) -> dict[str, int]:
     """The folders directly in ``folder``, each with how many skills are below it.
 
-    One definition for the indexes and the listing both, so a folder the listing
-    offers is always one an index names, and the other way round.
+    One definition for the folders the indexes name.
     """
     prefix = f"{folder}/" if folder else ""
     found: dict[str, int] = {}
@@ -194,14 +217,6 @@ def _children(skills: list[Skill], folder: str) -> dict[str, int]:
             child = prefix + skill.folder[len(prefix) :].split("/")[0]
             found[child] = found.get(child, 0) + 1
     return dict(sorted(found.items()))
-
-
-def _agent_path(agent: Agent) -> str:
-    """An agent's file as its plugin names it: relative to the plugin root."""
-    for base in (agent.root, agent.root.resolve()):
-        if agent.path.is_relative_to(base):
-            return agent.path.relative_to(base).as_posix()
-    return agent.path.name
 
 
 def mime_for(path: str) -> str:
@@ -256,47 +271,35 @@ class Catalogue:
         resources: LibraryFiles,
         revalidate: Callable[[Path], None] | None = None,
         libraries: Sequence[LibraryText] = (),
-        agents: AgentRoster | None = None,
     ):
         self._libraries = list(libraries)
-        self._agents = agents if agents is not None else AgentRoster()
         self._index = index
         self._resources = resources
         self._revalidate = revalidate
-        self._memo: dict[tuple[Scope, bool], list[Entry]] = {}
+        self._memo: dict[Scope, list[Entry]] = {}
         # A skill's files and their text, unless it is live: an export never
         # changes under a generation, so each is read once however many ask.
         self._files: dict[Path, dict[str, Path]] = {}
         self._texts: dict[Path, str] = {}
 
-    @property
-    def agents(self) -> AgentRoster:
-        """The agents this catalogue holds; ``len()`` counts those served."""
-        return self._agents
-
     # -- listing ------------------------------------------------------------
 
-    def entries(self, scope: Scope = EVERYTHING, full: bool = False) -> list[Entry]:
-        """The resource listing: indexes first, then optionally every skill.
+    def entries(self, scope: Scope = EVERYTHING) -> list[Entry]:
+        """What kb lists itself: each library's ``_files.md``, where one has files.
 
-        The default is the indexes alone -- a dozen rows for a catalogue of
-        ninety skills. Listing every skill instead costs ~16k tokens and is paid
-        on every ``resources/list`` by every client, which is the exact expense
-        this server exists to avoid; ``full`` is for the clients that need it
-        anyway (``fastmcp.utilities.skills`` finds skills only by scanning the
-        listing for ``/SKILL.md``), not for agents.
+        The skills' own rows are the plugin layer's (SKL-14), so none is listed
+        here and none twice. ``_files.md`` is kb's alone: a library with a
+        library file in scope gets one row.
 
-        Memoised per ``(scope, full)``. A ``Catalogue`` is built per snapshot
-        and thrown away with it, so the memo cannot outlive the data it
-        summarises -- which is the only reason caching a listing is safe here
-        at all. The list is shared with every other caller of the same scope:
-        read it, never edit it.
+        Memoised per scope. A ``Catalogue`` is built per snapshot and thrown
+        away with it, so the memo cannot outlive the data it summarises -- which
+        is the only reason caching a listing is safe here at all. The list is
+        shared with every other caller of the same scope: read it, never edit it.
         """
-        key = (scope, full)
-        memo = self._memo.get(key)
+        memo = self._memo.get(scope)
         if memo is not None:
             return memo
-        entries = self._entries(scope, full)
+        entries = self._entries(scope)
         if not entries and scope:
             # An unknown scope yields nothing and cost nothing to find out.
             # Memoising it would let a client grow this dict one bogus header
@@ -307,75 +310,22 @@ class Catalogue:
             # scopes is not bounded by the catalogue. Dropping the lot is
             # cheaper than an LRU and a listing is quick to rebuild.
             self._memo.clear()
-        self._memo[key] = entries
+        self._memo[scope] = entries
         return entries
 
-    def _entries(self, scope: Scope, full: bool) -> list[Entry]:
-        visible = self._index.visible(scope)
-        libraries = {s.library for s in visible} | {
-            lib for lib in self._resources.libraries if self._library_files(lib, scope)
-        }
-
-        entries: dict[str, Entry] = {}
-        for library in sorted(libraries):
-            in_library = [s for s in visible if s.library == library]
-            index_tags = tuple(sorted({library, "index"}))
-            rows: list[Entry] = []
-            # The listing is the top of the same tree the indexes are: the
-            # library's index and its top-level folders.
-            children = _children(in_library, "")
-            if in_library:
-                summary = _count(len(in_library))
-                if children:
-                    summary += (
-                        f" in {_count(len(children), 'folder')}:"
-                        f" {', '.join(children)}"
-                    )
-                rows.append(
-                    Entry(
-                        index_uri(library),
-                        f"{library}/{INDEX}",
-                        f"The {library} library — {summary}.",
-                        "text/markdown",
-                        index_tags,
-                    )
-                )
-            rows += [
-                Entry(
-                    index_uri(library, folder),
-                    f"{library}/{folder}/{INDEX}",
-                    f"{_count(_under(in_library, folder))}"
-                    f" in the {folder} folder of the {library} library.",
-                    "text/markdown",
-                    index_tags,
-                )
-                for folder in children
-            ]
-            if self._library_files(library, scope):
-                rows.append(
-                    Entry(
-                        f"{SCHEME}{library}/{LIBRARY_FILES}",
-                        f"{library}/{LIBRARY_FILES}",
-                        f"Files the {library} library ships outside any skill,"
-                        " which its skills reference.",
-                        "text/markdown",
-                        index_tags,
-                    )
-                )
-            for row in rows:
-                entries.setdefault(row.uri, row)
-
-        if full:
-            for skill in sorted(visible, key=lambda s: s.address):
-                row = Entry(
-                    uri_for(skill),
-                    f"{skill.address}/{MAIN_FILE}",
-                    skill.description,
-                    "text/markdown",
-                    tuple(sorted({skill.library, *skill.tags})),
-                )
-                entries.setdefault(row.uri, row)
-        return list(entries.values())
+    def _entries(self, scope: Scope) -> list[Entry]:
+        return [
+            Entry(
+                f"{SCHEME}{library}/{LIBRARY_FILES}",
+                f"{library}/{LIBRARY_FILES}",
+                f"Files the {library} library ships outside any skill,"
+                " which its skills reference.",
+                "text/markdown",
+                tuple(sorted({library, "index"})),
+            )
+            for library in sorted(self._resources.libraries)
+            if self._library_files(library, scope)
+        ]
 
     # -- what a scope may see -----------------------------------------------
 
@@ -393,7 +343,6 @@ class Catalogue:
             self._resources,
             self._revalidate,
             self._libraries,
-            self._agents,
         )
         # The same trees, so what one has read the other need not read again.
         narrowed._files = self._files
@@ -404,21 +353,18 @@ class Catalogue:
         """Every skill ``scope`` admits, by address."""
         return sorted(self._index.visible(scope), key=lambda s: s.address)
 
-    def skill_files(self, skill: Skill, scope: Scope = EVERYTHING) -> dict[str, str]:
-        """Every file of ``skill`` as a read of it serves it, keyed by path, sorted.
+    def skill_files(self, skill: Skill) -> dict[str, str]:
+        """Every file of ``skill`` as it reads on disk, keyed by path, sorted.
 
         The files are the regular ones under the skill's directory that are not
-        hidden and resolve inside it, nested skills' files included; each is the
-        text ``read`` gives for it, ``SKILL.md`` rewritten for ``scope``. A file
-        that cannot be read is left out, so what this names is what is served.
+        hidden and resolve inside it, nested skills' files included. A file
+        that cannot be read is left out. Raw text: kb's rewriter renders a
+        ``SKILL.md`` when the plugin layer builds it (``instructions``).
         """
-        found: dict[str, str] = {}
-        for file, target in self._files_of(skill).items():
-            text = self._text(skill, target)
-            found[file] = (
-                self._instructions(skill, text, scope) if file == MAIN_FILE else text
-            )
-        return found
+        return {
+            file: self._text(skill, target)
+            for file, target in self._files_of(skill).items()
+        }
 
     def _files_of(self, skill: Skill) -> dict[str, Path]:
         """``skill``'s files and where each reads from, walked once unless live."""
@@ -436,27 +382,26 @@ class Catalogue:
                 self._files[skill.path] = files
         return files
 
-    def live_stamp(self, scope: Scope = EVERYTHING) -> tuple:
-        """What the live skills ``scope`` admits hold on disk now, revalidated.
+    def live_stamp(self, skill: Skill) -> tuple:
+        """What ``skill``'s files hold on disk now, revalidated if it is live.
 
-        Empty when none is live. A server that keeps what it built from
-        ``skill_files`` builds again when this changes: a live read serves an
-        upstream edit (SKL-37), and a digest still describes the bytes served.
+        Empty for a skill that is not live: an export never moves under a
+        generation. A server that keeps what it read of a live skill reads it
+        again when this changes (SKL-37).
         """
+        if not skill.live:
+            return ()
         stamp = []
-        for skill in self.visible_skills(scope):
-            if not skill.live:
+        for path in sorted(skill.path.rglob("*")):
+            if not path.is_file() or hidden(path.relative_to(skill.path)):
                 continue
-            for path in sorted(skill.path.rglob("*")):
-                if not path.is_file() or hidden(path.relative_to(skill.path)):
-                    continue
-                if self._revalidate is not None:
-                    self._revalidate(path)
-                try:
-                    stat = path.stat()
-                except OSError:
-                    continue
-                stamp.append((str(path), stat.st_mtime_ns, stat.st_size))
+            if self._revalidate is not None:
+                self._revalidate(path)
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            stamp.append((str(path), stat.st_mtime_ns, stat.st_size))
         return tuple(stamp)
 
     def selected(self, scope: Scope = EVERYTHING) -> list[LibraryText]:
@@ -534,89 +479,54 @@ class Catalogue:
 
     # -- agents -------------------------------------------------------------
 
-    def agent_cards(self, scope: Scope = EVERYTHING) -> list[dict]:
-        """A card for every agent ``scope`` admits, in name order (AGT-7).
+    def agent_instructions(
+        self, library: str, plugin: str, body: str, scope: Scope = EVERYTHING
+    ) -> str:
+        """An agent's body as ``scope`` reads it: AGT-17, then PRM-48.
 
-        Answered from the snapshot: a live agent is re-read on a definition
-        only (AGT-16), so listing never costs a round trip.
+        Plugin-qualified skill names become addresses first (SKL-54), from
+        what ``scope`` admits; then ``${CLAUDE_PLUGIN_ROOT}`` renders as a
+        prompt body's does, through the plugin's own skills in this library.
+        Every other placeholder -- ``${CLAUDE_SKILL_DIR}`` included, an agent
+        being no skill -- is left as written. The gateway prefix is the plugin
+        layer's to write, after this.
         """
-        return [
-            {
-                "name": agent.name,
-                "description": agent.parsed.description,
-                "capabilities": list(agent.parsed.capabilities),
-            }
-            for agent in self._agents.visible(scope)
-        ]
+        names = self.qualified_names(library, plugin, scope)
+        return placeholders.substitute(
+            names.rewrite(body),
+            plugin_root=f"{SCHEME}{library}",
+            skills=self.plugin_skill_dirs(library, plugin, scope),
+        )
 
-    def agent_definition(self, name: str, scope: Scope = EVERYTHING) -> dict | None:
-        """AGT-9's fields for one agent, or None when absent or out of scope.
+    def agent_meta(
+        self,
+        library: str,
+        plugin: str,
+        path: str,
+        frontmatter: Mapping[str, object],
+        servers: Sequence[str],
+    ) -> dict:
+        """kb's ``io.kubed.mcp-kb/agent`` value for one agent (AGT-9).
 
-        The extension's envelope and the gateway prefix are the protocol
-        layer's to add. ``instructions`` renders ``${CLAUDE_PLUGIN_ROOT}`` as a
-        prompt body does, through the plugin's own skills in this library, and
-        leaves every other placeholder -- ``${CLAUDE_SKILL_DIR}`` included, an
-        agent being no skill -- as written. Plugin-qualified skill names in
-        ``instructions`` become addresses first (SKL-54), and ``_meta`` carries
-        ``skills``: each ``skills:`` entry of the file that resolves, to its
-        unprefixed address (AGT-17).
+        ``plugin`` is kb's plugin id, ``path`` the agent's file under its root,
+        ``frontmatter`` what that file's frontmatter reads as and ``servers``
+        the plugin's MCP server names. ``skills`` maps each ``skills:`` entry of
+        the frontmatter to the ``SKILL.md`` address it resolves to among the
+        agent's own plugin's skills alone (N9): this is computed once per
+        generation and never sees a scope, and every scope that admits the
+        agent admits its plugin, so it never names a skill a caller cannot see
+        (SCP-24).
         """
-        agent = self._agents.get(name, scope)
-        if agent is None:
-            return None
-        parsed = self._agent_parsed(agent)
-        names = self.qualified_names(agent.library, agent.plugin, scope)
-        definition: dict = {"agent": agent.name}
-        if parsed.body.strip():
-            definition["instructions"] = placeholders.substitute(
-                names.rewrite(parsed.body),
-                plugin_root=f"{SCHEME}{agent.library}",
-                skills=self.plugin_skill_dirs(agent.library, agent.plugin, scope),
-            )
-        hint = routing_hint(parsed.model)
-        if hint is not None:
-            definition["modelRoutingHint"] = hint
-        definition["tools"] = []
-        definition["_meta"] = {
-            AGENT_META: {
-                "plugin": agent.plugin,
-                "library": agent.library,
-                "path": _agent_path(agent),
-                "frontmatter": parsed.frontmatter,
-                "servers": list(agent.servers),
-                "skills": names.preload(parsed.frontmatter.get("skills")),
-            }
+        names = self.qualified_names(library, plugin)
+        own = QualifiedNames(names.plugins[:1])
+        return {
+            "plugin": plugin,
+            "library": library,
+            "path": path,
+            "frontmatter": frontmatter,
+            "servers": list(servers),
+            "skills": own.preload(frontmatter.get("skills")),
         }
-        return definition
-
-    def _agent_parsed(self, agent: Agent) -> ParsedAgent:
-        """The agent as its file reads now if it is live, else the snapshot's.
-
-        A live file is revalidated, then parsed again (AGT-16). A read that
-        fails, or an edit that no longer parses, serves the copy parsed when
-        the snapshot was built: a file half saved is no reason to fail a get.
-        The warning names the agent and its plugin-relative path, never the
-        cache path it was read from.
-        """
-        if not agent.live:
-            return agent.parsed
-        try:
-            if self._revalidate is not None:
-                self._revalidate(agent.path)
-            parsed = parse_agent(agent.path)
-        except OSError:
-            parsed = "agent file is not readable"
-        if isinstance(parsed, str):
-            log.warning(
-                "re-reading agent %s (%s of plugin %s): %s; serving the last"
-                " good copy",
-                agent.name,
-                _agent_path(agent),
-                agent.plugin,
-                parsed,
-            )
-            return agent.parsed
-        return parsed
 
     def _library_files(self, library: str, scope: Scope) -> list[str]:
         """The library-level files this caller may see, empty when none are.
@@ -689,7 +599,7 @@ class Catalogue:
         for and lists nothing.
 
         A skill's own files and its ``_manifest`` read as nothing here: the
-        skills provider serves them, from ``skill_files`` (MD-55). A path under
+        plugin layer serves them, from each plugin as it reads it. A path under
         a skill reads here only through the plugin-root fallback.
         """
         parsed = parse(uri)
@@ -881,6 +791,15 @@ class Catalogue:
     def _has(self, skill: Skill, file: str) -> bool:
         """Whether ``file`` is one of ``skill``'s own, as ``skill_files`` names them."""
         return file in self._files_of(skill)
+
+    def instructions(self, address: str, text: str, scope: Scope = EVERYTHING) -> str:
+        """The ``SKILL.md`` ``text`` of the skill at ``address`` as ``scope``
+        reads it: SKL-55, then SKL-25 and SKL-52. ``text`` as written for an
+        address that is no skill here."""
+        skill = self._index.get(address)
+        if skill is None:
+            return text
+        return self._instructions(skill, text, scope)
 
     def _instructions(self, skill: Skill, text: str, scope: Scope) -> str:
         """A ``SKILL.md`` as ``scope`` reads it: names and placeholders resolved."""

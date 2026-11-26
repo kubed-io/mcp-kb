@@ -6,9 +6,8 @@ MCP 2026-07-28, and a client declaring form elicitation -- it is a question
 instead: the render returns an ``InputRequiredResult`` (SEP-2322) carrying one
 form, and the round that answers renders.
 
-Everything that cannot be asked keeps the error, and there are three of them:
-an older protocol, a client that declares no elicitation, and the tool mirror,
-whose result shape has nowhere to put a question.
+Everything that cannot be asked keeps the error, and there are two of them:
+an older protocol, and a client that declares no elicitation.
 """
 
 import logging
@@ -129,24 +128,3 @@ async def test_an_older_protocol_is_refused_however_capable_the_client_is(server
             await client.get_prompt("kit_debug", {})
     assert caught.value.error.message == REFUSAL
     assert asked == []
-
-
-async def test_the_tool_mirror_still_answers_with_the_error_that_says_what_to_do(
-    server,
-):
-    """``get_prompt`` as a tool returns FastMCP's formatted messages, which an
-    ask has none of -- so the mirror asks nobody and keeps the error result."""
-    asked = []
-    handler = _answers({"app": "nextcloud"}, asked)
-    async with Client(server_of(server), elicitation_handler=handler) as client:
-        result = await client.call_tool(
-            "get_prompt", {"name": "kit_debug"}, raise_on_error=False
-        )
-        rendered = await client.call_tool(
-            "get_prompt", {"name": "kit_debug", "arguments": {"app": "loki"}}
-        )
-
-    assert result.is_error
-    assert result.content[0].text.startswith(REFUSAL)
-    assert asked == []
-    assert "Look at loki since 1h." in rendered.content[0].text

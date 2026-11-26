@@ -27,28 +27,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Send `Kb-Via: extension` or `local` (or `?via=`) and the instructions point at where your client gets its skills.
 - A client now connects knowing what each library in its scope is for; set a library's `description`, `notes` and `listSkills` to shape it.
 - Discover and load verified skills in MCP Skills clients through `skills/list` and `skills/get`.
 - Skill links work behind a multiplexing gateway: set `Kb-Resource-Prefix` (or `?prefix=`), e.g. `kb+`, and kb writes it in front of every address in text.
 - A library can list `categories`, and `Kb-Category` (`?category=`) selects every library listing one.
-- A plugin's `commands` may be an object map, and commands in subfolders are served as `<library>_<folder>_<name>`.
-- **Discover the agents your plugins ship** through the experimental `agents/list` and `agents/get`, scoped like everything else.
+- Commands in subfolders of a plugin's `commands` are served as `<library>_<folder>_<name>`.
+- **Discover the agents your plugins ship** through the experimental `agents/list` and `agents/get`, scoped like everything else, with kubed-mcp's `io.kubed/agent` and kb's `io.kubed.mcp-kb/agent` in `_meta` and each agent's file at `agents://<library>/…`.
 - A client can tell kb serves `skill://` addresses from `resources/templates/list`.
 - A `<plugin>:<skill>` name in a skill, prompt or agent reads as the skill's `skill://` address.
 - Browse a library, a folder or a skill's own folders with `resources/directory/read`, or read the `_index.json` beside each.
+- **Send profiles to Pyroscope, and traces and metrics over OpenTelemetry**, from a `telemetry` section in the config; the image ships the packages.
+- A client's instructions now say where each library's prompts and agents read, at their `prompts://` and `agents://` indexes.
+- Choose what `resources/list` lists with `Kb-Listed` (`?listed=`): `skills`, `prompts`, `agents` or `none`.
 
 ### Changed
 
-- Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Listing` and `Kb-Resource-Prefix`; the old `X-` names are still accepted.
+- Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Resource-Prefix` and `Kb-Resources`; the old `X-` names are still accepted.
 - **BREAKING:** A pin set under an old `X-` name (a gateway route header, a credential) no longer holds against a client-sent `Kb-` header, which now beats it; move such pins to the `Kb-` names.
 - **BREAKING:** Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
 - A plugin's `plugin.json` reads as Claude Code reads it: its `skills` add to the usual skill folders, and a marketplace entry's lists append to it.
+- **BREAKING:** Skills are found as Claude Code finds them: each folder in `skills/`, then the folders `plugin.json`, the marketplace entry and the config declare; a config's `skills:` lists folders, and a glob there fails the config; `.claude/skills/`, `.github/skills/`, `.agents/skills/` and deeper folders are no longer searched.
+- **BREAKING:** A library's plugins other than its main one serve their skills under `skill://<library>/<plugin>/` (a plugin `tidy` in library `superpowers` now serves at `skill://superpowers/tidy/…`).
 - Marketplace entries marked `strict: false` now load, unless they conflict with the plugin's own `plugin.json`.
 - The issue and pull request agents run from kubed-io/actions' shared workflows.
-- **BREAKING:** A skill that fails the Agent Skills checks (strict frontmatter, at most 512 files and 16 MiB), or that sits inside another skill, is no longer served at all; the log says why.
-- A skill's `_manifest` gives the size and hash of the bytes a read returns, the same as its `skills/get` entry.
+- **BREAKING:** A skill that fails the Agent Skills checks (strict frontmatter, at most 512 files and 16 MiB), or holds a hidden file or a symlink (as a ConfigMap mounted as a skill's own folder does; mount it with `items` paths), is no longer served at all; the log says why.
+- **BREAKING:** A skill's `_manifest` names the skill by its `name`, not its address, and gives the size and hash of the bytes a read returns, the same as its `skills/get` entry.
+- **BREAKING:** A skill's file that is not UTF-8 text, or has no or an unrecognised extension (such as `scripts/run`), reads as a blob, and `read_resource` no longer returns its text.
+- `list_resources` and `read_resource` are kubed-mcp's, and return the rows and contents `resources/list` and `resources/read` do.
+- `list_resources`, `read_resource` and the Agents extension exist only once a plugin with a skill, an agent or a prompt file is served, and the Skills extension once one with a skill is.
+- An edit to a live skill, agent or prompt is served from the request after the one that notices it, and a live agent or prompt saved mid-edit goes on serving its last good version.
+- A library can no longer be named `mcp-kb`, the server's own name.
 - `skills/get` of a skill that is not served answers `Unknown skill URI: <uri>`.
 - Plugin sources (git, WebDAV, `file://`) load through kubed-mcp plugin loaders.
+- `resources/list` lists each skill's `SKILL.md` and each library's `_files.md`; the `_index.md` files still read, unlisted.
+- Built on kubed-mcp 0.3: VS Code is listed `list_resources` and `read_resource` with no header, and `initialize` and `server/discover` report what they resolved in `_meta["io.kubed/delivery"]`.
 
 ### Fixed
 
@@ -60,6 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A command, prompt or agent whose folder or file name makes an unusable name (a space, a newline, an `@`) is now skipped and reported in `/health`.
 - A marketplace entry on another repository now serves its edited `skills`, `commands`, `agents` or `path` on the next refresh.
 - A marketplace plugin's version is now its `plugin.json`'s when both declare one, as in Claude Code.
+- `/health` lists the skill folders a plugin cannot serve, and counts no skills, prompts or agents for a plugin that is not served.
+- A VS Code client with no header is told to read with `read_resource`, matching the tools it is listed.
+
+### Removed
+
+- **BREAKING:** `Kb-Listing` (`?listing=`, `?skills=`, `X-Skill-Listing`) is no longer read.
+- **BREAKING:** The `list_prompts` and `get_prompt` tools and `Kb-Prompts` (`?prompts=`, `X-MCP-Prompts`) are gone; a tools-only client lists prompt files with `Kb-Listed: prompts` and reads them with `read_resource`.
 
 ## [0.1.0] - 2026-09-18
 

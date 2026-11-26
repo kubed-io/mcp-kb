@@ -15,7 +15,6 @@ Scope only exists inside an HTTP request, so this runs against a real server on
 a loopback port, like ``test_address_space.py``.
 """
 
-import json
 import threading
 
 import pytest
@@ -264,14 +263,10 @@ async def test_a_skills_rendered_citation_with_a_prefix(url):
 
 async def test_a_prompt_citing_its_plugins_skills_renders_their_addresses(url):
     """A prompt body is the plugin's text too, so the same citations render the
-    same addresses -- through ``prompts/get`` and through its tool mirror."""
+    same addresses through ``prompts/get``."""
     async with _client(url) as client:
         got = await client.get_prompt("kit_cite")
-        mirrored = await client.call_tool("get_prompt", {"name": "kit_cite"})
     assert RENDERED in got.messages[0].content.text
-    # The mirror returns the messages as JSON, so the text is one field of it.
-    message = json.loads(mirrored.content[0].text)["messages"][0]
-    assert RENDERED in message["content"]
 
 
 async def test_a_prompts_rendered_citation_with_a_prefix(url):
@@ -317,7 +312,9 @@ def _build_shared_root(base, helper_files=("shared/**/*",)):
     return Config.model_validate(
         {
             "plugins": [
-                {"name": "a", "source": f"file://{kit}", "tags": ["core"]},
+                # The kit is the library's main plugin, so its skills sit at
+                # lib/<name>; the helper serves no skill to place.
+                {"name": "lib", "source": f"file://{kit}", "tags": ["core"]},
                 {
                     "name": "b",
                     "source": f"file://{kit}",
@@ -326,7 +323,7 @@ def _build_shared_root(base, helper_files=("shared/**/*",)):
                     "files": list(helper_files),
                 },
             ],
-            "libraries": [{"name": "lib", "plugins": ["a", "b"]}],
+            "libraries": [{"name": "lib", "plugins": ["lib", "b"]}],
         }
     )
 
@@ -367,9 +364,9 @@ async def test_a_sibling_plugins_skill_is_not_readable_through_a_shared_root(
 ):
     """The ceiling excludes every skill directory of the *library*.
 
-    Two plugins on one root: ``a`` ships the skills, ``b`` only the shared
+    Two plugins on one root: ``lib`` ships the skills, ``b`` only the shared
     files. ``b`` has no skill directories of its own, so a per-plugin exclusion
-    let its root answer for ``a``'s skills -- and a client scoped to ``extra``,
+    let its root answer for ``lib``'s skills -- and a client scoped to ``extra``,
     which may not see skill ``loki`` at its own address, read the skill's
     instructions and references at the library base, unsubstituted.
     """

@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tomllib
 import zipfile
+from importlib import metadata
 
 import pytest
 import yaml
@@ -427,6 +428,12 @@ def test_the_copied_venv_is_proved_to_work_at_build_time():
     """
     runner = dockerfile_stages()["runner"]
     assert any("kubed.mcp_kb.server" in ln for ln in runner)
+    assert any(
+        "import pyroscope" in ln
+        and "opentelemetry.sdk" in ln
+        and "kubed.mcp_kb.server" in ln
+        for ln in runner
+    )
 
 
 def test_the_project_install_resolves_its_dependencies():
@@ -455,19 +462,50 @@ def test_the_runtime_list_is_what_pyproject_declares():
     assert requirements.runtime(data, []) == data["project"]["dependencies"]
 
 
-def test_no_extra_is_a_runtime_extra_here():
-    """[build] and [test] are tooling. If a runtime extra is ever added, the
-    Dockerfile has to opt into it explicitly and this test should be revisited."""
+def test_telemetry_is_the_one_runtime_extra_and_the_image_asks_for_it():
+    """[build] and [test] are tooling; [telemetry] is the image's alone."""
     data = tomllib.loads(PYPROJECT.read_text())
-    assert set(data["project"]["optional-dependencies"]) == {"build", "test"}
-    # Instructions, not the file text: the prose explains why there is no
-    # --extra, and a substring search over the comments finds that explanation.
+    extras = data["project"]["optional-dependencies"]
+    assert set(extras) == {"build", "test", "telemetry"}
+    assert extras["telemetry"] == ["kubed-mcp[telemetry]"]
     generate = next(
-        ln
-        for ln in dockerfile_stages()["builder"]
-        if "requirements.py runtime" in ln
+        ln for ln in dockerfile_stages()["builder"] if "requirements.py runtime" in ln
     )
-    assert "--extra" not in generate
+    assert re.findall(r"--extra\s+(\S+)", generate) == ["telemetry"]
+
+
+def test_the_package_alone_does_not_require_the_profiler():
+    data = tomllib.loads(PYPROJECT.read_text())
+    plain = requirements.runtime(data, [])
+    assert not [d for d in plain if "[telemetry]" in d or "pyroscope" in d]
+    assert requirements.runtime(data, ["telemetry"]) == [*plain, "kubed-mcp[telemetry]"]
+
+
+def test_the_audit_covers_what_the_image_installs():
+    """The Dependency Audit installs the extras the image does, and so audits the
+    profiler and OpenTelemetry the image ships through kubed-mcp's own
+    ``telemetry`` extra: an audit of the plain install passes over all of it."""
+    lint = yaml.safe_load((REPO / ".github" / "workflows" / "lint.yml").read_text())
+    steps = lint["jobs"]["deps"]["steps"]
+    install = next(s for s in steps if s.get("name") == "Install Runtime Dependencies")
+    audited = re.fullmatch(
+        r'pip install --editable "\.\[([\w,]*)\]"', install["run"].strip()
+    )
+    assert audited, install["run"]
+    generate = next(
+        ln for ln in dockerfile_stages()["builder"] if "requirements.py runtime" in ln
+    )
+    image = re.findall(r"--extra\s+(\S+)", generate)
+    assert sorted(audited[1].split(",")) == sorted(image)
+
+    # What the extra brings in is kubed-mcp's to declare: the packages the
+    # image's smoke test imports are among them, so the audit reaches them.
+    telemetry = [
+        re.split(r"[\s;<>=!~\[]", req, maxsplit=1)[0].lower()
+        for req in metadata.requires("kubed-mcp") or []
+        if re.search(r"""extra\s*==\s*["']telemetry["']""", req)
+    ]
+    assert {"pyroscope-io", "opentelemetry-sdk"} <= set(telemetry), telemetry
 
 
 def test_an_extra_that_does_not_exist_says_which_do():

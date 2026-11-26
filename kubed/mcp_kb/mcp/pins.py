@@ -29,13 +29,11 @@ from typing import TYPE_CHECKING
 from kubed.mcp import Middleware
 from kubed.mcp.protocol import INVALID_PARAMS, MCPError
 
-from .prompts import PromptProvider
 from .request import requested_scope
 from .scope import EVERYTHING, Scope
 
 if TYPE_CHECKING:
     from ..catalogue.snapshot import Snapshot
-    from ..catalogue.uris import Catalogue
     from ..config import Config
 
 FOLDER_IN_LIBRARY = (
@@ -53,12 +51,10 @@ def what_is_wrong(
     scope: Scope,
     config: Config,
     snapshot: Snapshot,
-    catalogue: Callable[[Scope], Catalogue] | None = None,
 ) -> str | None:
     """Why ``scope`` names nothing in this catalogue, or None if it names something.
 
-    ``catalogue`` is the catalogue served for a scope, less the skills that are
-    not served; the snapshot's own when none is given.
+    Read off the snapshot, whose catalogue is already narrowed to what is served.
     """
     if not scope:
         return None
@@ -115,9 +111,9 @@ def what_is_wrong(
             f" are: {_listed(tags)}."
         )
 
-    if not scope.library and not _serving(snapshot, EVERYTHING, catalogue):
+    if not scope.library and not _serving(snapshot, EVERYTHING):
         return None
-    if (scope.categories or scope.tags) and not _serving(snapshot, scope, catalogue):
+    if (scope.categories or scope.tags) and not _serving(snapshot, scope):
         where = f"library {scope.library!r}" if scope.library else "any library"
         return (
             f"The scope names things that exist, but nothing in {where} carries"
@@ -152,23 +148,21 @@ def _up(snapshot: Snapshot, library: str) -> bool:
     )
 
 
-def _serving(
-    snapshot: Snapshot,
-    scope: Scope,
-    catalogue: Callable[[Scope], Catalogue] | None = None,
-) -> bool:
-    """Whether ``scope`` would be shown anything at all: a row, a prompt or an agent.
+def _serving(snapshot: Snapshot, scope: Scope) -> bool:
+    """Whether ``scope`` would be shown anything at all.
 
-    An agent counts (SCP-31 row 9): a plugin that ships only agents is a thing
-    a scope can name, and refusing it would leave agents/list unreachable. A
-    skill that is not served is not something to be shown.
+    A served skill, a library file, a prompt or an agent is something to be
+    shown; a skill that is not served is not. An agent counts (SCP-31 row 9): a
+    plugin that ships only agents is a thing a scope can name, and refusing it
+    would leave agents/list unreachable.
     """
-    served = snapshot.catalogue if catalogue is None else catalogue(scope)
-    if served.entries(scope):
-        return True
-    if PromptProvider(lambda: snapshot).visible(scope):
-        return True
-    return bool(served.agent_cards(scope))
+    served = snapshot.catalogue
+    return bool(
+        served.visible_skills(scope)
+        or served.entries(scope)
+        or snapshot.visible_prompts(scope)
+        or snapshot.visible_agents(scope)
+    )
 
 
 class RefuseEmptyScope(Middleware):

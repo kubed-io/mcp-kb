@@ -1,29 +1,25 @@
-"""The on-disk index: what each fetch and each plugin yielded, without re-harvesting.
+"""The on-disk index: each fetch's tree and fingerprint, so a boot fetches nothing.
 
-Cold start reads this file and reconstructs every ``Skill`` and ``FilePrompt``
-straight from it, with no filesystem walk and no frontmatter parse -- that is
-the whole point of writing one. A row is therefore self-contained: absolute
-paths as strings, and no reference back to a live object.
+A ``FetchRecord`` is one materialised tree -- a clone, a copy, a directory --
+and the fingerprint it had, which is the expensive thing: building one is a
+network round trip. Nothing harvested out of a tree is written. A boot and a
+refresh harvest every plugin again from the trees on disk, which is a local
+walk and the one way a harvest cannot outlive the lists that chose it (SRC-48).
 
-Two kinds of record, because two things are expensive: a ``FetchRecord`` is
-one materialised tree (a clone, a copy, a directory) and its fingerprint, and
-a ``PluginRecord`` is one plugin's harvest out of such a tree. A skill row
-carries no library: which libraries a plugin serves in is assembled from the
-config at snapshot time, and a plugin in two libraries is one harvest served
-twice.
-
-``Index`` is a frozen dataclass whose two mapping fields are plain ``dict``s.
+``Index`` is a frozen dataclass whose one mapping field is a plain ``dict``.
 Python does not stop a caller from mutating a dict reached through a frozen
 instance; nothing here needs it to. The type is immutable by convention,
 matching every other snapshot in this codebase, and callers that build a new
-``Index`` build new mappings rather than mutating one in place.
+``Index`` build a new mapping rather than mutating one in place.
 
 ``config_hash`` and the ``version`` field are cold start's two questions before
 it trusts anything in the file: "was this built from the config I have now",
 and "do I still know how to read this shape". Either mismatch means rebuild
 from scratch, so ``Index.read`` folds every way of failing those questions --
 missing file, unparsable JSON, a wrong or absent version, a shape that does
-not match the dataclasses below -- into a single ``None``.
+not match ``FetchRecord`` -- into a single ``None``. A file of the previous
+version is read for its ``fetches`` alone: the plugin rows it also holds are
+never looked at, so no shape of them can fail a boot.
 """
 
 from __future__ import annotations
@@ -38,105 +34,12 @@ from pathlib import Path
 from typing import Literal
 
 from ..config import Config
-from ..plugins import Globs
-from ..plugins.manifest import CommandEntry
-from .prompts import PromptSource
-from .skills import Skill
 
-INDEX_VERSION = 7
-
-
-@dataclass(frozen=True)
-class SkillRow:
-    """A harvested skill, flattened to JSON-safe fields.
-
-    No library, plugin, category or tags: those are the library's and the
-    plugin's, put back on by ``to_skill`` when a snapshot assigns the plugin
-    to a library.
-    """
-
-    name: str
-    folder: str
-    description: str
-    path: str
-
-    @classmethod
-    def from_skill(cls, skill: Skill) -> SkillRow:
-        return cls(
-            name=skill.name,
-            folder=skill.folder,
-            description=skill.description,
-            path=str(skill.path),
-        )
-
-    def to_skill(
-        self,
-        *,
-        library: str,
-        plugin: str,
-        root: Path,
-        category: str | None,
-        tags: frozenset[str],
-        library_categories: frozenset[str] = frozenset(),
-        live: bool = False,
-    ) -> Skill:
-        return Skill(
-            name=self.name,
-            library=library,
-            folder=self.folder,
-            description=self.description,
-            path=Path(self.path),
-            plugin=plugin,
-            root=root,
-            category=category,
-            tags=tags,
-            library_categories=library_categories,
-            live=live,
-        )
-
-
-@dataclass(frozen=True)
-class PromptRow:
-    """A harvested prompt: where it is, its dialect, and what it is called.
-
-    The dialect is recorded because deciding it may have been the config's
-    doing (``dialect:`` on the plugin), the harvest's (a ``commands/`` tree)
-    or the file's own; the snapshot re-parses the file in the dialect the
-    row records, so every rebuild and restart reads it the same way. The
-    name is recorded for the same reason: it was decided by where the file
-    was found (PLG-25), which the path alone no longer says.
-
-    ``content``, ``description`` and ``argument_hint`` are an object-map
-    command's (PLG-21). An inline body has no file to re-parse, so it rides in
-    the row, and ``path`` is the manifest it came from.
-    """
-
-    path: str
-    dialect: str
-    name: str
-    content: str | None = None
-    description: str | None = None
-    argument_hint: str | None = None
-
-    @classmethod
-    def from_source(cls, source: PromptSource, dialect: str) -> PromptRow:
-        return cls(
-            path=str(source.path),
-            dialect=dialect,
-            name=source.name,
-            content=source.content,
-            description=source.description,
-            argument_hint=source.argument_hint,
-        )
-
-    def to_source(self) -> PromptSource:
-        return PromptSource(
-            path=Path(self.path),
-            name=self.name,
-            content=self.content,
-            description=self.description,
-            argument_hint=self.argument_hint,
-        )
+INDEX_VERSION = 12
+# The version before this one, whose fetches are the same records: read for
+# them alone, and written over as INDEX_VERSION. It goes once every deployment
+# has written 12 (#84's follow-up).
+PREVIOUS_VERSION = 11
 
 
 @dataclass(frozen=True)
@@ -161,50 +64,6 @@ class FetchRecord:
     error: str | None
 
 
-@dataclass(frozen=True)
-class AgentRow:
-    """One agent file: where it is (relative to its plugin root) and its name."""
-
-    path: str
-    name: str
-
-
-@dataclass(frozen=True)
-class PluginRecord:
-    """One plugin's harvest out of its fetch's tree: every row built from it.
-
-    ``root`` is the plugin root -- the fetch root joined with the plugin's
-    subdirectory -- and ``fetch`` the key of the record it was harvested from,
-    which is what decides whether this record can be reused when that one is.
-    ``globs`` are what chose the files out of that tree, and with ``root``
-    decide it too: a marketplace entry's lists and subdirectory are the
-    marketplace's, which may be another fetch, so the tree can stand still
-    while what it serves changes (SRC-48).
-    ``None`` is a record with no harvest behind it, which nothing reuses.
-    A plugin fails on its own when its root is not a directory, its manifest
-    does not parse, or its fetch failed; the error says which.
-    """
-
-    id: str
-    fetch: str
-    root: str | None
-    status: Literal["ok", "failed"]
-    error: str | None
-    built: str
-    skills: tuple[SkillRow, ...]
-    prompts: tuple[PromptRow, ...]
-    files: tuple[str, ...]
-    skill_dirs: tuple[str, ...]
-    # What the harvest found and could not load -- a prompt file that does not
-    # parse -- as ``{"path", "reason"}`` rows. Kept on the record because the
-    # harvest is the only pass that sees such a file: its rows never name it.
-    skipped: tuple[dict[str, str], ...] = ()
-    # Agents and the paths a fallback must refuse, relative to the plugin root.
-    agents: tuple[AgentRow, ...] = ()
-    agent_paths: tuple[str, ...] = ()
-    globs: Globs | None = None
-
-
 def _fetch_record_from_dict(raw: dict) -> FetchRecord:
     return FetchRecord(
         key=raw["key"],
@@ -216,67 +75,6 @@ def _fetch_record_from_dict(raw: dict) -> FetchRecord:
     )
 
 
-def _plugin_record_from_dict(raw: dict) -> PluginRecord:
-    return PluginRecord(
-        id=raw["id"],
-        fetch=raw["fetch"],
-        root=raw["root"],
-        status=raw["status"],
-        error=raw["error"],
-        built=raw["built"],
-        skills=tuple(SkillRow(**s) for s in raw["skills"]),
-        prompts=tuple(PromptRow(**p) for p in raw["prompts"]),
-        files=tuple(raw["files"]),
-        skill_dirs=tuple(raw["skill_dirs"]),
-        skipped=tuple(_skipped_row(row) for row in raw["skipped"]),
-        agents=tuple(AgentRow(**a) for a in raw["agents"]),
-        agent_paths=tuple(raw["agent_paths"]),
-        globs=_globs_from_dict(raw["globs"]),
-    )
-
-
-def _globs_from_dict(raw: dict | None) -> Globs | None:
-    """A ``Globs`` back from JSON, tuples and all, so it compares equal.
-
-    A kind's null stays ``None`` and its empty list becomes ``()``: the two are
-    the conventions and none of that kind, and blurring them would re-harvest
-    every plugin on every cold start, or worse, reuse the wrong harvest.
-    """
-    if raw is None:
-        return None
-
-    def kind(key: str) -> tuple[str, ...] | None:
-        value = raw[key]
-        return None if value is None else tuple(value)
-
-    return Globs(
-        skills=kind("skills"),
-        prompts=kind("prompts"),
-        files=kind("files"),
-        commands=tuple(raw["commands"]),
-        agents=kind("agents"),
-        command_dirs=tuple(raw["command_dirs"]),
-        command_files=tuple(raw["command_files"]),
-        command_map=tuple(CommandEntry(**entry) for entry in raw["command_map"]),
-    )
-
-
-def _skipped_row(row: object) -> dict[str, str]:
-    """One ``{"path", "reason"}`` row, exactly -- anything else is a bad index.
-
-    Every other field is shaped by constructing a dataclass, which refuses a
-    wrong one; this one is a plain dict, so it is checked by hand, and a row
-    the log and ``/health`` would index into must not reach them half-formed.
-    """
-    if (
-        not isinstance(row, dict)
-        or set(row) != {"path", "reason"}
-        or not all(isinstance(v, str) for v in row.values())
-    ):
-        raise ValueError(f"not a skipped row: {row!r}")
-    return {"path": row["path"], "reason": row["reason"]}
-
-
 @dataclass(frozen=True)
 class Index:
     """The whole on-disk record: one JSON file, one atomic write."""
@@ -285,7 +83,6 @@ class Index:
     built: str
     config_hash: str
     fetches: dict[str, FetchRecord]
-    plugins: dict[str, PluginRecord]
 
     def write(self, path: Path) -> None:
         """Write to a unique temp file beside ``path``, then ``os.replace`` it.
@@ -308,20 +105,23 @@ class Index:
     def read(cls, path: Path) -> Index | None:
         """The index at ``path``, or ``None`` when it cannot be trusted.
 
-        Missing, unparsable, the wrong version, or a shape that does not match
-        the dataclasses above all collapse to the same ``None`` -- every case
-        means "rebuild from scratch", so the cause does not need to travel any
-        further than a log line at the call site.
+        Missing, unparsable, a version other than this one or the previous,
+        or a shape that does not match ``FetchRecord`` all collapse to the same
+        ``None`` -- every case means "rebuild from scratch", so the cause does
+        not need to travel any further than a log line at the call site.
+        ``version`` is the file's own; a previous version's ``plugins`` is
+        never read.
         """
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
-        if not isinstance(raw, dict) or raw.get("version") != INDEX_VERSION:
-            return None
-        if not isinstance(raw.get("fetches"), dict) or not isinstance(
-            raw.get("plugins"), dict
+        if not isinstance(raw, dict) or raw.get("version") not in (
+            PREVIOUS_VERSION,
+            INDEX_VERSION,
         ):
+            return None
+        if not isinstance(raw.get("fetches"), dict):
             return None
         try:
             return cls(
@@ -332,18 +132,20 @@ class Index:
                     key: _fetch_record_from_dict(rec)
                     for key, rec in raw["fetches"].items()
                 },
-                plugins={
-                    pid: _plugin_record_from_dict(rec)
-                    for pid, rec in raw["plugins"].items()
-                },
             )
         except (KeyError, TypeError, AttributeError, ValueError):
             return None
 
 
 def config_hash(config: Config) -> str:
-    """A stable fingerprint of the config, independent of key order."""
-    payload = json.dumps(config.model_dump(mode="json"), sort_keys=True)
+    """A stable fingerprint of the config, independent of key order.
+
+    The telemetry section is left out (SRC-36): it says what the process reports,
+    not what it serves, so changing it must not discard a warm index.
+    """
+    payload = json.dumps(
+        config.model_dump(mode="json", exclude={"telemetry"}), sort_keys=True
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

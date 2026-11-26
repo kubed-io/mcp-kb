@@ -60,7 +60,6 @@ def _config(webdav, *, auth=None, folder=None, **plugin):
                 {
                     "name": "notes",
                     "source": f"notes://{folder or webdav.folder}",
-                    "skills": ["skills/*/SKILL.md"],
                     "files": ["**/*"],
                     **plugin,
                 }
@@ -512,7 +511,6 @@ def test_a_webdav_fetch_that_cannot_be_reached_fails_only_itself(webdav, tmp_pat
                 {
                     "name": "local",
                     "source": f"file://{_local(tmp_path)}",
-                    "skills": ["skills/*/SKILL.md"],
                 },
             ],
             "libraries": [
@@ -563,7 +561,6 @@ def _served_config(webdav, tmp_path):
                 {
                     "name": "local",
                     "source": f"file://{_local(tmp_path)}",
-                    "skills": ["skills/*/SKILL.md"],
                 },
             ],
             "libraries": [

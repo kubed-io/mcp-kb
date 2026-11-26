@@ -50,7 +50,7 @@ def register(mcp: QuickMCP, knowledge_base: KnowledgeBase) -> None:
             "built": snapshot.built,
             "skills": len(snapshot.index),
             "prompts": len(snapshot.prompts),
-            "agents": len(snapshot.catalogue.agents),
+            "agents": len(snapshot.agents),
             "libraries": snapshot.status.get("libraries", {}),
             "plugins": snapshot.status.get("plugins", {}),
             # The counters are read at report time, not at build time: a

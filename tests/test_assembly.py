@@ -17,8 +17,15 @@ import pytest
 from fastmcp import Client
 
 from kubed.mcp_kb import KnowledgeBase
-from kubed.mcp_kb.catalogue.index import PluginRecord, now
-from kubed.mcp_kb.catalogue.snapshot import Library, assemble_libraries, build_snapshot
+from kubed.mcp_kb.catalogue.index import now
+from kubed.mcp_kb.catalogue.skills import Skill
+from kubed.mcp_kb.catalogue.snapshot import (
+    Harvest,
+    Library,
+    assemble_libraries,
+    build_snapshot,
+)
+from kubed.mcp_kb.catalogue.uris import uri_for
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.pins import what_is_wrong
 from kubed.mcp_kb.mcp.scope import Scope
@@ -100,9 +107,8 @@ async def _health(knowledge_base):
 
 
 async def _skills(knowledge_base):
-    """Every served skill's URI: the full listing, which is the index's addresses."""
-    listing = knowledge_base.catalogue.entries(full=True)
-    return sorted(e.uri for e in listing if e.uri.endswith("/SKILL.md"))
+    """Every served skill's ``SKILL.md`` URI, from the catalogue."""
+    return sorted(uri_for(s) for s in knowledge_base.catalogue.visible_skills())
 
 
 async def _read(knowledge_base, uri):
@@ -129,8 +135,10 @@ async def test_a_marketplace_library_lists_its_entries_as_plugins(market, tmp_pa
     assert lgtm["root"] == "lgtm"
     assert lgtm["libraries"] == ["obs"]
     assert health["plugins"]["k6@obs"]["keywords"] == ["load"]
-    assert "loki." in await _read(kb, "skill://obs/loki/SKILL.md")
-    assert "load." in await _read(kb, "skill://obs/load/SKILL.md")
+    # Three entries published, none named `obs`: no main plugin, so each
+    # entry's skills sit in a folder of its name.
+    assert "loki." in await _read(kb, "skill://obs/lgtm/loki/SKILL.md")
+    assert "load." in await _read(kb, "skill://obs/k6/load/SKILL.md")
     async with Client(server_of(kb)) as client:
         rendered = await client.get_prompt("obs_run", {"arguments": "fast"})
     assert rendered.messages[0].content.text == "Run fast.\n"
@@ -154,12 +162,12 @@ async def test_a_selector_regroups_a_marketplace_plugin_under_its_own_name(
     assert health["libraries"]["logs"]["plugins"] == ["lgtm@obs"]
     assert health["plugins"]["lgtm@obs"]["libraries"] == ["obs", "logs"]
     assert await _skills(kb) == [
-        "skill://logs/loki/SKILL.md",
-        "skill://obs/load/SKILL.md",
-        "skill://obs/loki/SKILL.md",
+        "skill://logs/lgtm/loki/SKILL.md",
+        "skill://obs/k6/load/SKILL.md",
+        "skill://obs/lgtm/loki/SKILL.md",
     ]
-    assert "loki." in await _read(kb, "skill://logs/loki/SKILL.md")
-    assert "loki." in await _read(kb, "skill://obs/loki/SKILL.md")
+    assert "loki." in await _read(kb, "skill://logs/lgtm/loki/SKILL.md")
+    assert "loki." in await _read(kb, "skill://obs/lgtm/loki/SKILL.md")
 
 
 async def test_a_named_marketplace_plugin_adds_beside_a_library(market, tmp_path):
@@ -178,7 +186,7 @@ async def test_a_named_marketplace_plugin_adds_beside_a_library(market, tmp_path
     perf = health["libraries"]["perf"]
     assert perf["plugins"] == ["k6@obs"]
     assert perf["error"] == "no plugin named 'nope@obs'; obs publishes: k6, lgtm"
-    assert "load." in await _read(kb, "skill://perf/load/SKILL.md")
+    assert "load." in await _read(kb, "skill://perf/k6/load/SKILL.md")
 
 
 async def test_two_plugins_on_one_repository_at_one_ref_make_one_clone(
@@ -202,7 +210,7 @@ async def test_two_plugins_on_one_repository_at_one_ref_make_one_clone(
         kb.fetches[0].slug
     ]
     assert health["plugins"]["mine"]["fetch"] == "lab://market"
-    assert "load." in await _read(kb, "skill://own/load/SKILL.md")
+    assert "load." in await _read(kb, "skill://own/mine/load/SKILL.md")
 
 
 async def test_a_library_whose_marketplace_is_missing_says_so(market, tmp_path):
@@ -321,15 +329,12 @@ async def test_an_unreadable_manifest_is_reported_without_the_cache_path(
 
 
 def test_a_plugin_status_never_carries_a_null_error(tmp_path):
-    """`PluginStatus.error` is a string: an ok record with no root -- a shape
-    nothing builds, but the index could hold -- says so in words."""
+    """`PluginStatus.error` is a string: an ok harvest with no root -- a shape
+    nothing builds -- says so in words."""
     plugin = fake_plugin("p", tmp_path)
-    record = PluginRecord(
-        id="p", fetch=plugin.fetch.key, root=None, status="ok", error=None,
-        built=now(), skills=(), prompts=(), files=(), skill_dirs=(),
-    )
+    harvest = Harvest(id="p", root=None, status="ok", error=None, built=now())
     snapshot = build_snapshot(
-        Config(), [plugin], [Library("lib", "", ("p",))], {}, {"p": record}, 0
+        Config(), [plugin], [Library("lib", "", ("p",))], {}, {"p": harvest}, 0
     )
 
     assert snapshot.status["plugins"]["p"]["error"] == "not harvested"
@@ -342,7 +347,7 @@ async def test_a_refresh_of_a_marketplace_fetch_serves_an_entry_it_gained(
     the fetch it may bring -- is served after one refresh, with no restart."""
     config = _config(tmp_path, libraries=[{"name": "obs", "source": "lab://market"}])
     kb = KnowledgeBase(config, tmp_path / "cache")
-    assert "skill://obs/tempo/SKILL.md" not in await _skills(kb)
+    assert "skill://obs/tempo/tempo/SKILL.md" not in await _skills(kb)
 
     _skill(market, "tempo/skills/tempo", "tempo")
     _catalog(
@@ -356,7 +361,7 @@ async def test_a_refresh_of_a_marketplace_fetch_serves_an_entry_it_gained(
     assert kb.refresh() == ["lab://market"]
     health = await _health(kb)
     assert health["libraries"]["obs"]["plugins"] == ["lgtm@obs", "k6@obs", "tempo@obs"]
-    assert "tempo." in await _read(kb, "skill://obs/tempo/SKILL.md")
+    assert "tempo." in await _read(kb, "skill://obs/tempo/tempo/SKILL.md")
     assert kb.generation == 1
 
 
@@ -390,13 +395,13 @@ async def test_a_refresh_reports_the_fetch_a_gained_entry_brought(market, tmp_pa
     _catalog(market, lgtm, _elsewhere("other", tmp_path))
     _commit(market, "add other")
     assert kb.refresh() == ["lab://market", "lab://other"]
-    assert "other." in await _read(kb, "skill://obs/other/SKILL.md")
+    assert "other." in await _read(kb, "skill://obs/other/other/SKILL.md")
 
     _catalog(market, lgtm, _elsewhere("other", tmp_path), _elsewhere("third", tmp_path))
     _commit(market, "add third")
     body = await _reindex(kb)
     assert body["rebuilt"] == ["lab://market", "lab://other", "lab://third"]
-    assert "third." in await _read(kb, "skill://obs/third/SKILL.md")
+    assert "third." in await _read(kb, "skill://obs/third/third/SKILL.md")
 
 
 @pytest.fixture
@@ -470,7 +475,8 @@ async def test_a_manifests_keywords_join_the_plugins_labels(manifested, tmp_path
     finally:
         server.should_exit = True
         thread.join(timeout=5)
-    assert names == ["obs/_index.md", "tests/_index.md"]
+    # `sp` is obs's lone entry and so its main plugin; in `tests` it is not.
+    assert names == ["obs/tdd/SKILL.md", "tests/sp/tdd/SKILL.md"]
     assert both == names
 
 
@@ -538,9 +544,8 @@ async def test_an_entrys_version_stands_beside_a_manifest_without_one(tmp_path):
 async def test_a_cold_start_reuses_the_index_and_re_reads_the_marketplace(
     market, tmp_path, monkeypatch
 ):
-    """Nothing is cloned or harvested on a restart; the marketplace's entries
-    are re-derived from the tree already on disk."""
-    from kubed.mcp_kb import server
+    """Nothing is cloned on a restart; the marketplace's entries are re-derived,
+    and harvested, from the tree already on disk."""
     from kubed.mcp_kb.sources import SourceLoader
 
     config = _config(tmp_path, libraries=[{"name": "obs", "source": "lab://market"}])
@@ -549,10 +554,8 @@ async def test_a_cold_start_reuses_the_index_and_re_reads_the_marketplace(
     def must_not_run(*args, **kwargs):
         raise AssertionError("a cold start must reuse the index")
 
-    # server.py imports build_plugin by name, so it is patched where it is
-    # called from; every fetch is materialised through its source's loader.
+    # Every fetch is materialised through its source's loader.
     monkeypatch.setattr(SourceLoader, "materialise", must_not_run)
-    monkeypatch.setattr(server, "build_plugin", must_not_run)
     second = KnowledgeBase(config, tmp_path / "cache")
 
     assert second.status["libraries"]["obs"]["plugins"] == ["lgtm@obs", "k6@obs"]
@@ -624,7 +627,7 @@ async def test_a_subdir_symlinked_out_of_the_tree_fails_that_plugin(linked, tmp_
     assert health["plugins"]["escaped"]["error"] == (
         f"link is not a directory in file://{linked}"
     )
-    assert await _skills(kb) == ["skill://kit/ok/SKILL.md"]
+    assert await _skills(kb) == ["skill://kit/good/ok/SKILL.md"]
     assert "leak" not in json.dumps(await _health(kb))
 
 
@@ -681,7 +684,7 @@ async def test_a_plugin_json_symlinked_out_of_the_root_is_not_read(linked, tmp_p
 
     assert health["plugins"]["m"]["status"] == "ok"
     assert health["plugins"]["m"]["keywords"] == []
-    assert await _skills(kb) == ["skill://kit/m/SKILL.md"]
+    assert await _skills(kb) == ["skill://kit/m/m/SKILL.md"]
 
 
 async def test_an_in_root_symlinked_subdir_and_manifest_still_serve(linked, tmp_path):
@@ -702,8 +705,8 @@ async def test_an_in_root_symlinked_subdir_and_manifest_still_serve(linked, tmp_
     assert health["plugins"]["inner"]["status"] == "ok"
     assert health["plugins"]["mounted"]["keywords"] == ["m"]
     assert await _skills(kb) == [
-        "skill://kit/mine/SKILL.md",
-        "skill://kit/ok/SKILL.md",
+        "skill://kit/inner/ok/SKILL.md",
+        "skill://kit/mounted/mine/SKILL.md",
     ]
 
 
@@ -784,6 +787,7 @@ async def test_editing_a_local_marketplace_is_picked_up_by_a_refresh(tmp_path):
     )
     kb = KnowledgeBase(config, tmp_path / "cache")
     key = f"file://{root}"
+    # One entry: obs's main plugin, at the library's own level.
     assert await _skills(kb) == ["skill://obs/loki/SKILL.md"]
     before = kb.status["fetches"][key]["fingerprint"]
 
@@ -791,9 +795,10 @@ async def test_editing_a_local_marketplace_is_picked_up_by_a_refresh(tmp_path):
 
     assert kb.refresh() == [key]
     assert kb.status["fetches"][key]["fingerprint"] != before
+    # Two entries: no main plugin, so each sits in a folder of its name.
     assert await _skills(kb) == [
-        "skill://obs/load/SKILL.md",
-        "skill://obs/loki/SKILL.md",
+        "skill://obs/k6/load/SKILL.md",
+        "skill://obs/lgtm/loki/SKILL.md",
     ]
 
 
@@ -801,7 +806,8 @@ async def test_nothing_under_claude_plugin_is_harvested_or_served(tmp_path):
     """The fingerprint walk sees that directory; the harvest must not. A
     `marketplace.json` and a `plugin.json` say *what* to serve and are not
     themselves a skill, a prompt or a library file -- not even under the
-    widest globs a config can write."""
+    widest globs a config can write, or the plugin root declared as a skill
+    folder, whose dot children are never skills."""
     root = tmp_path / "tree"
     _skill(root, "skills/real", "real")
     _write(root, "prompts/ok.md", "---\ndescription: Fine.\n---\nFine.\n")
@@ -815,7 +821,7 @@ async def test_nothing_under_claude_plugin_is_harvested_or_served(tmp_path):
                 {
                     "name": "p",
                     "source": f"file://{root}",
-                    "skills": ["**/SKILL.md"],
+                    "skills": ["."],
                     "prompts": ["prompts/**/*.md"],
                     "files": ["**/*"],
                 }
@@ -826,6 +832,7 @@ async def test_nothing_under_claude_plugin_is_harvested_or_served(tmp_path):
     kb = KnowledgeBase(config, tmp_path / "cache")
 
     assert [s.name for s in kb.index.visible()] == ["real"]
+    server_of(kb)
     assert [p.name for p in kb.snapshot.prompts] == ["lib_ok"]
     assert kb.resources.files("lib") == ["prompts/ok.md"]
     assert ".claude-plugin" not in json.dumps(await _health(kb))
@@ -901,14 +908,16 @@ def test_notes_and_list_skills_carry_through(tmp_path):
 def test_a_snapshot_strips_library_text_before_the_index_uses_it(tmp_path):
     """A YAML `notes: |` block ends in a newline; it must not double the blank
     line, and a whitespace-only value adds no line at all."""
-    from kubed.mcp_kb.catalogue.index import SkillRow
-
     plugin = fake_plugin("p", tmp_path)
-    rows = tuple(SkillRow(n, "", f"{n}.", str(tmp_path / n)) for n in ("a", "b"))
-    record = PluginRecord(
-        id="p", fetch=plugin.fetch.key, root=str(tmp_path), status="ok",
-        error=None, built=now(), skills=rows, prompts=(), files=(),
-        skill_dirs=(),
+    skills = tuple(
+        Skill(
+            name=n, library="", folder="", description=f"{n}.", path=tmp_path / n,
+            plugin="p", root=tmp_path,
+        )
+        for n in ("a", "b")
+    )
+    harvest = Harvest(
+        id="p", root=tmp_path, status="ok", error=None, built=now(), skills=skills
     )
 
     def index(description, notes):
@@ -917,7 +926,7 @@ def test_a_snapshot_strips_library_text_before_the_index_uses_it(tmp_path):
             [plugin],
             [Library("lib", description, ("p",), notes=notes)],
             {},
-            {"p": record},
+            {"p": harvest},
             0,
         )
         return snapshot.catalogue.read("skill://lib/_index.md")

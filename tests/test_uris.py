@@ -9,10 +9,16 @@ from pathlib import Path
 
 import pytest
 
-from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex, load_skills
-from kubed.mcp_kb.catalogue.uris import Catalogue, LibraryText, parse, uri_for
+from kubed.mcp_kb.catalogue.skills import LibraryFiles, SkillIndex
+from kubed.mcp_kb.catalogue.uris import (
+    Catalogue,
+    LibraryText,
+    parse,
+    resolved,
+    uri_for,
+)
 from kubed.mcp_kb.mcp.scope import Scope
-from tests.conftest import build_library_files, fake_plugin, load_all_skills, served
+from tests.conftest import build_library_files, load_all_skills, served
 
 
 def _tags(*groups):
@@ -60,24 +66,11 @@ def test_parse_does_not_decode_percent_escapes(catalogue):
 
 
 @pytest.mark.unit
-def test_entries_are_indexes_not_skills(catalogue):
-    """The listing is the cheap layer: libraries and folders, never every skill."""
+def test_entries_are_files_md_rows_not_indexes_or_skills(catalogue):
+    """kb lists its own ``_files.md`` alone: the skills' rows are the plugin
+    layer's, and the indexes read without being listed."""
     uris = [e.uri for e in catalogue.entries()]
-    assert uris == [
-        "skill://deepsource/_index.md",
-        "skill://deepsource/plugin-a/_index.md",
-        "skill://deepsource/plugin-b/_index.md",
-        "skill://deepsource/_files.md",
-        "skill://flatsource/_index.md",
-    ]
-
-
-@pytest.mark.unit
-def test_full_listing_adds_every_skill(catalogue):
-    """Skill-syncing clients find skills only by scanning for /SKILL.md."""
-    uris = [e.uri for e in catalogue.entries(full=True)]
-    assert "skill://flatsource/alpha/SKILL.md" in uris
-    assert sum(1 for u in uris if u.endswith("/SKILL.md")) == 4
+    assert uris == ["skill://deepsource/_files.md"]
 
 
 @pytest.mark.unit
@@ -97,22 +90,18 @@ def test_a_library_with_shared_material_advertises_it(catalogue):
 
 @pytest.mark.unit
 def test_entries_honour_the_pin(catalogue):
-    uris = [e.uri for e in catalogue.entries(Scope("flatsource"))]
-    assert uris == ["skill://flatsource/_index.md"]
+    assert [e.uri for e in catalogue.entries(Scope("deepsource"))] == [
+        "skill://deepsource/_files.md"
+    ]
+    assert catalogue.entries(Scope("flatsource")) == []
 
 
 @pytest.mark.unit
-def test_a_tag_scope_lists_the_libraries_of_the_plugins_carrying_it(catalogue):
-    """The listing is always the library level and its top folders, whatever
-    the scope: a tag narrows which plugins count, never which rows a library
-    gets."""
+def test_a_tag_scope_lists_the_files_of_the_libraries_carrying_it(catalogue):
+    """A tag narrows which plugins count, so a library's ``_files.md`` is listed
+    when a plugin carrying the tag has a library file in scope."""
     uris = [e.uri for e in catalogue.entries(_tags({"deep"}))]
-    assert uris == [
-        "skill://deepsource/_index.md",
-        "skill://deepsource/plugin-a/_index.md",
-        "skill://deepsource/plugin-b/_index.md",
-        "skill://deepsource/_files.md",
-    ]
+    assert uris == ["skill://deepsource/_files.md"]
     assert catalogue.entries(_tags({"nope"})) == []
 
 
@@ -346,28 +335,9 @@ def test_mime_types_follow_the_content(catalogue):
 
 
 @pytest.mark.unit
-def test_an_index_row_is_tagged_with_its_library(tmp_path):
-    """A library index row is tagged with its own library and "index", sorted."""
-    skill_dir = tmp_path / "loki"
-    skill_dir.mkdir()
-    (skill_dir / "SKILL.md").write_text("---\nname: loki\ndescription: d\n---\n")
-    skills = load_skills(
-        [skill_dir], library="grafana", plugin=fake_plugin("g", tmp_path), root=tmp_path
-    )
-    resources = LibraryFiles()
-    cat = Catalogue(SkillIndex(skills), resources)
-    assert cat.entries()[0].tags == ("grafana", "index")
-
-
-@pytest.mark.unit
-def test_a_full_row_carries_the_skills_labels_and_its_library(catalogue, skills_dir):
-    """The full listing is a per-skill row: its plugin's labels, plus the
-    library so FastMCP's own tag filters can tell the libraries apart."""
-    skill = next(s for s in load_all_skills(skills_dir) if s.name == "gamma")
-    row = next(
-        e for e in catalogue.entries(full=True) if e.uri == uri_for(skill)
-    )
-    assert row.tags == ("deep", "deepsource")
+def test_a_files_row_is_tagged_with_its_library(catalogue):
+    """A ``_files.md`` row is tagged with its own library and "index", sorted."""
+    assert catalogue.entries()[0].tags == ("deepsource", "index")
 
 
 # -- library text -------------------------------------------------------------
@@ -511,3 +481,11 @@ def test_library_index_opens_with_its_text():
     assert texted.read("skill://lib/f/_index.md") == plain.read("skill://lib/f/_index.md")
     bare = Catalogue(SkillIndex(skills), LibraryFiles(), libraries=[LibraryText("lib")])
     assert bare.read("skill://lib/_index.md") == before
+
+
+def test_resolved_names_the_address_parse_reads():
+    assert resolved("skill://grafana/a/../b/SKILL.md") == "skill://grafana/b/SKILL.md"
+    assert resolved("skill://grafana/") == "skill://grafana"
+    assert resolved("skill://grafana/../../x") == "skill://grafana/x"
+    assert resolved("kb+skill://grafana/x") is None
+    assert resolved("skill://") is None

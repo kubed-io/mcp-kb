@@ -137,6 +137,15 @@ jobs:
         /tmp/verify/bin/python -c "import kubed.mcp_kb as m; print('imported', m.__file__)"
         /tmp/verify/bin/mcp-kb --help
 
+    # The profiler is the image's alone (the Dockerfile's --extra telemetry), so a
+    # plain install of the wheel must not carry it.
+    - name: Verify the Wheel Carries No Profiler
+      run: |
+        if /tmp/verify/bin/python -c "import pyroscope" 2>/dev/null; then
+          echo "::error::pyroscope imports from a plain wheel install"
+          exit 1
+        fi
+
     - name: Upload Package
       uses: actions/upload-artifact@v7
       with:

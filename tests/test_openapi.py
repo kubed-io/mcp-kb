@@ -43,8 +43,8 @@ def every_status(skills_dir, cache, monkeypatch):
     so its plugin entry carries `skipped`. `gone` names a directory that is
     not there, so it never had a tree and is `failed`, which carries `status`
     and `error` and nothing else, and its plugin fails with it. `clash` serves
-    `flatsource`'s tree again in the same library, so that library carries a
-    `conflicts` entry; `ghost` names a marketplace plugin that does not exist,
+    `flatsource`'s tree again in the same library, as files at the addresses of
+    `flatsource`'s skills, so that library carries a `conflicts` entry; `ghost` names a marketplace plugin that does not exist,
     so its library carries an `error`. A document checked against nothing but
     a healthy body says nothing about the shapes an operator actually goes to
     `/health` for.
@@ -56,7 +56,8 @@ def every_status(skills_dir, cache, monkeypatch):
         {
             "name": "clash",
             "source": f"file://{skills_dir / 'flatsource'}",
-            "skills": ["**/SKILL.md"],
+            "skills": [],
+            "files": ["**/*"],
             "version": "1",
         }
     )
@@ -65,7 +66,7 @@ def every_status(skills_dir, cache, monkeypatch):
     flatsource["plugins"].append("clash")
     raw["libraries"].append({"name": "ghost", "plugins": ["nope@ghost"]})
     # A file named like an index: `deepsource` serves on, and lists it skipped.
-    (skills_dir / "deepsource" / "_index.md").write_text("not an index\n")
+    (skills_dir / "deepsource" / "shared" / "_index.md").write_text("not an index\n")
     knowledge_base = KnowledgeBase(Config.model_validate(raw), cache)
 
     real = SourceLoader.materialise
@@ -213,6 +214,8 @@ async def test_a_real_health_response_matches_the_documented_fields(every_status
     assert {info["status"] for info in body["plugins"].values()} == {"ok", "failed"}
     assert body["plugins"]["deepsource"]["skipped"]
     assert body["plugins"]["clash"]["version"] == "1"
+    # I4: `clash` is declared `skills: []`, so the plugin layer never adds it.
+    assert body["plugins"]["clash"]["prompts"] == 0
     assert body["libraries"]["flatsource"]["conflicts"]
     assert body["libraries"]["ghost"]["error"]
     validate("Health", body)
@@ -252,6 +255,31 @@ async def test_a_health_response_with_plugin_notes_validates(tmp_path):
     validate("Health", body)
     documented = build_spec()["components"]["schemas"]["PluginStatus"]["properties"]
     assert set(body["plugins"]["kit"]) <= set(documented)
+
+
+async def test_a_health_response_with_layer_rows_validates(tmp_path):
+    """I3: a skill folder the plugin layer does not load is a `skipped` row,
+    which the healthy body above never carries: a skill of 513 files is the
+    smallest tree that has one."""
+    from tests.test_skipped import BIG_REASON, _big
+
+    root = tmp_path / "kit"
+    _big(root)
+    config = Config.model_validate(
+        {
+            "plugins": [{"name": "kit", "source": f"file://{root}"}],
+            "libraries": [{"name": "kit", "plugins": ["kit"]}],
+        }
+    )
+    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
+    transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://kb") as http:
+        body = (await http.get("/health")).json()
+
+    assert body["plugins"]["kit"]["skipped"] == [
+        {"path": "skills/big", "reason": BIG_REASON}
+    ]
+    validate("Health", body)
 
 
 async def test_a_failed_fetch_carries_only_its_status_and_error(every_status):

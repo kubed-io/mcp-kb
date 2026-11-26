@@ -60,18 +60,21 @@ def _field(kind: str, desc: str, **extra) -> dict:
 SKIPPED = {
     "type": "array",
     "description": (
-        "Present when this plugin ships something the address space has no "
-        "room for. Each entry is left out while the rest of the plugin serves: "
-        "a library file whose address lies inside one of the plugin's own "
-        "skills or is named `_index.md` or `_files.md`; a skill whose "
-        "frontmatter `name` breaks the Agent Skills naming rule or differs "
-        "from its directory, or that a skill before it already serves at that "
-        "address; a prompt whose name a prompt before it already has, or whose "
-        "file does not parse or cannot be read; an agent file with no usable "
-        "name or description, or whose name this plugin already serves. A "
-        "clash with another plugin is "
-        "not listed here: it fails the later plugin in that library instead, "
-        "under the library's `conflicts`."
+        "Present when this plugin ships something the address space has no room "
+        "for. Each entry is left out while the rest of the plugin serves: a "
+        "library file whose address lies inside one of the plugin's own skills or"
+        " is named `_index.md` or `_files.md`; a skill whose frontmatter `name` "
+        "breaks the Agent Skills naming rule or differs from its directory, or "
+        "that a skill before it already serves at that address; a skill folder "
+        "the plugin layer does not load, with its reason (such as the Agent "
+        "Skills limits); a prompt whose name a prompt before it already has, or "
+        "whose file does not parse or cannot be read; an agent file the plugin "
+        "layer refuses, with its reason (no frontmatter or none JSON can carry, "
+        "an unusable name, a blank description, a name an earlier file of this "
+        "plugin already serves, bytes that are not UTF-8), or that kb cannot "
+        "read. One row per path; the server's own reason first. A clash with "
+        "another plugin is not listed here: it fails the later plugin in that "
+        "library instead, under the library's `conflicts`."
     ),
     "items": {
         "type": "object",
@@ -150,7 +153,7 @@ PLUGIN_STATUS = {
     "description": (
         "One plugin, keyed under `plugins` by its id: its config name, or "
         "`<entry>@<library>` for a marketplace entry. `skills`, `prompts`, "
-        "`agents`, `files` and `built` are the plugin's own harvest, independent of "
+        "`agents`, `files` and `built` are the plugin's own, independent of "
         "which libraries serve it, and are absent when `status` is `failed`."
     ),
     "required": [
@@ -175,11 +178,23 @@ PLUGIN_STATUS = {
             "items": {"type": "string"},
             "description": "The libraries that serve this plugin, in config order.",
         },
-        "skills": _field("integer", "Skills this plugin yields."),
-        "prompts": _field("integer", "Prompts this plugin yields."),
+        "skills": _field(
+            "integer",
+            "Skills the plugin layer serves for this plugin, from the first "
+            "library that adds it; 0 when no library adds it.",
+        ),
+        "prompts": _field(
+            "integer",
+            "Prompts the plugin layer serves for this plugin, from the first "
+            "library that adds it; 0 when no library adds it.",
+        ),
         "files": _field("integer", "Library-level files this plugin yields."),
-        "agents": _field("integer", "Agents this plugin yields."),
-        "built": _field("string", "When this plugin was last harvested."),
+        "agents": _field(
+            "integer",
+            "Agents the plugin layer serves for this plugin, from the first "
+            "library that adds it; 0 when no library adds it.",
+        ),
+        "built": _field("string", "When this generation harvested the plugin."),
         "error": _field(
             "string",
             "Present when `failed`: its fetch failed, its directory is not in "

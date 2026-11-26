@@ -40,10 +40,10 @@ same leak. **Flag any real name or homelab hostname in a diff as a blocker.**
 
 | Path | Holds |
 |---|---|
-| `kubed/mcp_kb/` | `server.py` composes it and owns which snapshot is current, `main.py` starts it, `routes.py` is the plain-HTTP surface, `config.py` is the config model and the published schema |
-| `kubed/mcp_kb/catalogue/` | what is served: `harvest.py` decides what counts, `skills.py` is the domain, `uris.py` is the `skill://` address space, `prompts.py` parses a prompt file with no FastMCP in it, `index.py` persists it, `snapshot.py` builds one immutable view, `refresh.py` decides when to look again |
+| `kubed/mcp_kb/` | `app.py` composes it, `server.py` owns which snapshot is current, `main.py` starts it, `routes.py` is the plain-HTTP surface, `config.py` is the config model and the published schema |
+| `kubed/mcp_kb/catalogue/` | what is served: `harvest.py` decides what counts, `skills.py` is the domain, `uris.py` is the `skill://` address space, `prompts/` parses a prompt file with no FastMCP in it, `index.py` persists it, `snapshot.py` builds one immutable view, `refresh.py` decides when to look again |
 | `kubed/mcp_kb/sources/` | where bytes come from: `file.py`, `git.py`, `webdav.py`, the shared `export.py`, `errors.py`, and `live.py` because revalidation is a source concern |
-| `kubed/mcp_kb/mcp/` | what an agent sees: `resources.py` is the interface, `tools.py` and `prompts.py` the mirrors, `request.py` and `scope.py` the per-request scope, `announce.py` the list-changed notification |
+| `kubed/mcp_kb/mcp/` | what an agent sees: `resources.py` is the interface, `tools.py` names kubed-mcp's resource pair and defines no tool, `prompts.py` reads commands for kubed-mcp's plugin layer, `request.py` and `scope.py` the per-request scope, `announce.py` the list-changed notification |
 | `kubed/mcp_kb/spec/` | the OpenAPI document for the HTTP surface |
 | `scripts/` | `generate_openapi.py`, `generate_wiki.py`, and `requirements.py` for the image build |
 | `examples/` | `config.yaml`, the worked config the image ships |
@@ -53,31 +53,21 @@ same leak. **Flag any real name or homelab hostname in a diff as a blocker.**
 what lets `kubed.mcp_kb` and `kubed.selenium_flow` install side by side. A PR
 that adds one is a finding, and `tests/test_packaging.py` fails on it.
 
-## The principle that dominates every review: the tools are a mirror
+## The principle that dominates every review: kb registers no tool
 
 MCP has a primitive for material an agent reads, and it is the **resource**, and
 one for a template a person picks, and it is the **prompt**. Both are the
-interface here. The four tools exist only because some clients — n8n above all —
-implement neither.
+interface here, and kb serves them through kubed-mcp's plugin layer.
 
-That makes the mirror a contract, not a convenience:
-
-- **`list_resources()` returns the rows `resources/list` returns.
-  `read_resource(uri)` takes the URI `resources/read` takes**, and `list_prompts`
-  / `get_prompt` do the same for `prompts/list` and `prompts/get`. A client that
-  can drive MCP resources can drive this server without learning anything. A PR
-  that makes a tool diverge from what it mirrors — a different shape, an extra
-  argument, a filter only one half applies — breaks the one promise the design
-  rests on.
-- **A fifth tool that is not a mirror is a finding.** Say where it belongs: in
-  the address space, as a URI that resolves to something.
-- **`catalogue/uris.py` is the only place behaviour lives.** `mcp/resources.py`
-  and `mcp/tools.py` are thin projections of `Catalogue`. A PR that puts
-  resolution logic in a projection is a finding — a rule applied in one of them
-  is a rule the other half does not have.
-- **The prompt mirror is FastMCP's own `PromptsAsTools`**, subclassed only for
-  read-only annotations. A hand-written replacement flattens role-tagged
-  messages to text, which is the thing that makes a prompt a prompt.
+- **kb defines no tool.** The resource pair, `list_resources()` and
+  `read_resource(uri)`, is kubed-mcp's: it lists them only for a client that
+  turned resources off, as a mirror of `resources/list` and `resources/read`
+  (its DLV-6), and refuses a server tool of either name. A PR that registers a
+  tool in kb is a finding. Say where it belongs: in the address space, as a URI
+  that resolves to something.
+- **`catalogue/uris.py` is the only place kb's behaviour lives.** The modules in
+  `mcp/` hand kubed-mcp what it serves. A PR that puts resolution logic in one
+  of them is a finding.
 - Operational routes — `/health`, `/reindex`, `/openapi.yaml` — are HTTP-only on
   purpose. They describe or rebuild the server rather than serving a skill.
 
@@ -87,7 +77,7 @@ Fewer, higher-value comments beat exhaustive nitpicking. A review with 3 real
 findings is better than one with 15 where 12 are cosmetic. Noise trains the team
 to ignore you.
 
-- **Worth a comment:** correctness, scope enforcement, and the mirror rule above —
+- **Worth a comment:** correctness, scope enforcement, and the no-tool rule above —
   always.
 - **Usually skip:** a wording tweak, a slightly-stale comment, a missing type on
   an internal helper — unless the file is otherwise clean or it is egregious.
@@ -102,16 +92,18 @@ to ignore you.
 
 1. **Scope enforcement** — a `Scope` (`?library=`, `?category=`, `?tag=`, or the
    `Kb-Library` / `Kb-Category` / `Kb-Tag` headers) narrows a client,
-   and it is a ceiling the model cannot widen past. Every `Catalogue`, `SkillIndex`
-   and `PromptProvider` read takes a `Scope` for that reason: there is no method
+   and it is a ceiling the model cannot widen past. Every `Catalogue` and `SkillIndex`
+   read, and every view kb hands kubed-mcp's plugin layer, takes a `Scope` for that reason: there is no method
    that can be called without deciding about the scope. A new path that reads
    content without threading it is a finding even when it looks correct, because
    **filtering a listing is not enough** — every URI here is guessable by design, so an unfiltered read is
    reachable by anyone who can spell it. Absent and out-of-scope must stay
    indistinguishable: knowing a skill's name must not confirm it exists.
-2. **The mirror rule** — the section above.
-3. **Tool schema quality** — see below. On this project a weak schema is a
-   functional defect, not a style nit.
+2. **No tool in kb** — the section above.
+3. **Nothing fetched runs, and no cache path or credential leaks** — a `!` line
+   or `!{…}` block in a prompt is text, and no cache path, clone path, WebDAV URL
+   or credential reaches a served body, an error, a log or `/health`. A kubed-mcp
+   message kb passes on goes through `SkillServing._clean` first.
 4. **Path safety** — a model supplies the path inside a URI. Reads resolve before
    comparing, so `../` and a symlink pointing out of a skill are refused. A new
    read that skips that is a finding.
@@ -126,14 +118,6 @@ to ignore you.
 
 ## Python conventions specific to this repo
 
-- **Type hints in `mcp/tools.py` ARE the tool schema.** FastMCP builds the JSON
-  schema from the signature, so a missing or loose annotation ships a worse tool.
-  `param: str = None` instead of `param: str | None = None`, a bare `dict`, an
-  untyped `**kwargs` — all are real findings here.
-- **Docstrings in `mcp/tools.py` are prompt, not documentation.** They are read by a
-  model choosing a tool. Review them for that reader: what the tool does, when to
-  reach for it, what the arguments mean. The `read_resource` docstring carries
-  the URI grammar because that is where a model will look for it.
 - **`catalogue/` imports no FastMCP, deliberately.** The catalogue is testable
   without an MCP client. A PR that reaches for a FastMCP type in it is a finding.
 - **Reads are lazy and must stay that way.** A skill body may cite

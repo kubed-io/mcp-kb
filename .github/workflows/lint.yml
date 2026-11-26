@@ -46,11 +46,12 @@ jobs:
         cache: pip
         cache-dependency-path: pyproject.toml
 
-    # Runtime only. The test extra is deliberately NOT installed here: ruff and
-    # pytest never reach a user, and an advisory against a test-only tool that
-    # stops a release is noise, not security.
+    # Runtime only, with the telemetry extra because the image installs it. The test
+    # extra is deliberately NOT installed here: ruff and pytest never reach a user,
+    # and an advisory against a test-only tool that stops a release is noise, not
+    # security.
     - name: Install Runtime Dependencies
-      run: pip install --editable .
+      run: pip install --editable ".[telemetry]"
 
     # --exclude-editable drops kubed-mcp-kb itself. It is not on PyPI, so
     # leaving it in makes pip-audit fail to resolve the very package being

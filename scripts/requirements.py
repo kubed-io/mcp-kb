@@ -34,8 +34,8 @@ def read(path: pathlib.Path) -> dict:
 def runtime(pyproject: dict, extras: list[str]) -> list[str]:
     """What the package needs to RUN: its dependencies, plus any named extras.
 
-    This project ships no runtime extra today — ``build`` and ``test`` are both
-    tooling and have no business in the image. The flag stays because which
+    ``telemetry`` is the one runtime extra, and only the image asks for it.
+    ``build`` and ``test`` are tooling and have no business in the image. Which
     extras belong in an image is the Dockerfile's decision to make and to
     explain, and this only answers what they contain.
     """

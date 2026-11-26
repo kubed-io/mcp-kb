@@ -180,3 +180,11 @@ def test_plugins_import_no_fastmcp():
     result = imports_clean(PLUGINS_MODULES)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
+
+
+def test_the_config_imports_no_fastmcp():
+    """`config.py` embeds kubed-mcp's `TelemetrySettings`; `kubed.mcp` resolves
+    every other name lazily, so reading a config still loads no FastMCP."""
+    result = imports_clean(("kubed.mcp_kb.config",))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"

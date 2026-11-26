@@ -2,7 +2,7 @@
 
 A prompt is a Markdown file a plugin ships, which a person picks and fills in. kb reads three
 dialects of prompt file and serves each as the same MCP prompt. This file covers how a file becomes
-a prompt and how it renders, not which files a plugin offers, scope, or the tool mirror.
+a prompt and how it renders, not which files a plugin offers or scope.
 
 ## Neighbours
 
@@ -11,15 +11,17 @@ marketplace entry's `commands`, or the conventions) is decided as in
 [plugins-and-libraries.md](plugins-and-libraries.md).
 
 **PRM-2.** A prompt belongs to the library that serves its plugin and carries that plugin's
-category and tags. Whether a client sees it is decided as in
+category and tags. kubed-mcp's plugin layer serves it: a client sees it when the layer's view
+admits its plugin, and the view is kb's scope, decided as in
 [scoping-and-instructions.md](scoping-and-instructions.md). A prompt out of scope is neither listed
-by `prompts/list` nor found by `prompts/get`.
-
-**PRM-3.** The `list_prompts` and `get_prompt` tools ([http-and-tools.md](http-and-tools.md))
-list and render exactly what `prompts/list` and `prompts/get` do, under the same scope.
+by `prompts/list` nor found by `prompts/get`, and reads as absent: `Unknown prompt`, as a name
+nobody serves does.
 
 **PRM-4.** A skipped prompt file is reported under its plugin's `skipped` in `/health`, as a
-plugin-relative path and a reason, as in [plugins-and-libraries.md](plugins-and-libraries.md).
+plugin-relative path and a reason, as in [plugins-and-libraries.md](plugins-and-libraries.md). The
+rows come from the plugin layer's read of the plugin, with kb's reasons: kb's command reader parses
+each file, and a file it cannot parse is skipped with the reason this file gives. A file the
+layer's read reaches and kb did not select is not a row.
 
 ## The file
 
@@ -31,9 +33,9 @@ block (`---` then `---`) is valid.
 
 **PRM-7.** A file that cannot be read, whose YAML does not parse, or whose frontmatter breaks a rule
 below is skipped with a reason. A frontmatter key that is not a string (`1:`, `true:`) is skipped
-with `frontmatter has a key that is not a string`, and so is an inline command's (PLG-21).
+with `frontmatter has a key that is not a string`.
 Frontmatter nested too deeply for the parser is skipped with `frontmatter is nested too deeply to
-read`, and so is an inline command's. The plugin's other prompts, skills and files still serve.
+read`. The plugin's other prompts, skills and files still serve.
 
 **PRM-8.** A frontmatter field of the wrong type (a mapping or a list where text is expected, a
 non-list where a list is expected) skips the file with a reason naming the field. It MUST NOT stop
@@ -73,8 +75,7 @@ reference are text and render as written.
 | 11 | The body has `$ARGUMENTS`, `$ARGUMENTS[N]` or `$N` | `claude` |
 | 12 | Nothing above answered | `mcp-kb` |
 
-**PRM-15.** Rule 1 holds whatever the plugin declares and wherever the file sits. A `commands` map
-item that passes rule 1 is `claude`, whatever rules 2 and 3 say (PLG-12, PLG-21).
+**PRM-15.** Rule 1 holds whatever the plugin declares and wherever the file sits.
 
 **PRM-16.** A config's own `prompts:` glob is not a `commands` declaration. A file it selects gets
 no help from rule 5.
@@ -82,9 +83,10 @@ no help from rule 5.
 **PRM-17.** When rule 7 is reached, an `arguments` list that mixes strings and mappings skips the
 file. An empty `arguments` list counts as absent.
 
-**PRM-18.** The dialect decided at harvest is recorded in the index with the file's path. Every
-later rebuild and restart reads the file in the recorded dialect. A recorded dialect kb does not
-know skips the file with the reason `unknown dialect '<name>'`.
+**PRM-18.** The dialect is decided by PRM-14 each time the plugin is read. Nothing about a
+prompt is kept on disk, so a boot decides it afresh. A build of that read reads the file in that
+same dialect, so a body rewritten for a build never changes a file's dialect. A configured dialect
+kb does not know skips the file with the reason `unknown dialect '<name>'`.
 
 ## The `mcp-kb` dialect
 
@@ -192,21 +194,41 @@ an `argument-hint`.
 ## Naming
 
 **PRM-41.** A prompt's name is `<library>_<name>`, where the name is as PLG-25 says
-([plugins-and-libraries.md](plugins-and-libraries.md)). A library name has no `_`, so the name
-splits back unambiguously.
+([plugins-and-libraries.md](plugins-and-libraries.md)). The prefix is the first segment of the
+plugin's namespace (kubed-mcp's PLUG-63), which every plugin of the library shares (PLUG-17), and
+the name below it is the plugin layer's (PLUG-62), which is PLG-25's. A file the layer names
+otherwise than PLG-25 is skipped. A library name has no `_`, so the name splits back
+unambiguously.
 
 **PRM-42.** The stem of `x.prompt.md` is `x`. The stem of any other file is its name without its
 last extension. `prompts/debug.md` in a plugin the `grafana` library serves is `grafana_debug`.
-The stem is held to the usable-name rule PLG-25 gives: `prompts/a b.md` is skipped with
-`prompt name 'a b' is not a usable name`.
+The stem is held to the usable-name rule PLG-25 gives: `prompts/a b.md` in library `lib` is skipped
+with `prompt name 'lib_a b' is not a usable name`, the reason quoting the full name.
 
 **PRM-43.** The plugin is not part of the name. Two prompts in one plugin with the same name
 (`prompts/debug.md`, `prompts/sub/debug.md`, `debug.prompt.md`) serve the first, in the order
 PLG-25 gives. Each later one is skipped with the reason `prompt <name> is already served by
-<path>`.
+<path>`, quoting the full name: `prompt lib_debug is already served by prompts/debug.md`.
 
 **PRM-44.** Two plugins of one library that yield the same prompt name are a conflict between
-plugins, handled as in [plugins-and-libraries.md](plugins-and-libraries.md).
+plugins: the plugin layer refuses the later plugin (PLUG-18), reported as LIB-29 says in
+[plugins-and-libraries.md](plugins-and-libraries.md).
+
+## As a resource
+
+**PRM-63.** A served prompt's file also reads, unlisted, at `prompts://<namespace>/<place>`. The
+namespace is its plugin's (SKL-59). The place is its path below the commands folder it was read
+from: `commands/db/migrate.md` reads at `prompts://lib/db/migrate.md`. For a file a manifest lists
+by path, the place is that path: `./prompts/x.md` of plugin `b` reads at
+`prompts://lib/b/prompts/x.md`. It reads as the plugin layer builds it, frontmatter kept, after
+kb's rewriter and the prefix. Every folder holding one is a directory with `_index.md` and
+`_index.json`; `prompts://<library>` is one only when the main plugin serves a prompt (kubed-mcp's
+PLUG-66 to PLUG-68). It is held to the scope as `prompts/get` is, and out of scope it fails as an
+absent address does. It is listed only when `Listed` names `prompts` (DLV-8). Two files of one
+plugin at one place serve the first in kb's path order (`harvest.command_entries`), and the later
+one is skipped whole, its prompt included, with its reason in `/health`'s `skipped`:
+`prompts://lib/prompts/x.md is already served by commands/prompts/x.md`. This is kubed-mcp's limit,
+reported to quick-mcp. The instructions point at the index (INS-19).
 
 ## Rendering
 
@@ -215,9 +237,12 @@ default applies to it, and a required argument is missing.
 
 **PRM-46.** Every argument value is rendered as its string form.
 
-**PRM-47.** Rendering runs in this order: the qualified skill names in the body (PRM-62), then the
-dialect's placeholders, then the placeholders this server resolves (PRM-48), then the gateway
-prefix on every `skill://` address in the text, as in [skills.md](skills.md).
+**PRM-47.** The qualified skill names in the body (PRM-62), then `${CLAUDE_PLUGIN_ROOT}` (PRM-48,
+PRM-61), are resolved when the plugin layer's build is made, against the request's scope. The
+dialect's placeholders are filled in at render. The gateway prefix on every `skill://` address in
+the text is the plugin layer's, written last (GW-7), as in [skills.md](skills.md). kb never
+rewrites an argument's value: `${CLAUDE_PLUGIN_ROOT}` given as an argument renders as typed. The
+gateway prefix, written over the whole rendered text, is the one change that reaches it.
 
 ## Placeholders resolved and left alone
 
@@ -273,18 +298,24 @@ PRM-52.
 **PRM-56.** A `decline`, a `cancel`, or an `accept` with no content fails as in PRM-52, whatever
 content came with it.
 
-**PRM-57.** An older protocol, a client that declared no form elicitation, and the `get_prompt`
-tool are never asked. They get the failure in PRM-52.
+**PRM-57.** An older protocol and a client that declared no form elicitation are never asked. They
+get the failure in PRM-52.
 
 ## Live prompts
 
-**PRM-58.** A prompt from a `cache: live` source (see
-[config-and-sources.md](config-and-sources.md)) is revalidated against its server on `prompts/get`,
-and its body is re-read from disk on each render.
+**PRM-58.** A prompt file of a `cache: live` source (see
+[config-and-sources.md](config-and-sources.md)) is revalidated with its plugin's skill and agent
+files, on each request whose scope admits the plugin (SKL-37). One that moved re-reads its plugin,
+and the prompt as edited serves from the next request.
 
-**PRM-59.** A live prompt's arguments, defaults and dialect are those the harvest recorded. Declaring
-another argument needs a refresh.
+**PRM-59.** The edit's arguments, defaults and dialect are read from the edited file and served
+with it; no refresh is needed.
 
-**PRM-60.** When a live re-read fails (unreadable file, no frontmatter block, YAML that does not
-parse or is nested too deeply to read), the prompt renders the body last harvested and kb logs a
-warning.
+**PRM-60.** When an edited prompt file the plugin served no longer reads as a prompt (for
+example unreadable, not a prompt, no frontmatter block, YAML that does not parse or is nested too
+deeply, a placeholder that is not a declared argument, or a required argument with a default), the
+re-read is refused: the plugin keeps its last good build, its skills and agents included, and kb
+logs one warning. It tries again when a file of the plugin moves.
+
+**PRM-64.** Under Via `extension` or `local`, `prompts/list` lists no plugin prompt, and
+`prompts/get` still serves one (DLV-9). kb adds no filter of its own.

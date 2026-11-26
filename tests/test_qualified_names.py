@@ -36,7 +36,7 @@ NAMES = (
 RESOLVED = (
     "A skill://kit/writing/SKILL.md\n"
     "B skill://kit/writing/SKILL.md\n"
-    "C skill://kit/ops/SKILL.md\n"
+    "C skill://kit/kit-extra/ops/SKILL.md\n"
     "D kit:nope\n"
     "E https://kit:writing\n"
     "F /kit:db:migrate\n"
@@ -168,22 +168,11 @@ async def _agent(url, name, tags=None, prefix=None):
     return await _raw(url, "agents/get", _headers(tags, prefix), name=name)
 
 
-async def _prompt(url, name, arguments=None):
-    client = Client(StreamableHttpTransport(url))
+async def _prompt(url, name, arguments=None, headers=None):
+    client = Client(StreamableHttpTransport(url, headers=headers or {}))
     async with client:
         got = await client.get_prompt(name, arguments)
     return got.messages[0].content.text
-
-
-async def _prompt_tool(url, name, arguments=None):
-    client = Client(
-        StreamableHttpTransport(url, headers={"X-MCP-Prompts": "off"})
-    )
-    async with client:
-        result = await client.call_tool(
-            "get_prompt", {"name": name, "arguments": arguments or {}}
-        )
-    return json.loads(result.content[0].text)["messages"][0]["content"]
 
 
 async def test_a_skill_body_reads_qualified_names_as_addresses(url):
@@ -219,12 +208,14 @@ async def test_the_manifest_describes_the_bytes_served(url):
 
 async def test_an_agent_reads_names_as_addresses_and_preloads_its_skills(url):
     definition = await _agent(url, "kit_helper")
-    assert definition["instructions"] == RESOLVED
+    # N10: kubed-mcp trims the body.
+    assert definition["instructions"] == RESOLVED.strip()
     meta = definition["_meta"]["io.kubed.mcp-kb/agent"]
+    # N9: the preload map names the agent's own plugin's skills alone, so the
+    # cross-plugin kit-extra:ops is left out for everyone (SCP-24).
     assert meta["skills"] == {
         "kit:writing": "skill://kit/writing/SKILL.md",
         "writing": "skill://kit/writing/SKILL.md",
-        "kit-extra:ops": "skill://kit/ops/SKILL.md",
     }
     assert meta["frontmatter"]["skills"] == [
         "kit:writing", "writing", "kit-extra:ops", "nope"
@@ -254,5 +245,6 @@ async def test_an_argument_value_is_never_rewritten(url):
     assert text == RESOLVED + "H kit:writing\n"
 
 
-async def test_the_prompt_mirror_rewrites_alike(url):
-    assert await _prompt_tool(url, "kit_cite") == RESOLVED + "H \n"
+async def test_a_client_without_resources_gets_the_same_prompt(url):
+    off = {"Kb-Resources": "off"}
+    assert await _prompt(url, "kit_cite", headers=off) == RESOLVED + "H \n"

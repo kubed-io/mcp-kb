@@ -19,7 +19,6 @@ _EXPORTS = {
     "Skill": ".catalogue.skills",
     "SkillIndex": ".catalogue.skills",
     "Snapshot": ".catalogue.snapshot",
-    "load_prompts": ".catalogue.prompts",
     "load_skills": ".catalogue.skills",
 }
 
