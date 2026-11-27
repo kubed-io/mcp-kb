@@ -111,11 +111,14 @@ served skill in scope: the URI `skill://<namespace>/<skill>/SKILL.md`, the name
 `<namespace>/<skill>/SKILL.md`, the skill's own `description` and the `mimeType` `text/markdown`.
 Under Via `extension` and `local` the default lists none (DLV-9). A `Listed` setting read from the
 level Via was read from, or an earlier one (the `Kb-` header, then `X-MCP-`, then the query),
-replaces the default under every Via; one from a later level is ignored (DLV-9). `skills` lists the
+replaces the default under every Via; one from a later level is ignored (DLV-9). Under every Via
+and `Listed` setting, the skill rows are at most the request's max (SCP-3): 100 unless the request
+or the config sets another. SKL-64 says which are kept. `skills` lists the
 skills, `prompts` the prompt files and `agents` the agent files, and `none` lists none. Then, under
 every setting, one row per
 library with a library file in scope, in library name order: `skill://<library>/_files.md`, with the
-description `Files the <library> library ships outside any skill, which its skills reference.` No
+description `Files the <library> library ships outside any skill, which its skills reference.` A
+`_files.md` row is not a skill row, and the max never cuts one. No
 `_index.md` is listed, and each one still reads (SKL-17).
 
 **SKL-15.** The `_files.md` row's `name` is its URI without `skill://`, its `mimeType` is
@@ -414,14 +417,26 @@ file a read of the skill serves (SKL-21), `SKILL.md` included, by URI, and no vi
 under the same request headers, and equal the skill's `_manifest` (SKL-24). An entry is offered
 only when every file it names reads as listed (F59).
 
-**SKL-48.** `skills/list` returns every in-scope skill's entry, except under SKL-62, by URI, as
+**SKL-48.** `skills/list` returns the in-scope skills' entries, at most the request's max of them
+(SKL-64), except under SKL-62, by URI, as
 `{"resultType": "complete", "ttlMs": 0, "cacheScope": "private", "skills": [...]}`. It pages by the
-server's page size, and kb sets none, so one page holds every entry and a `cursor` the server never
-issued is ignored.
+server's page size, and kb sets none, so one page holds every entry listed. A skill the max leaves
+out still answers `skills/get` and `resources/read`, and stays in every `_index.md` and
+`_index.json`. A `cursor` the server never issued is ignored, which is kubed-mcp's known deviation
+from SEP-2640.
 
 **SKL-62.** Under Via `local`, `skills/list` lists no skill, and `skills/get` still serves each one
-in scope (DLV-9, DLV-10). Under `mcp` and `extension` it lists them all. `Listed` does not change
-it. kb adds no filter of its own.
+in scope (DLV-9, DLV-10). Under `mcp` and `extension` it lists them up to the request's max
+(SKL-64). `Listed` does not change it. kb adds no filter of its own. Under `local` none is listed
+and none counts as cut.
+
+**SKL-64.** A listing the max cuts (SKL-14, SKL-48) keeps the first skills in the plugin layer's
+order and leaves out the rest. That order is the one kb adds plugins in (SKL-58): libraries in
+config order, each library's plugins in its order, and a plugin served by two libraries once in
+each. A plugin's skills come folder by folder as the plugin layer finds them (SKL-1), and each
+folder's skills by name. So a route over the max loses the last skills of its last library's last
+plugins, and an operator chooses what is left out by the order of the config's libraries and of
+each library's plugins. A scope cuts from what it admits. kb sets no `delivery.max`.
 
 **SKL-49.** `skills/get` takes `uri`, which MUST be exactly a skill's `SKILL.md` address (after
 SKL-42), and returns the same envelope with `skill`. Anything else, and an out-of-scope skill, fail

@@ -164,7 +164,8 @@ entry FastMCP stamps in a modern-era result's `_meta`. It is never FastMCP's own
 resolved for the request, from the `Kb-` and `X-MCP-` headers, their query parameters, kb's
 defaults and its table of known clients. Its `resources` is the setting that lists the resource
 pair (TOOL-2), and its `prefix` is the resource prefix every served address carries (GW-4, GW-11),
-or `null`. Its `via` is the mode the instructions were written for.
+or `null`. Its `via` is the mode the instructions were written for. Its `max` is the cap resolved for the
+request (SCP-3), or `"all"` for none.
 
 **HTTP-29.** Every cacheable result (`tools/list`, `prompts/list`, `resources/list`,
 `resources/templates/list`, `resources/read`, `server/discover`) carries `ttlMs` equal to the

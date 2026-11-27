@@ -23,12 +23,16 @@ Each is read per MCP request from an HTTP header or a query parameter on the MCP
 | Resource prefix | `Kb-Resource-Prefix` | `prefix` | `X-MCP-Resource-Prefix` | — |
 | Resources | `Kb-Resources` | `resources` | `X-MCP-Resources` | — |
 | Via | `Kb-Via` | `via` | `X-MCP-Via` | — |
+| Max | `Kb-Max` | `max` | `X-MCP-Max` | — |
 
 **SCP-3.** The resource prefix and the resources setting are read by the same rules as the
-scope (SCP-4 to SCP-7). The resource prefix, the resources setting, the listed setting and Via
+scope (SCP-4 to SCP-7). The resource prefix, the resources setting, the listed setting, Via and the max
 are kubed-mcp's own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its
 `X-MCP-` alias (DLV-16). Via is `mcp` (the default), `extension` or `local`, matched without
-regard to case; any other value resolves to `mcp`. What the listed setting and the
+regard to case; any other value resolves to `mcp`. Max is a whole number of 1 or more, or
+`all` for no cap, matched without regard to case. Any other value is ignored with one warning,
+and the next of its sources answers. With none, it is the config's `delivery.max`, else 100.
+What the listed setting, the max and the
 prefix do is specified in [skills.md](skills.md), and the resources setting in
 [http-and-tools.md](http-and-tools.md).
 
