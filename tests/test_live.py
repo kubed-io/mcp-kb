@@ -156,6 +156,27 @@ def test_the_rereading_read_builds_the_set_it_reread(webdav, tmp_path):
     assert read_served(knowledge_base, URI) is None, "MD-57: x no longer builds"
 
 
+def test_a_remote_file_named_like_the_etag_stamp_is_never_downloaded_over_it(
+    webdav, tmp_path
+):
+    """The folder's own ``.mcp-kb-etags.json`` is an upstream file like any
+    other until the listing leaves it out: a revalidation that saw it move would
+    replace kb's stamp with it."""
+    from kubed.mcp_kb.sources.webdav import ETAGS_FILE
+
+    webdav.write(ETAGS_FILE, "{}")
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+    stamp = knowledge_base.served_tree(KEY) / ETAGS_FILE
+    before = stamp.read_text(encoding="utf-8")
+
+    webdav.write(ETAGS_FILE, json.dumps({"skills/x/SKILL.md": "forged", "pad": "x"}))
+    webdav.requests.clear()
+    landed(knowledge_base)
+
+    assert stamp.read_text(encoding="utf-8") == before
+    assert f"/kb/{ETAGS_FILE}" not in webdav.method("GET")
+
+
 def _skill_site(serving, view_key=None):
     """The ``Site`` kubed-mcp's build hands the rewriter for x's ``SKILL.md``."""
     from kubed.mcp.plugins import Site

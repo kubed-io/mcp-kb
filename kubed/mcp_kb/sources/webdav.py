@@ -55,6 +55,11 @@ from .export import WORK_PREFIX, Exports, workspace
 if TYPE_CHECKING:
     from httpx import URL
 
+# Every file kb writes into an export starts with this, and no upstream file
+# that does is ever listed, recorded or copied: a remote file named like a stamp
+# would otherwise be revalidated over kb's own.
+RESERVED = ".mcp-kb-"
+
 # Written at the root of an export: what every file's ETag was when it was
 # copied, which is what a live read revalidates against. Hidden, so harvest.py's
 # dot-file rule keeps it out of every listing by itself.
@@ -63,6 +68,12 @@ ETAGS_FILE = ".mcp-kb-etags.json"
 # The export's completion stamp: the version it holds, then how many files it
 # took. export.py writes it, last of all.
 VERSION_FILE = ".mcp-kb-version"
+
+
+def reserved(rel: str) -> bool:
+    """Whether the path's file name is one of kb's own (``RESERVED``)."""
+    return rel.rsplit("/", 1)[-1].startswith(RESERVED)
+
 
 VERSION = re.compile(r"^[0-9a-f]{64}$")
 
@@ -125,6 +136,11 @@ def materialise_webdav(fetch: Fetch, cache: Path) -> Path:
         with _reporting(fetch, "copy"):
             fs.get("", str(tmp), recursive=True)
         tmp.mkdir(parents=True, exist_ok=True)
+        # The copy takes everything upstream holds; kb's stamps are the only
+        # files of those names an export may have.
+        for path in tmp.rglob("*"):
+            if path.is_file() and reserved(path.name):
+                path.unlink()
         (tmp / ETAGS_FILE).write_text(
             json.dumps(etags, indent=1, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -204,6 +220,9 @@ def remote_etags(fetch: Fetch, fs: WebdavFileSystem) -> dict[str, str]:
     default. webdav4 passes the ETag through from the same response that
     enumerates the children, so a listing prices every file's freshness for
     free. Sorted, so two equal folders produce two equal dicts and one digest.
+
+    A file whose name is ``reserved`` is left out, so no recorded map, digest or
+    live download ever names one: this listing is the single gate.
     """
     with _reporting(fetch, "listing"):
         try:
@@ -219,7 +238,7 @@ def remote_etags(fetch: Fetch, fs: WebdavFileSystem) -> dict[str, str]:
     return {
         path: _etag(info)
         for path, info in sorted(found.items())
-        if info.get("type") == "file"
+        if info.get("type") == "file" and not reserved(path)
     }
 
 

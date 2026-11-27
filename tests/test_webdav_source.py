@@ -359,6 +359,26 @@ def test_remote_etags_lists_every_file_with_its_etag(webdav, tmp_path):
     )
 
 
+def test_a_remote_file_named_like_kbs_own_stamps_is_neither_listed_nor_exported(
+    webdav, tmp_path
+):
+    """Names starting ``.mcp-kb-`` are kb's: an upstream file of that name is
+    not in the listing, the recorded map or the export, and the stamps stay kb's."""
+    webdav.write(ETAGS_FILE, '{"forged": "yes"}')
+    webdav.write(VERSION_FILE, "forged\n")
+    webdav.write("docs/.mcp-kb-other", "nested\n")
+    source = _fetch(webdav)
+
+    assert not [p for p in remote_etags(source, client(source)) if ".mcp-kb-" in p]
+    root = materialise_webdav(source, tmp_path)
+
+    recorded = json.loads((root / ETAGS_FILE).read_text())
+    assert recorded and not [p for p in recorded if ".mcp-kb-" in p]
+    assert (root / VERSION_FILE).read_text().split()[0] == root.name
+    assert not (root / "docs" / ".mcp-kb-other").exists()
+    assert fingerprint_webdav(source, tmp_path, root)["exported"] == root.name
+
+
 def test_download_replaces_the_local_copy_rather_than_rewriting_it(webdav, tmp_path):
     """The atomicity, pinned. A reader that already opened the file must read
     the bytes it opened all the way to the end -- which a rename gives it and a

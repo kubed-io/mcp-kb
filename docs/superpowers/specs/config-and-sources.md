@@ -247,6 +247,8 @@ access refusal ([SRC-41](#startup)).
 **SRC-16.** A webdav fetch's URL is the folder. Its whole content is copied to
 `<cache>/src/<slug>/<version>`, the version being the SHA-256 of its sorted `path → ETag` map. A
 file with no ETag stands in `<modified>:<size>`.
+Names starting `.mcp-kb-` are kb's own stamps: a folder's files of that name are left out of the
+map and the export.
 
 **SRC-17.** A folder whose ETag map has not moved resolves to the export on disk and is not
 downloaded.
