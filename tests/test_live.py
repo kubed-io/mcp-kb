@@ -1,9 +1,12 @@
-"""``cache: live``: a read revalidates the file it is about to serve.
+"""``cache: live``: a read starts a background revalidation, and the first
+request after it lands serves the edit.
 
 Every test drives a real ``KnowledgeBase`` over the real WebDAV server
 (``tests/webdav_server.py``), which refuses an unauthenticated request. What is
-being proved is one sentence: *a file edited upstream is served on the next
-read, and everything else about the server stays where it was.*
+being proved is one sentence: *a file edited upstream is served by the first
+request after a revalidation saw it, and everything else about the server stays
+where it was.* ``landed`` is how a test waits for that revalidation: no request
+waits for one.
 
 Two quirks of the server under test:
 
@@ -15,6 +18,7 @@ Two quirks of the server under test:
   microseconds. The one test about the TTL turns it back on.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -33,6 +37,7 @@ from kubed.mcp_kb.catalogue.uris import AGENT_META
 from kubed.mcp_kb.config import BasicAuth, Config, EnvRef
 from kubed.mcp_kb.plugins import Fetch
 from kubed.mcp_kb.sources import live
+from kubed.mcp_kb.sources.errors import SourceError
 from tests.conftest import (
     DEEP_YAML,
     ext_request,
@@ -120,22 +125,23 @@ def _knowledge_base(webdav, tmp_path, cache="live"):
 def test_an_edit_upstream_is_visible_on_the_next_read_without_a_refresh(
     webdav, tmp_path
 ):
-    """SKL-37: the read that revalidates re-adds the plugin and serves the edit
-    itself, its pin included (N6)."""
+    """SKL-37: the first request after the pass that saw the edit re-adds the
+    plugin and serves the edit itself, its pin included (N6)."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     assert "first" in read_served(knowledge_base, URI)
 
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    landed(knowledge_base)
 
     assert "edited in nextcloud" in read_served(knowledge_base, URI), (
-        "N6: the re-adding read"
+        "the first request after the pass"
     )
     assert knowledge_base.generation == 0, "no refresh happened; the read did the work"
 
 
 def test_the_rereading_read_builds_the_set_it_reread(webdav, tmp_path):
-    """N6 and MD-57: the read whose view re-reads a live skill FastMCP now
-    refuses builds the set the re-read served, against that set's state, so it
+    """N6 and MD-57: the first request after the pass, whose view re-reads a
+    live skill FastMCP now refuses, builds the set the re-read served, against that set's state, so it
     serves nothing at the skill, and nor does a read after it."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     # Served, and never read: a read now would keep a build of the set, which
@@ -144,8 +150,9 @@ def test_the_rereading_read_builds_the_set_it_reread(webdav, tmp_path):
     assert URI in plugin.skills
 
     webdav.write("skills/x/SKILL.md", "---\nname: x\ndescription: ''\n---\nBody.\n")
+    landed(knowledge_base)
 
-    assert read_served(knowledge_base, URI) is None, "N6: the re-adding read"
+    assert read_served(knowledge_base, URI) is None, "the first request after the pass"
     assert read_served(knowledge_base, URI) is None, "MD-57: x no longer builds"
 
 
@@ -287,13 +294,14 @@ def test_a_build_pinned_before_a_serve_that_raises_reads_its_own_generation(
 
 def test_an_edit_upstream_fastmcp_refuses_unlists_the_skill(webdav, tmp_path):
     """MD-57 for a live skill: once it no longer builds, nothing names it --
-    from the read that re-adds its plugin on (N6)."""
+    from the first request after the pass on (N6)."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     assert "skill://notes/x/SKILL.md" in read_served(knowledge_base, "skill://notes/_index.md")
 
     webdav.write("skills/x/SKILL.md", "---\nname: x\ndescription: ''\n---\nBody.\n")
+    landed(knowledge_base)
 
-    assert read_served(knowledge_base, URI) is None, "N6: the re-adding read"
+    assert read_served(knowledge_base, URI) is None, "the first request after the pass"
     index = read_served(knowledge_base, "skill://notes/_index.md")
     assert index is None or "skill://notes/x" not in index
     assert knowledge_base.generation == 0, "the read did it, not a refresh"
@@ -302,14 +310,18 @@ def test_an_edit_upstream_fastmcp_refuses_unlists_the_skill(webdav, tmp_path):
 def test_a_skill_a_live_edit_breaks_is_logged_once(webdav, tmp_path, caplog):
     """K6 D5: a skill a live re-read newly skips is a ``skipped`` row, and the
     re-read logs it once, by kb, as a refresh would; a refresh after it does
-    not say it again. The read that re-reads is the one that skips it (N6)."""
+    not say it again. The first request after the pass is the one that skips
+    it (N6)."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     assert "first" in read_served(knowledge_base, URI)
     reason = "description must contain 1-1024 characters"
 
     with caplog.at_level(logging.WARNING):
         webdav.write("skills/x/SKILL.md", "---\nname: x\ndescription: ''\n---\nBody.\n")
-        assert read_served(knowledge_base, URI) is None, "N6: the re-adding read"
+        landed(knowledge_base)
+        assert read_served(knowledge_base, URI) is None, (
+            "the first request after the pass"
+        )
         knowledge_base.refresh(force=True)
 
     assert knowledge_base.generation == 1
@@ -325,6 +337,7 @@ def test_a_library_level_file_is_revalidated_too(webdav, tmp_path):
     assert read_served(knowledge_base, GUIDE) == "library-level guidance\n"
 
     webdav.write("docs/guide.md", "guidance, revised and lengthened upstream\n")
+    landed(knowledge_base)
 
     assert "revised and lengthened" in read_served(knowledge_base, GUIDE)
 
@@ -337,8 +350,8 @@ async def _rendered(client, name, **arguments) -> str:
 async def test_a_live_prompt_edit_serves_from_the_request_that_notices_it(
     webdav, tmp_path
 ):
-    """PRM-58, PRM-59: the request that notices an edit re-reads it and serves
-    the edit, with its arguments."""
+    """PRM-58, PRM-59: the first request after the pass that saw an edit
+    re-reads it and serves the edit, with its arguments."""
     webdav.write("prompts/p.md", PROMPT.format(body="the first body"))
     kb = _knowledge_base(webdav, tmp_path)
     async with Client(server_of(kb)) as client:
@@ -346,7 +359,8 @@ async def test_a_live_prompt_edit_serves_from_the_request_that_notices_it(
         webdav.write(
             "prompts/p.md", ARGUED.format(body="the second, longer body {{ who }}")
         )
-        assert "the second, longer body you" in await _rendered(  # noticed here
+        landed(kb)
+        assert "the second, longer body you" in await _rendered(  # the first after it
             client, "notes_p", who="you"
         )
         (listed,) = [p for p in await client.list_prompts() if p.name == "notes_p"]
@@ -359,6 +373,7 @@ async def _keeps_the_last_good_build(webdav, tmp_path, caplog, broken, reason):
     async with Client(server_of(kb)) as client:
         assert "the first body" in await _rendered(client, "notes_p")
         webdav.write("prompts/p.md", broken)
+        landed(kb)
         with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
             assert "the first body" in await _rendered(client, "notes_p")
             assert "the first body" in await _rendered(client, "notes_p")
@@ -371,7 +386,8 @@ async def _keeps_the_last_good_build(webdav, tmp_path, caplog, broken, reason):
         webdav.write(
             "prompts/p.md", PROMPT.format(body="the third body, longest of all")
         )
-        assert "the third body" in await _rendered(client, "notes_p")  # noticed here
+        landed(kb)
+        assert "the third body" in await _rendered(client, "notes_p")  # the first after it
         assert "the third body" in await _rendered(client, "notes_p")
 
 
@@ -405,7 +421,7 @@ def test_a_prompt_broken_by_a_refresh_does_not_block_a_live_skill_edit(
 ):
     """PRM-60: a refresh that finds the plugin's only prompt broken adds the
     plugin with no prompt read, so a later re-read has no prompt to vet, and a
-    skill's edit serves from the request that re-reads it."""
+    skill's edit serves from the first request after the pass."""
     webdav.write("prompts/p.md", PROMPT.format(body="the first body"))
     kb = _knowledge_base(webdav, tmp_path)
     assert "first" in read_served(kb, URI)
@@ -413,8 +429,11 @@ def test_a_prompt_broken_by_a_refresh_does_not_block_a_live_skill_edit(
     kb.refresh(force=True)
     assert [p.name for p in kb.prompts] == []
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    landed(kb)
     with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
-        assert "edited in nextcloud" in read_served(kb, URI), "N6: the re-adding read"
+        assert "edited in nextcloud" in read_served(kb, URI), (
+            "the first request after the pass"
+        )
     assert not [r for r in caplog.records if "not read again" in r.getMessage()]
 
 
@@ -451,8 +470,11 @@ def test_a_broken_edit_to_a_file_that_lost_its_name_does_not_block_a_reread(
     assert [p.template for p in kb.prompts] == ["the served body\n"]
     webdav.write("prompts/b/p.md", "no frontmatter here, and longer than before\n")
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    landed(kb)
     with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
-        assert "edited in nextcloud" in read_served(kb, URI), "N6: the re-adding read"
+        assert "edited in nextcloud" in read_served(kb, URI), (
+            "the first request after the pass"
+        )
     assert not [r for r in caplog.records if "not read again" in r.getMessage()]
 
 
@@ -466,9 +488,9 @@ def test_a_manifest_is_priced_against_the_server_before_it_is_served(
     they describe the copy on disk and the very next read serves something
     else.
 
-    The one read that re-adds the plugin prices the edit, and leaves the build
-    cache holding the one build it made, of the set the re-read served: no
-    build of the set before it is kept (N6)."""
+    The first request after the pass re-adds the plugin and prices the edit,
+    and leaves the build cache holding the one build it made, of the set the
+    re-read served: no build of the set before it is kept (N6)."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     mcp = serving_of(knowledge_base)._mcp
     manifest = "skill://notes/x/_manifest"
@@ -480,8 +502,9 @@ def test_a_manifest_is_priced_against_the_server_before_it_is_served(
     before = size()
     generation = mcp.generation
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    landed(knowledge_base)
 
-    assert size() > before, "N6: the read that re-adds prices the edit"
+    assert size() > before, "the first request after the pass prices the edit"
     assert mcp.generation == generation + 1
     # Reads a kubed-mcp internal: the build cache is public nowhere, so a 0.5.x
     # patch may move it.
@@ -502,14 +525,17 @@ def test_a_new_upstream_file_needs_a_refresh(webdav, tmp_path):
 
 
 def test_reads_within_the_ttl_do_not_hit_the_server(webdav, tmp_path, monkeypatch):
-    """One read of a skill is several reads of its files; one PROPFIND is enough."""
+    """One read of a skill is several reads of its files; one listing is enough,
+    and the TTL is the fetch's (SKL-38)."""
     monkeypatch.setattr(live, "TTL_SECONDS", 60.0)
     knowledge_base = _knowledge_base(webdav, tmp_path)
     read_served(knowledge_base, URI)
+    assert knowledge_base.snapshot.live.wait(5)
     webdav.requests.clear()
 
     read_served(knowledge_base, URI)
     read_served(knowledge_base, URI)
+    assert knowledge_base.snapshot.live.wait(5)
 
     assert webdav.requests == []
 
@@ -525,7 +551,8 @@ def test_a_snapshot_source_never_revalidates(webdav, tmp_path, monkeypatch):
         reached.append(args)
         raise AssertionError("a snapshot source must not touch the network")
 
-    monkeypatch.setattr(live, "fetch_file", boom)
+    monkeypatch.setattr(live, "remote_etags", boom)
+    monkeypatch.setattr(live, "download", boom)
     webdav.requests.clear()
 
     assert "first" in read_served(knowledge_base, URI)
@@ -560,6 +587,7 @@ def test_a_failed_revalidation_says_nothing_about_the_credentials(
     webdav.stop()
 
     with caplog.at_level("WARNING"):
+        landed(knowledge_base)
         read_served(knowledge_base, URI)
 
     assert caplog.text, "a revalidation that failed is worth a line in the log"
@@ -568,17 +596,18 @@ def test_a_failed_revalidation_says_nothing_about_the_credentials(
 
 
 def test_a_failed_revalidation_names_the_source_once(webdav, tmp_path, caplog):
-    """fetch_file's error already carries the fetch, and the log line adds it:
+    """The listing's error already carries the fetch, and the log line adds it:
     `notes://kb: revalidating … failed: notes://kb: …` reads as two fetches."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     read_served(knowledge_base, URI)
     webdav.stop()
 
     with caplog.at_level("WARNING"):
+        landed(knowledge_base)
         read_served(knowledge_base, URI)
 
     assert caplog.text.count(f"{KEY}:") == 1
-    assert caplog.text.count("skills/x/SKILL.md") == 1
+    assert "revalidating the listing failed" in caplog.text
 
 
 def test_a_server_that_hangs_is_asked_once_and_then_left_alone(
@@ -587,40 +616,39 @@ def test_a_server_that_hangs_is_asked_once_and_then_left_alone(
     """The measured collapse: every read paid httpx's 5s default against a 2s
     TTL, and repeats of the *same* file paid it too.
 
-    Two things stop it. The revalidation client has a timeout well under the
-    TTL, so one read costs a bounded moment; and a failure puts the source in a
+    Three things stop it. The read never waits for the server at all: the pass
+    asks it on a thread of its own. The revalidation client has a timeout, so
+    one pass costs a bounded moment; and a failure puts the source in a
     cooldown, so nothing after the first pays anything at all.
 
     "Nothing" is counted, not timed: a read that never asks the hung server
     cannot wait on it, and a wall-clock bound on the repeats only measures the
     runner (one of them took 122 ms on a loaded 3.11 job, against 50 ms).
     """
-    monkeypatch.setattr(live, "REVALIDATE_TIMEOUT", 0.2)
+    monkeypatch.setattr(live, "REVALIDATE_TIMEOUT", 2.0)
     monkeypatch.setattr(live, "COOLDOWN_SECONDS", 60.0)
     knowledge_base = black_hole(tmp_path)
     asked: list[str] = []
-    asking = live.fetch_file
+    asking = live.remote_etags
 
-    def counted(fetch, root, rel, *args, **kwargs):
-        asked.append(rel)
-        return asking(fetch, root, rel, *args, **kwargs)
+    def counted(fetch, fs):
+        asked.append(fetch.key)
+        return asking(fetch, fs)
 
-    monkeypatch.setattr(live, "fetch_file", counted)
+    monkeypatch.setattr(live, "remote_etags", counted)
 
     with caplog.at_level("WARNING"):
         first = _elapsed(knowledge_base, URI)
-        once = len(asked)
+        assert not knowledge_base.snapshot.live.wait(0), "the read did not wait for the pass"
+        assert knowledge_base.snapshot.live.wait(5)
         for _ in range(5):
             read_served(knowledge_base, URI)
-        repeats = len(asked) - once
         read_served(knowledge_base, GUIDE)
-        other = len(asked) - once - repeats
+        assert knowledge_base.snapshot.live.wait(5)
 
-    assert once >= 1, "the first read asks the server"
+    assert first < 1.0, f"one read must not wait for the server: {first:.2f}s"
+    assert asked == [KEY], f"a wedged server must not be asked twice: {asked}"
     assert "first" in read_served(knowledge_base, URI), "the cached copy is still served"
-    assert first < 1.0, f"one read must not cost the httpx default: {first:.2f}s"
-    assert repeats == 0, f"a wedged server must not be asked twice: {asked}"
-    assert other == 0, f"the cooldown covers the source, not the one file: {asked}"
     assert caplog.text.count("revalidating") == 1
 
 
@@ -631,8 +659,8 @@ async def test_health_says_a_live_source_is_cooling_after_a_failure(
     from "we stopped asking"."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     read_served(knowledge_base, URI)
-    monkeypatch.setattr(live, "fetch_file", _wedged)
-    read_served(knowledge_base, URI)
+    monkeypatch.setattr(live, "remote_etags", _wedged)
+    landed(knowledge_base)
 
     transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
@@ -645,14 +673,14 @@ def test_a_source_that_answers_again_stops_cooling(webdav, tmp_path, monkeypatch
     """The cooldown is a pause, not a verdict: a folder comes back by itself."""
     monkeypatch.setattr(live, "COOLDOWN_SECONDS", 0.05)
     knowledge_base = _knowledge_base(webdav, tmp_path)
-    answering = live.fetch_file
-    monkeypatch.setattr(live, "fetch_file", _wedged)
-    read_served(knowledge_base, URI)
+    answering = live.remote_etags
+    monkeypatch.setattr(live, "remote_etags", _wedged)
+    landed(knowledge_base)
     assert knowledge_base.snapshot.stats(KEY)["cooling"] is True
 
-    monkeypatch.setattr(live, "fetch_file", answering)
+    monkeypatch.setattr(live, "remote_etags", answering)
     time.sleep(0.1)
-    read_served(knowledge_base, URI)
+    landed(knowledge_base)
 
     assert "cooling" not in knowledge_base.snapshot.stats(KEY)
 
@@ -660,25 +688,28 @@ def test_a_source_that_answers_again_stops_cooling(webdav, tmp_path, monkeypatch
 def test_the_ttl_runs_from_the_answer_and_not_from_the_question(
     webdav, tmp_path, monkeypatch
 ):
-    """Stamped before the request but measured against elapsed time, a request
-    slower than the TTL leaves the same file due for another the instant it
-    comes back -- so a slow server is asked once per read, not once per TTL."""
+    """Stamped when the pass starts but measured against elapsed time, a
+    listing slower than the TTL leaves the fetch due for another the instant it
+    comes back -- so a slow server is asked once per kick, not once per TTL."""
     monkeypatch.setattr(live, "TTL_SECONDS", 0.3)
     knowledge_base = _knowledge_base(webdav, tmp_path)
+    revalidator = knowledge_base.snapshot.live
     read_served(knowledge_base, URI)
-    answering = live.fetch_file
+    assert revalidator.wait(5)
+    answering = live.remote_etags
 
     def slow(*args, **kwargs):
         time.sleep(0.4)
         return answering(*args, **kwargs)
 
     time.sleep(0.35)
-    monkeypatch.setattr(live, "fetch_file", slow)
-    read_served(knowledge_base, URI)
+    monkeypatch.setattr(live, "remote_etags", slow)
+    landed(knowledge_base)
 
-    monkeypatch.setattr(live, "fetch_file", answering)
+    monkeypatch.setattr(live, "remote_etags", answering)
     webdav.requests.clear()
-    read_served(knowledge_base, URI)
+    revalidator.revalidate(knowledge_base.index.get("notes/x").path)
+    assert revalidator.wait(5)
 
     assert webdav.requests == [], "the TTL must bound a slow server too"
 
@@ -700,9 +731,10 @@ def test_the_revalidator_follows_the_export_a_refresh_created(webdav, tmp_path):
     assert current != retired
 
     webdav.skill("x", "edited after the refresh, and longer than it was")
+    landed(knowledge_base)
 
     assert "edited after the refresh" in read_served(knowledge_base, URI), (
-        "N6: the re-adding read"
+        "the first request after the pass"
     )
     assert "first" in (retired / "SKILL.md").read_text(), "the retired export stands"
 
@@ -722,6 +754,7 @@ def test_one_client_serves_every_live_read(webdav, tmp_path, monkeypatch):
     read_served(knowledge_base, URI)
     read_served(knowledge_base, URI)
     read_served(knowledge_base, GUIDE)
+    assert knowledge_base.snapshot.live.wait(5)
 
     assert built == [KEY]
 
@@ -730,6 +763,7 @@ async def test_health_reports_what_a_live_source_revalidated(webdav, tmp_path):
     knowledge_base = _knowledge_base(webdav, tmp_path)
     read_served(knowledge_base, URI)
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    landed(knowledge_base)
     read_served(knowledge_base, URI)
 
     transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
@@ -738,8 +772,11 @@ async def test_health_reports_what_a_live_source_revalidated(webdav, tmp_path):
 
     fetch = body["fetches"][KEY]
     assert fetch["live"] is True
-    # Once per request that reads skills, and once for the first build.
-    assert fetch["revalidated"] == 3
+    # Every file of the export, once per pass: the boot publish's and landed's
+    # at least (L3).
+    files = len(live.recorded_etags(knowledge_base.served_tree(KEY)))
+    assert files == 2
+    assert fetch["revalidated"] >= 2 * files
     assert fetch["fetched"] == 1
 
 
@@ -763,6 +800,259 @@ def test_a_snapshot_source_reports_no_live_fields(webdav, tmp_path):
     knowledge_base = _knowledge_base(webdav, tmp_path, cache="snapshot")
 
     assert "live" not in knowledge_base.status["fetches"][KEY]
+
+
+# -- the background pass -------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_a_blocked_listing_delays_no_request(webdav, tmp_path, monkeypatch):
+    """L1: the server holds every PROPFIND for 2 s, and no request waits for it --
+    not the one that starts the revalidation, not another client's, not ``/health``."""
+    monkeypatch.setattr(live, "REVALIDATE_TIMEOUT", 5.0)  # a read on the loop would wait 2 s
+    kb = _knowledge_base(webdav, tmp_path)
+    serving_of(kb)
+    assert kb.snapshot.live.wait(5), "the boot publish's pass is done"
+    arrived = webdav.stall("PROPFIND", 2.0)
+    with serve_http(kb) as url:
+        async with http_client(url) as kicker, http_client(url) as other:
+            start = time.monotonic()
+            await kicker.list_resources()  # kicks the pass
+            kicked = time.monotonic() - start
+            assert await asyncio.to_thread(arrived.wait, 5), "the pass never reached the server"
+            start = time.monotonic()
+            await other.list_resources()
+            listed = time.monotonic() - start
+            async with httpx.AsyncClient() as http:
+                start = time.monotonic()
+                assert (await http.get(url.removesuffix("/mcp") + "/health")).status_code == 200
+                health = time.monotonic() - start
+    assert kicked < 1.0 and listed < 1.0 and health < 1.0, (kicked, listed, health)
+
+
+def _held_listing(monkeypatch, *, hold_first=True):
+    """``live.remote_etags``, counted by fetch key; the first call answers and
+    then waits on ``release`` (5 s at most) when ``hold_first``."""
+    calls: list[str] = []
+    entered = threading.Event()
+    release = threading.Event()
+    real = live.remote_etags
+
+    def listing(fetch, fs):
+        calls.append(fetch.key)
+        listed = real(fetch, fs)
+        entered.set()
+        if hold_first:
+            release.wait(5)
+        return listed
+
+    monkeypatch.setattr(live, "remote_etags", listing)
+    return calls, entered, release
+
+
+def test_kicks_while_a_pass_runs_start_no_second(webdav, tmp_path, monkeypatch):
+    """SKL-38: one revalidation at a time. Kicks that land while a pass runs
+    start nothing, and wait for nothing."""
+    kb = _knowledge_base(webdav, tmp_path)
+    revalidator = kb.snapshot.live
+    assert revalidator.wait(5)
+    calls, entered, release = _held_listing(monkeypatch)
+    path = kb.index.get("notes/x").path / "SKILL.md"
+
+    revalidator.revalidate(path)
+    assert entered.wait(5), "the pass listed"
+    for _ in range(9):
+        start = time.monotonic()
+        revalidator.revalidate(path)
+        assert time.monotonic() - start < 0.5, "a kick waits for nothing"
+
+    assert calls == [KEY]
+    assert [t.name for t in threading.enumerate()].count("kb-revalidate") == 1
+    release.set()
+    assert revalidator.wait(5)
+
+
+def test_one_pass_prices_every_due_live_fetch(webdav, tmp_path, monkeypatch):
+    """SKL-38: the pass a kick starts covers every live fetch that is due, the
+    one kicked and the others, one listing each."""
+    webdav.write(
+        "other/skills/z/SKILL.md", "---\nname: z\ndescription: Z.\n---\n\nz\n"
+    )
+    kb = _live_config(
+        webdav,
+        tmp_path,
+        [
+            {"name": "notes", "source": KEY},
+            {"name": "other", "source": f"{KEY}/other"},
+        ],
+        [
+            {"name": "notes", "plugins": ["notes"]},
+            {"name": "other", "plugins": ["other"]},
+        ],
+    )
+    revalidator = kb.snapshot.live
+    assert revalidator.wait(5)
+    calls, _, _ = _held_listing(monkeypatch, hold_first=False)
+
+    revalidator.revalidate(kb.index.get("notes/x").path / "SKILL.md")
+    assert revalidator.wait(5)
+
+    assert sorted(calls) == sorted([KEY, f"{KEY}/other"])
+
+
+def test_a_retired_revalidator_stops_between_files_and_ignores_kicks(
+    webdav, tmp_path, monkeypatch
+):
+    """A revalidator retired mid-pass finishes the download under way and
+    starts no other, and a kick after it starts nothing."""
+    kb = _knowledge_base(webdav, tmp_path)
+    revalidator = kb.snapshot.live
+    export = kb.index.get("notes/x").path
+    webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    webdav.write("docs/guide.md", "guidance, revised and lengthened upstream\n")
+    calls, _, _ = _held_listing(monkeypatch, hold_first=False)
+    downloads = []
+    real = live.download
+
+    def download(fetch, root, rel, fs):
+        downloads.append(rel)
+        if len(downloads) == 1:
+            revalidator.retire()
+        return real(fetch, root, rel, fs)
+
+    monkeypatch.setattr(live, "download", download)
+
+    landed(kb)
+
+    assert downloads == ["docs/guide.md"]
+    assert "first" in (export / "SKILL.md").read_text(), "the second file is left"
+    assert revalidator.retired is True
+    listed = len(calls)
+    thread = revalidator._thread
+    revalidator.revalidate(export / "SKILL.md")
+    assert revalidator._thread is thread, "a kick after retire() starts no thread"
+    assert revalidator.wait(0)
+    assert len(calls) == listed, "a retired revalidator starts nothing"
+
+
+def test_an_edit_during_a_pass_is_seen_by_the_next(webdav, tmp_path, monkeypatch):
+    """An edit that lands after a pass listed is not lost: that pass brings it
+    nothing, and the next due one does."""
+    kb = _knowledge_base(webdav, tmp_path)
+    serving_of(kb)
+    revalidator = kb.snapshot.live
+    assert revalidator.wait(5)
+    _, entered, release = _held_listing(monkeypatch)
+
+    revalidator.revalidate(kb.index.get("notes/x").path / "SKILL.md")
+    assert entered.wait(5), "the pass listed"
+    webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    release.set()
+    assert revalidator.wait(5)
+    assert revalidator.stats(KEY)["fetched"] == 0, "that pass listed before the edit"
+
+    landed(kb)
+    assert "edited in nextcloud" in read_served(kb, URI)
+
+
+def test_a_pass_that_raises_releases_the_flag(webdav, tmp_path, monkeypatch):
+    """A pass that dies of something nobody expected, a full disk, still lets
+    the next one start once its fetch has cooled."""
+    monkeypatch.setattr(live, "COOLDOWN_SECONDS", 0.05)
+    kb = _knowledge_base(webdav, tmp_path)
+    serving_of(kb)
+    assert kb.snapshot.live.wait(5)
+    webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    calls, _, _ = _held_listing(monkeypatch, hold_first=False)
+    real = live.download
+    failed = []
+
+    def download(*args):
+        if not failed:
+            failed.append(args[2])
+            raise OSError("No space left on device")
+        return real(*args)
+
+    monkeypatch.setattr(live, "download", download)
+
+    landed(kb)
+    assert failed == ["skills/x/SKILL.md"]
+    listed = len(calls)
+    time.sleep(0.1)
+    landed(kb)
+
+    assert len(calls) == listed + 1
+    assert "edited in nextcloud" in read_served(kb, URI)
+
+
+def test_a_missing_local_copy_is_downloaded_again(webdav, tmp_path):
+    """A local copy that lost a file whose ETag has not moved is put back."""
+    kb = _knowledge_base(webdav, tmp_path)
+    copy = kb.index.get("notes/x").path / "SKILL.md"
+    copy.unlink()
+
+    landed(kb)
+
+    assert "first" in copy.read_text()
+    assert kb.snapshot.stats(KEY)["fetched"] == 1
+
+
+def test_a_file_gone_upstream_keeps_its_local_copy(webdav, tmp_path):
+    """SRC-24: a file deleted upstream goes on serving from the local copy until
+    a refresh, and a pass downloads and counts nothing for it."""
+    kb = _knowledge_base(webdav, tmp_path)
+    landed(kb)
+    files = len(live.recorded_etags(kb.served_tree(KEY)))
+    before = kb.snapshot.stats(KEY)["revalidated"]
+    (webdav.root / "docs/guide.md").unlink()
+    webdav.requests.clear()
+
+    landed(kb)
+
+    stats = kb.snapshot.stats(KEY)
+    assert webdav.method("GET") == [], "nothing is downloaded for it"
+    assert "cooling" not in stats, "a file gone upstream is no failure"
+    assert stats["revalidated"] - before == files - 1, "and nothing is counted for it"
+    assert stats["fetched"] == 0
+    assert read_served(kb, GUIDE) == "library-level guidance\n"
+
+
+def test_a_failed_download_names_its_file_once(webdav, tmp_path, monkeypatch, caplog):
+    """SRC-23: a GET that fails names its fetch once, and its file."""
+    kb = _knowledge_base(webdav, tmp_path)
+    webdav.skill("x", "edited in nextcloud, and rather longer than before")
+
+    def refused(fetch, root, rel, fs):
+        raise SourceError(f"{KEY}: fetch of skills/x/SKILL.md failed: HTTP 500")
+
+    monkeypatch.setattr(live, "download", refused)
+
+    with caplog.at_level(logging.WARNING):
+        landed(kb)
+
+    lines = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert lines == [f"{KEY}: revalidating skills/x/SKILL.md failed: HTTP 500"]
+
+
+def test_a_full_disk_names_no_cache_path(webdav, tmp_path, monkeypatch, caplog):
+    """SRC-23: an ``OSError`` from a download, a full disk, is said by its words;
+    its filename, a temporary file under the cache, is not in the log."""
+    kb = _knowledge_base(webdav, tmp_path)
+    webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    staged = str(tmp_path / "cache" / "src" / "notes-kb" / ".work" / "kb-tmp")
+
+    def full(fetch, root, rel, fs):
+        raise OSError(28, "No space left on device", staged)
+
+    monkeypatch.setattr(live, "download", full)
+
+    with caplog.at_level(logging.WARNING):
+        landed(kb)
+
+    (line,) = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert "skills/x/SKILL.md" in line
+    assert "No space left on device" in line
+    assert str(tmp_path) not in line, line
 
 
 # -- re-reading on view (D9) ----------------------------------------------------
@@ -838,18 +1128,21 @@ def _skill_view(knowledge_base) -> tuple[str, dict, dict]:
 
 
 def test_a_live_edit_reads_after_trust(webdav, tmp_path, clock):
-    """D9: within the 2 s trust an edit is not looked for; past it, the read
-    that revalidates re-adds the plugin and serves the edit, and the reads
-    after it serve it too, its ``_manifest`` and its entry agreeing (N6)."""
+    """D9: within the 2 s trust an edit is not looked for; past it, the first
+    request after the pass re-adds the plugin and serves the edit, and the
+    reads after it serve it too, its ``_manifest`` and its entry agreeing (N6)."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     assert "first" in read_served(knowledge_base, URI)
+    # The boot publish's pass, which must not be the one that sees the edit.
+    assert knowledge_base.snapshot.live.wait(5)
 
     webdav.write("skills/x/SKILL.md", EDITED)
     assert "first" in read_served(knowledge_base, URI), "trusted for 2 s"
 
     clock(2.5)
+    landed(knowledge_base)
     assert "edited in nextcloud" in read_served(knowledge_base, URI), (
-        "N6: the re-adding read"
+        "the first request after the pass"
     )
     text, manifest, entry = _skill_view(knowledge_base)
 
@@ -875,6 +1168,7 @@ def test_a_reread_keeps_every_other_plugin(webdav, tmp_path):
     assert set(before) == {"notes", "other"}
 
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    landed(knowledge_base)
     assert "edited in nextcloud" in read_served(knowledge_base, URI)
 
     after = {p.namespace: p for p in mcp.plugins}
@@ -897,28 +1191,37 @@ def test_no_reread_while_a_refresh_publishes(webdav, tmp_path):
         assert "first" in read_served(knowledge_base, URI)
         assert mcp.generation == generation
 
+    landed(knowledge_base)
     assert "edited in nextcloud" in read_served(knowledge_base, URI)
     assert mcp.generation == generation + 1
 
 
-async def test_an_out_of_scope_live_skill_is_not_revalidated(webdav, tmp_path):
-    """Only the plugins a request's scope admits are revalidated."""
+async def test_an_out_of_scope_live_plugin_is_not_reread(webdav, tmp_path):
+    """D10: a pass lists the whole fetch, but a request re-reads only the
+    plugins its scope admits; every other one is kept as served."""
     knowledge_base = _two_libraries(webdav, tmp_path)
-    serving_of(knowledge_base)
-    webdav.requests.clear()
+    mcp = serving_of(knowledge_base)._mcp
+    before = {p.namespace: p for p in mcp.plugins}
+    webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    webdav.write(
+        "other/skills/z/SKILL.md",
+        "---\nname: z\ndescription: Z.\n---\n\nz, edited upstream and longer\n",
+    )
+    landed(knowledge_base)
 
     with serve_http(knowledge_base) as url:
         async with http_client(url + "?library=other") as client:
-            assert "z" in (await client.read_resource(OTHER))[0].text
+            text = (await client.read_resource(OTHER))[0].text
+            assert "z, edited upstream" in text
 
-    paths = [path for _, path in webdav.requests]
-    assert f"/{FOLDER}/other/skills/z/SKILL.md" in paths, "the admitted one is"
-    assert not [p for p in paths if p.startswith(f"/{FOLDER}/skills/")]
+    after = {p.namespace: p for p in mcp.plugins}
+    assert after["notes"] is before["notes"], "out of scope: not re-read"
+    assert after["other"] is not before["other"]
 
 
 def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock, caplog):
-    """N6 for an agent: the re-adding request serves the edit, and so does the
-    one after it, on ``agents/get`` and ``agents/list`` both; an edit that no longer
+    """N6 for an agent: the first request after the pass serves the edit, and so
+    does the one after it, on ``agents/get`` and ``agents/list`` both; an edit that no longer
     parses keeps the plugin's last good build, said once (AGT-16), and the next good
     one is served."""
     webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
@@ -936,6 +1239,7 @@ def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock, caplog):
     def edit(text: str):
         webdav.write("agents/helper.md", text)
         clock(2.5)
+        landed(knowledge_base)
 
         async def go(client):
             try:
@@ -954,7 +1258,7 @@ def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock, caplog):
     first, got, listed = edit(
         AGENT.format(description="Helps, edited upstream.", body="Help, edited.")
     )
-    assert first["instructions"] == "Help, edited.", "N6: the re-adding request"
+    assert first["instructions"] == "Help, edited.", "the first request after the pass"
     assert got["instructions"] == "Help, edited."
     for key in ("io.kubed/agent", "io.kubed.mcp-kb/agent"):
         assert got["_meta"][key]["frontmatter"]["description"] == (
@@ -973,7 +1277,9 @@ def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock, caplog):
     first, got, listed = edit(
         AGENT.format(description="Helps again.", body="Help, saved properly.")
     )
-    assert first["instructions"] == "Help, saved properly.", "N6: the re-adding request"
+    assert first["instructions"] == "Help, saved properly.", (
+        "the first request after the pass"
+    )
     assert got["instructions"] == "Help, saved properly."
     assert listed[name]["description"] == "Helps again."
 
@@ -1001,6 +1307,7 @@ def test_a_live_agent_saved_with_an_unusable_name_keeps_its_name(
         '---\nname: "a b"\ndescription: Helps, renamed.\n---\n\nRenamed.\n',
     )
     clock(2.5)
+    landed(knowledge_base)
 
     async def go(client):
         first = await names(client)
@@ -1009,7 +1316,7 @@ def test_a_live_agent_saved_with_an_unusable_name_keeps_its_name(
         return first, then, got
 
     first, then, got = run_client(knowledge_base, go)
-    assert first == {"notes_helper"}, "N6: the re-adding request"
+    assert first == {"notes_helper"}, "the first request after the pass"
     assert then == {"notes_helper"}, "AGT-16: the agent keeps its name"
     assert got["instructions"] == "Help first."
     assert got["_meta"]["io.kubed.mcp-kb/agent"]["frontmatter"]["name"] == "helper"
@@ -1025,8 +1332,8 @@ def test_a_live_edit_taking_a_twins_name_serves_the_first_in_path_order(
     webdav, tmp_path, clock
 ):
     """AGT-16's carve-out: an edit that gives an agent the name another file of
-    its plugin serves still reads, so no build is kept. From the request that
-    re-reads it, the first file in path order is served under that name and the other is
+    its plugin serves still reads, so no build is kept. From the first request
+    after the pass, the first file in path order is served under that name and the other is
     skipped (AGT-6), as a refresh of the same tree serves them."""
     webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
     webdav.write(
@@ -1048,6 +1355,7 @@ def test_a_live_edit_taking_a_twins_name_serves_the_first_in_path_order(
         "---\nname: helper\ndescription: A, renamed.\n---\n\nAlpha's, renamed.\n",
     )
     clock(2.5)
+    landed(knowledge_base)
 
     async def go(client):
         first = await names(client)
@@ -1056,7 +1364,7 @@ def test_a_live_edit_taking_a_twins_name_serves_the_first_in_path_order(
         return first, then, got
 
     first, then, got = run_client(knowledge_base, go)
-    assert first == {"notes_helper"}, "N6: the re-adding request"
+    assert first == {"notes_helper"}, "the first request after the pass"
     assert then == {"notes_helper"}, "AGT-6: one name, the first file in path order"
     assert got["instructions"] == "Alpha's, renamed."
     assert knowledge_base.generation == 0, "no refresh did it"
@@ -1092,6 +1400,7 @@ def test_a_live_watch_stamps_the_agents_the_manifest_lists(webdav, tmp_path, clo
         "---\nname: old\ndescription: Old, edited.\n---\n\nNot listed, and longer.\n",
     )
     clock(2.5)
+    landed(knowledge_base)
     run_client(knowledge_base, twice)
     assert mcp.generation == generation, "an unlisted file is not watched"
 
@@ -1099,8 +1408,9 @@ def test_a_live_watch_stamps_the_agents_the_manifest_lists(webdav, tmp_path, clo
         "roles/r.md", AGENT.format(description="Roles, edited.", body="Role, edited.")
     )
     clock(2.5)
+    landed(knowledge_base)
     first, got = run_client(knowledge_base, twice)
-    assert first["instructions"] == "Role, edited.", "N6: the re-adding request"
+    assert first["instructions"] == "Role, edited.", "the first request after the pass"
     assert got["instructions"] == "Role, edited."
     assert mcp.generation == generation + 1
 
@@ -1174,6 +1484,7 @@ def test_a_publisher_that_raises_leaves_the_records_as_they_were(
 
     # Live re-reads resume against the tree being served (N6).
     webdav.skill("x", "edited live after the failed refresh, and longer again")
+    landed(knowledge_base)
     assert "edited live after the failed refresh" in read_served(knowledge_base, URI)
 
     webdav.skill("x", "edited for the refresh that publishes, much longer than that")
@@ -1184,6 +1495,7 @@ def test_a_publisher_that_raises_leaves_the_records_as_they_were(
     assert "edited for the refresh that publishes" in read_served(knowledge_base, URI)
 
     webdav.skill("x", "and live again after it, the longest edit of all of them")
+    landed(knowledge_base)
     assert "and live again after it" in read_served(knowledge_base, URI)
 
 
@@ -1222,6 +1534,7 @@ def test_a_reread_that_reads_a_new_export_is_abandoned(
 
     monkeypatch.setattr(ServedTrees, "materialise", materialise)
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    landed(knowledge_base)
 
     read_served(knowledge_base, URI)
     assert switched, "the moved plugin was read"
@@ -1275,6 +1588,7 @@ async def test_a_reread_in_a_refreshs_window_names_no_cache_path(
 
     monkeypatch.setattr(ServedTrees, "materialise", materialise)
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    landed(knowledge_base)
     with caplog.at_level(logging.WARNING):
         read_served(knowledge_base, URI)
         read_served(knowledge_base, URI)
@@ -1314,7 +1628,10 @@ def test_no_reread_between_a_publish_and_its_swap(webdav, tmp_path, monkeypatch)
     assert knowledge_base.refresh() == [KEY]
 
     assert seen == {"moved": 0}
-    assert "edited again" in read_served(knowledge_base, URI), "N6: the re-adding read"
+    landed(knowledge_base)
+    assert "edited again" in read_served(knowledge_base, URI), (
+        "the first request after the pass"
+    )
 
 
 def test_a_reread_that_cannot_serve_says_so_once(webdav, tmp_path, monkeypatch, caplog):
@@ -1332,6 +1649,7 @@ def test_a_reread_that_cannot_serve_says_so_once(webdav, tmp_path, monkeypatch, 
 
     monkeypatch.setattr(mcp, "serve", refused)
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    landed(knowledge_base)
 
     with caplog.at_level("WARNING"):
         for _ in range(4):
@@ -1347,7 +1665,7 @@ def test_a_reread_that_cannot_serve_says_so_once(webdav, tmp_path, monkeypatch, 
 
 def test_a_plugin_refused_at_publish_is_not_reread(webdav, tmp_path, monkeypatch):
     """A plugin kubed-mcp refused is not served, so a re-read neither
-    revalidates nor adds it, whatever the scope: its conflict carries over."""
+    re-reads nor adds it, whatever the scope: its conflict carries over."""
     from kubed.mcp.plugins import PluginError, PluginSet
 
     real = PluginSet.add
@@ -1368,10 +1686,10 @@ def test_a_plugin_refused_at_publish_is_not_reread(webdav, tmp_path, monkeypatch
     webdav.requests.clear()
 
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    landed(knowledge_base)
     assert "edited in nextcloud" in read_served(knowledge_base, URI)
 
     assert asked == ["notes", "other", "notes"]
-    assert not [p for _, p in webdav.requests if p.startswith(f"/{FOLDER}/other/")]
     assert knowledge_base.status["libraries"]["other"]["conflicts"] == conflicts
 
 
@@ -1394,6 +1712,7 @@ def test_a_kept_plugins_agents_are_not_read_again(webdav, tmp_path, monkeypatch)
 
     monkeypatch.setattr(serving_module, "_frontmatter", counted)
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
+    landed(knowledge_base)
     assert "edited in nextcloud" in read_served(knowledge_base, URI)
 
     assert "agents/z.md" not in read
@@ -1442,6 +1761,7 @@ def test_a_kept_local_plugins_agents_are_not_read_again(webdav, tmp_path, caplog
     def reread(text: str, edit: str):
         agent.write_text(text)
         webdav.skill("x", edit)
+        landed(knowledge_base)
         assert edit in read_served(knowledge_base, URI), "the live plugin re-read"
         return run_client(knowledge_base, go)
 
@@ -1468,7 +1788,7 @@ def test_a_kept_local_plugins_agents_are_not_read_again(webdav, tmp_path, caplog
 
 def test_a_live_rename_renames_a_later_clashing_agent(webdav, tmp_path):
     """N6: a live edit of an agent's frontmatter ``name`` is served under the
-    new name from the request that re-reads it, without a refresh, and a later plugin's
+    new name from the first request after the pass, without a refresh, and a later plugin's
     agent it now clashes with is renamed ``<name>@<plugin>`` (PLUG-64)."""
     webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
     webdav.write("agents/helper.md", AGENT.format(description="Helps.", body="Mine."))
@@ -1499,6 +1819,7 @@ def test_a_live_rename_renames_a_later_clashing_agent(webdav, tmp_path):
         "agents/helper.md",
         "---\nname: aide\ndescription: Helps, renamed.\n---\n\nMine, renamed.\n",
     )
+    landed(knowledge_base)
 
     async def go(client):
         first = await names(client)
@@ -1508,7 +1829,7 @@ def test_a_live_rename_renames_a_later_clashing_agent(webdav, tmp_path):
         return first, then, mine, kits
 
     first, then, mine, kits = run_client(knowledge_base, go)
-    assert first == {"notes_aide", "notes_aide@kit"}, "N6: the re-adding request"
+    assert first == {"notes_aide", "notes_aide@kit"}, "the first request after the pass"
     assert then == {"notes_aide", "notes_aide@kit"}
     assert mine["instructions"] == "Mine, renamed."
     assert kits["instructions"] == "Kit's."
@@ -1516,6 +1837,18 @@ def test_a_live_rename_renames_a_later_clashing_agent(webdav, tmp_path):
 
 
 # -- helpers -------------------------------------------------------------------
+
+
+def landed(kb) -> None:
+    """A revalidation that started after this call has run to its end.
+
+    Waiting on the pass in flight alone is not enough: it may have listed
+    before the test's edit, and then brings nothing down. So: wait for it,
+    kick one, and wait for that one too (D12)."""
+    revalidator = kb.snapshot.live
+    assert revalidator.wait(5)
+    revalidator.revalidate(kb.index.get("notes/x").path.parent)
+    assert revalidator.wait(5)
 
 
 def _wedged(*args, **kwargs):

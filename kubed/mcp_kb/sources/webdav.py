@@ -20,13 +20,13 @@ Three things this module is careful about:
   is -- so nothing that lands under the cache, in a log line or in the errors
   ``/health`` publishes can carry it. An HTTP failure is reported as its status
   and nothing more.
-- **A live read replaces one file, atomically.** ``download`` is the per-file
-  half of ``cache: live`` (``fetch_file`` wraps it with one PROPFIND, and only
-  if the ETag moved is there a GET): one GET
-  into a temporary file in ``.work/`` beside the export that is then renamed
-  over the local copy. A reader holding the old file reads the old file to its
-  end, and a download that is killed half way through leaves nothing inside
-  the export for the next pass to read as a missing file.
+- **A live revalidation replaces one file at a time, atomically.** The
+  background pass of ``cache: live`` (``live.py``) lists the folder with
+  ``remote_etags`` and calls ``download`` for each file whose ETag moved: one
+  GET into a temporary file in ``.work/`` beside the export, which is then
+  renamed over the local copy. A reader holding the old file reads the old
+  file to its end, and a download that is killed half way through leaves
+  nothing inside the export for the next pass to read as a missing file.
 
 Read-only throughout: a fetch is copied from and never written to.
 """
@@ -93,8 +93,9 @@ def client(fetch: Fetch, *, timeout: float | None = None) -> WebdavFileSystem:
     it changes underneath us.
 
     ``timeout`` is per HTTP operation and left to httpx's own default here --
-    an index-time copy of a large folder is allowed to take its time. A read
-    is not, and ``live.py`` passes one; see ``REVALIDATE_TIMEOUT``.
+    an index-time copy of a large folder is allowed to take its time. A live
+    revalidation pass is not, and ``live.py`` passes one; see
+    ``REVALIDATE_TIMEOUT``.
     """
     if fetch.auth is None:
         # SourceConfig refuses an anonymous webdav source; a Fetch built by
@@ -160,44 +161,6 @@ def fingerprint_webdav(fetch: Fetch, cache: Path, root: Path) -> dict:
         "remote": _version(etags),
         "remote_files": len(etags),
     }
-
-
-def fetch_file(
-    fetch: Fetch,
-    root: Path,
-    rel: str,
-    etag: str | None = None,
-    *,
-    fs: WebdavFileSystem | None = None,
-) -> str | None:
-    """Revalidate one file against the server; re-download it only if it moved.
-
-    ``etag`` is what the file was when it was copied -- the caller's record of
-    it, or the export's own if the caller has none. Returns the ETag the file
-    has now, which is the same object when nothing changed, or None when the
-    file is gone upstream: a deleted file is not a deleted skill, and the local
-    copy goes on being served until a refresh rebuilds the fetch without it.
-
-    ``fs`` lets a caller reuse one client across many reads, which is the whole
-    difference between a live fetch and a slow one.
-    """
-    target = _inside(fetch, root, rel)
-    fs = fs or client(fetch)
-    recorded = etag if etag is not None else recorded_etags(root).get(rel)
-
-    try:
-        info = fs.info(rel)
-    except FileNotFoundError:
-        return None
-    except Exception as exc:
-        raise SourceError(f"{fetch.key}: {_failure(exc)} for {rel}") from exc
-
-    current = _etag(info)
-    if current == recorded and target.is_file():
-        return current
-
-    download(fetch, root, rel, fs)
-    return current
 
 
 def download(fetch: Fetch, root: Path, rel: str, fs: WebdavFileSystem) -> None:
@@ -349,6 +312,9 @@ def _failure(exc: Exception) -> str:
         return f"HTTP {exc.status_code}" + (f": {meaning}" if meaning else "")
     if isinstance(exc, ClientError):
         return str(exc)
+    if isinstance(exc, OSError) and exc.strerror:
+        # Its filename is a path under the cache: a download's temporary file.
+        return f"{type(exc).__name__}: {exc.strerror}"
     return f"{type(exc).__name__}: {exc}"
 
 

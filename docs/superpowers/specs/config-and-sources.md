@@ -273,29 +273,34 @@ library file is read off disk each time.
 
 ## `cache: live`
 
-**SRC-21.** On a live fetch, each read of one of its library files first
-revalidates that file, and each request that reads skills, agents or prompts first revalidates
-every file of the live skills, and each agent and prompt file, of the plugins its scope admits
-(SKL-37): one request for its ETag, and a download only if the ETag differs from the local copy's.
-A skill's, an agent's or a prompt's edit found that way is served to the request that found it.
+**SRC-21.** On a live fetch, each read of one of its library files, and each request that reads
+skills, agents or prompts under a scope admitting one of its plugins, starts the fetch's
+revalidation in the background if one is due (SKL-37). It is served from the local copy as it
+is. A revalidation lists the fetch's folder once, one PROPFIND per directory, and downloads each
+file the local copy holds whose ETag differs from the local copy's. An edit is served from the
+first request after the revalidation that found it.
 
 **SRC-22.** A download is staged in `<cache>/src/<slug>/.work/` and renamed over the local copy in
 one step, so a reader sees one whole version of the file.
 
 | Bound | Value |
 |---|---|
-| a file revalidated this recently is served without asking | 2 s |
+| a fetch revalidated this recently is not revalidated again | 2 s |
 | one revalidation request times out after | 1 s |
 | after a failure, the fetch is not revalidated for | 30 s |
+| revalidations running at once for the generation served | 1 |
 
-**SRC-23.** A failed revalidation logs a warning and serves the local copy; the read never fails
-for it. While the fetch is cooling, `/health` shows `cooling: true`.
+**SRC-23.** A failed revalidation logs one warning, `<fetch>: revalidating the listing failed:
+<reason>` or `<fetch>: revalidating <path> failed: <reason>`, with no URL or credential. The local
+copy goes on serving, and no read fails or waits for it. While the fetch is cooling, `/health`
+shows `cooling: true`.
 
 **SRC-24.** A file deleted upstream is served from the local copy until the fetch is rebuilt. A
 file added or renamed upstream, and an edited description in a listing, wait for a rebuild.
 
-**SRC-25.** A live fetch's `/health` entry carries `live: true` and the counts `revalidated` and
-`fetched`.
+**SRC-25.** A live fetch's `/health` entry carries `live: true` and two counts: `revalidated`,
+the files a revalidation compared against the server's listing, and `fetched`, the ones
+downloaded again.
 
 ## The cache directory
 

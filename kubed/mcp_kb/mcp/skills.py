@@ -71,13 +71,15 @@ serves. Either order of the swaps leaves such a window. Closing it needs
 kubed-mcp to hand the pinned generation to the view and on ``Site``.
 
 **A live plugin is re-read on view (D9).** What a live plugin's skill, agent and
-prompt files held on disk is stamped as it enters the set. The view revalidates the
-live plugins its request's scope admits and stamps them again; a plugin whose
-stamp moved is added again, every other one is kept as served, and the set is
-served and kb's catalogue narrowed afresh, under the generation it already had.
-The view re-reads before it pins kb's state, and kubed-mcp takes its own state
-after the view (0.4.2), so the request whose view re-reads a moved plugin reads
-the re-read, its pin for the rewriter included (SKL-37, N6).
+prompt files held on disk is stamped as it enters the set. The view starts the
+background revalidation of the live plugins its request's scope admits, which
+never waits for the server, and stamps them again from disk; a plugin whose
+stamp moved, because a revalidation that landed since downloaded one of its
+files, is added again, every other one is kept as served, and the set is served
+and kb's catalogue narrowed afresh, under the generation it already had. The
+view re-reads before it pins kb's state, and kubed-mcp takes its own state
+after the view (0.4.2), so the first request after the revalidation that moved
+a plugin reads the re-read, its pin for the rewriter included (SKL-37, N6).
 """
 
 from __future__ import annotations
@@ -1079,11 +1081,12 @@ class SkillServing:
     def view(self) -> View:
         """The plugins the request's scope admits, which is also the build key.
 
-        The live ones among them are revalidated first, and re-read when they
-        moved (D9). The published state is read after that re-read and pinned
-        for the rewriter, and kubed-mcp takes its own state after the view
-        (0.4.2), so the request that re-reads builds the re-read and serves the
-        edit (SKL-37, N6).
+        The live ones among them start their background revalidation first,
+        and are re-read when a revalidation that landed moved them (D9). The
+        published state is read after that re-read and pinned for the
+        rewriter, and kubed-mcp takes its own state after the view (0.4.2), so
+        the request that re-reads builds the re-read and serves the edit: the
+        first request after the revalidation (SKL-37, N6).
         """
         scope = requested_scope()
         self._reread_live(scope)
@@ -1099,15 +1102,17 @@ class SkillServing:
         return View(key, admits)
 
     def _reread_live(self, scope: Scope) -> None:
-        """Revalidate the live plugins ``scope`` admits, and serve again with
-        each one whose files moved read afresh (D9).
+        """Start the background revalidation of the live plugins ``scope``
+        admits, and serve again with each one whose files moved on disk read
+        afresh (D9). No network here: what moved is what a revalidation that
+        landed since the last stamp downloaded.
 
         Under the serving lock, taken without blocking: a publish holding it
         serves a new set anyway, so this request reads what is served. Never
         takes the knowledge base's lock, which a refresh holds while it waits
-        for this one. It runs before the view pins kb's state and before
-        kubed-mcp takes its own (0.4.2), so the request that re-reads serves the
-        edit (SKL-37, N6).
+        for this one; nor does the revalidation, on its own thread. It runs
+        before the view pins kb's state and before kubed-mcp takes its own
+        (0.4.2), so the request that re-reads serves the edit (SKL-37, N6).
         """
         if not self._published.live:
             return
@@ -1357,7 +1362,8 @@ def _same_folder(recorded: Path | None, read: Path) -> bool:
 
 def _stamp(snapshot: Snapshot, skills: Sequence[Skill], files: Sequence[Path]) -> tuple:
     """What a live plugin's ``skills``, agent and prompt ``files`` hold on disk now,
-    each revalidated first (SKL-37)."""
+    each starting its fetch's background revalidation first (SKL-37), which
+    this does not wait for."""
     catalogue = snapshot.catalogue
     parts: list[tuple] = [catalogue.live_stamp(skill) for skill in skills]
     for path in files:

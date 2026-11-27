@@ -190,9 +190,10 @@ class Snapshot:
     prompts: tuple[FilePrompt, ...]
     status: dict[str, dict] = field(default_factory=dict)
     # The live fetches of this generation, or None when none is live. Built
-    # here and retired here: a refresh exports a fetch to a new directory, so
-    # a revalidator that outlived its snapshot would go on writing into the
-    # tree nothing is serving.
+    # here and retired with the snapshot: a refresh exports a fetch to a new
+    # directory, so a revalidator that outlived its snapshot would go on
+    # writing into the tree nothing is serving. Its passes run on a thread of
+    # their own, never on a request's.
     live: Revalidator | None = None
     # What the generation was built from: the libraries in config order and
     # every resolved plugin. What a publisher walks to serve it.
@@ -246,12 +247,13 @@ class Snapshot:
         return found
 
     def revalidate(self, path: Path) -> None:
-        """Bring ``path`` level with its server, if a live fetch owns it."""
+        """Start a background revalidation of the live fetch owning ``path``, if
+        one is due, and return at once: what is on disk now is what serves."""
         if self.live is not None:
             self.live.revalidate(path)
 
     def stats(self, key: str) -> dict:
-        """What live reads of the fetch ``key`` have done since this snapshot."""
+        """What revalidations of the fetch ``key`` have done since this snapshot."""
         return {} if self.live is None else self.live.stats(key)
 
 

@@ -27,7 +27,6 @@ from kubed.mcp_kb.sources.webdav import (
     VERSION_FILE,
     client,
     download,
-    fetch_file,
     fingerprint_webdav,
     materialise_webdav,
     remote_etags,
@@ -339,18 +338,6 @@ def test_the_fingerprint_moves_when_the_export_loses_a_file(webdav, tmp_path):
 # -- a live read's half: one file, revalidated ---------------------------------
 
 
-def test_fetch_file_returns_the_etag_unchanged_when_the_file_has_not_moved(
-    webdav, tmp_path
-):
-    source = _fetch(webdav)
-    root = materialise_webdav(source, tmp_path)
-    recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
-    webdav.requests.clear()
-
-    assert fetch_file(source, root, SKILL) == recorded
-    assert webdav.method("GET") == [], "an unchanged file is not downloaded"
-
-
 def test_download_replaces_the_local_copy(webdav, tmp_path):
     source = _fetch(webdav)
     root = materialise_webdav(source, tmp_path)
@@ -370,28 +357,6 @@ def test_remote_etags_lists_every_file_with_its_etag(webdav, tmp_path):
     assert etags == json.loads(
         (materialise_webdav(source, tmp_path) / ETAGS_FILE).read_text()
     )
-
-
-def test_fetch_file_replaces_the_local_copy_when_the_etag_moved(webdav, tmp_path):
-    source = _fetch(webdav)
-    root = materialise_webdav(source, tmp_path)
-    recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
-    webdav.skill("x", "edited in nextcloud, longer than before")
-
-    moved = fetch_file(source, root, SKILL, etag=recorded)
-
-    assert moved != recorded
-    assert "edited in nextcloud" in _body(root)
-    assert fetch_file(source, root, SKILL, etag=moved) == moved
-
-
-def test_a_missing_upstream_file_leaves_the_local_copy(webdav, tmp_path):
-    source = _fetch(webdav)
-    root = materialise_webdav(source, tmp_path)
-    (webdav.root / SKILL).unlink()
-
-    assert fetch_file(source, root, SKILL) is None
-    assert "first" in _body(root), "a deleted upstream file is not a deleted skill"
 
 
 def test_download_replaces_the_local_copy_rather_than_rewriting_it(webdav, tmp_path):
