@@ -1296,20 +1296,22 @@ def test_a_failing_build_with_a_count_answers_the_bare_footer(monkeypatch):
 @pytest.mark.integration
 @ERAS
 @pytest.mark.parametrize(
-    ("headers", "line"),
+    ("headers", "line", "prefixed"),
     [
-        ({"Kb-Max": "3"}, CUT),
-        ({"Kb-Max": "3", "Kb-Via": "extension"}, CUT),
-        ({"Kb-Max": "3", "Kb-Resource-Prefix": "kb+"}, CUT),  # same text, prefixed
+        ({"Kb-Max": "3"}, CUT, False),
+        ({"Kb-Max": "3", "Kb-Via": "extension"}, CUT, False),
+        ({"Kb-Max": "3", "Kb-Resource-Prefix": "kb+"}, CUT, True),  # same text, prefixed
         (
             {"Kb-Library": "flatsource", "Kb-Max": "1"},
             "1 of 2 skills are listed; every skill reads through its library's _index.md.",
+            False,
         ),
     ],
 )
-async def test_the_cut_line_is_told_on_connect(server_url, mode, headers, line):  # noqa: F811
+async def test_the_cut_line_is_told_on_connect(server_url, mode, headers, line, prefixed):  # noqa: F811
     text = await told(server_url, mode, headers)
     assert text.split("\n\n")[-2] == line
+    assert ("kb+skill://" in text.split("\n\n")[-1]) is prefixed
 
 
 @pytest.mark.integration

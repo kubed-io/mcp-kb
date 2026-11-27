@@ -627,10 +627,6 @@ async def test_a_refresh_moves_both_handshakes_alike(tmp_path):
     assert await both() == [{"directoryRead": True}, {"directoryRead": True}]
 
 
-XFAIL_PROVIDER = pytest.mark.xfail(
-    strict=True,
-    reason="kubed-mcp adds no resultType to a provider's directory answer (quick-mcp; reported to #112)",
-)
 _VIEWS = ("_manifest", "_index.md", "_index.json")
 
 

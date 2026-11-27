@@ -245,6 +245,8 @@ async def test_a_cut_skill_still_gets_reads_and_is_indexed(server_url):
         BETA: "skill://flatsource/_index.md",
     }
     async with http_client(server_url, {"Kb-Max": "1"}) as client:
+        entries = (await request(client, "skills/list"))["skills"]
+        assert {e["uri"] for e in entries} == {GAMMA}
         for uri, index in folders.items():
             got = await request(client, "skills/get", uri=uri)
             assert got["skill"]["uri"] == uri

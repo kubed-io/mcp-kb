@@ -47,7 +47,7 @@ FOLDER_JSON = "skill://{library}/{folder}/_index.json"
 FILES = "skill://{library}/_files.md"
 PATH = "skill://{library}/{+path}"
 LAYER_PATH = "skill://{library}/{path}"
-PATTERNS = {LIBRARY_INDEX, FOLDER_INDEX, LIBRARY_JSON, FOLDER_JSON, FILES, PATH, LAYER_PATH}
+PATTERNS = {LIBRARY_INDEX, FOLDER_INDEX, LIBRARY_JSON, FOLDER_JSON, FILES, PATH}
 
 # Two addresses of each kind, in the synthetic tree: one series per kind, however
 # many of its addresses are read.
@@ -170,7 +170,7 @@ async def test_no_concrete_address_is_ever_a_label(knowledge_base, reader):
                 await client.read_resource(uri)
 
     labels = await _labels(reader, reads)
-    assert set(labels) <= PATTERNS
+    assert set(labels) <= PATTERNS | {LAYER_PATH}
     assert not any(label in uris for label in labels)
 
 

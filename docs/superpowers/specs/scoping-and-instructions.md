@@ -282,8 +282,8 @@ under `local`, nor in INS-23's footer.
 ### Layout and footer
 
 **INS-14.** Sections are separated by one blank line. INS-24's line, when there is one, comes
-after them, and the footer comes last, each after one blank line. With no library selected, the text is the footer alone under `mcp` and `extension`, and
-empty under `local` (INS-22).
+after them, and the footer comes last, each after one blank line. With no library selected, the text
+is the footer alone under `mcp` and `extension`, and empty under `local` (INS-22).
 
 **INS-15.** Under `mcp`, the footer follows the client's mode and is not configurable:
 

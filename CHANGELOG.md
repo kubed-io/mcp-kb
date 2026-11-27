@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Skill listings hold at most 100 skills unless you set `Kb-Max` (`?max=`, `DELIVERY_MAX`), `all` for every one; the instructions say when the list was cut.
+- A restart with clients connected closes their streams cleanly; `GRACEFUL_TIMEOUT` (15 s) sets how long in-flight calls get.
 - Send `Kb-Via: extension` or `local` (or `?via=`) and the instructions point at where your client gets its skills.
 - A client now connects knowing what each library in its scope is for; set a library's `description`, `notes` and `listSkills` to shape it.
 - Discover and load verified skills in MCP Skills clients through `skills/list` and `skills/get`.

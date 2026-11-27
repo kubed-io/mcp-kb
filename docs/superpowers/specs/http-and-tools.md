@@ -78,8 +78,8 @@ Its `built` is when this generation harvested it.
 **HTTP-45.** Each skip kb reports logs one line, kb's. The plugin layer's own line for that skip is
 dropped, matched on its template and its number of arguments: a skipped command file, a skipped
 agent file (of a plugin or of the whole set), a duplicate claim, a duplicate skill folder, an
-`agent_meta` refusal, and the `ERROR` for a skill folder it does not load. The layer's line for a
-`SKILL.md` deeper than a skill folder is kept.
+`agent_meta` refusal, and the `ERROR` for a skill folder it does not load. The plugin layer logs no line for a
+`SKILL.md` deeper than a skill folder.
 
 **HTTP-46.** A skill folder or agent file the plugin layer skips that kb's harvest never found is
 no row. kb logs it once, `'<path>' of plugin <id> is not served: <reason>`, unless it is an agent
