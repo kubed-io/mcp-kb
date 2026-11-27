@@ -55,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** A library's plugins other than its main one serve their skills under `skill://<library>/<plugin>/` (a plugin `tidy` in library `superpowers` now serves at `skill://superpowers/tidy/…`).
 - Marketplace entries marked `strict: false` now load, unless they conflict with the plugin's own `plugin.json`.
 - The issue and pull request agents run from kubed-io/actions' shared workflows.
-- **BREAKING:** A skill that fails the Agent Skills checks (strict frontmatter, at most 512 files and 16 MiB), or holds a hidden file or a symlink (as a ConfigMap mounted as a skill's own folder does; mount it with `items` paths), is no longer served at all; the log says why.
+- **BREAKING:** A skill that fails the Agent Skills checks (strict frontmatter, at most 512 files and 16 MiB), or holds a symlink (as a ConfigMap mounted as a skill's own folder does; mount it with `items` paths), is no longer served at all; the log says why.
 - **BREAKING:** A skill's `_manifest` names the skill by its `name`, not its address, and gives the size and hash of the bytes a read returns, the same as its `skills/get` entry.
 - **BREAKING:** A skill's file that is not UTF-8 text, or has no or an unrecognised extension (such as `scripts/run`), reads as a blob, and `read_resource` no longer returns its text.
 - `list_resources` and `read_resource` are kubed-mcp's, and return the rows and contents `resources/list` and `resources/read` do.
@@ -66,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plugin sources (git, WebDAV, `file://`) load through kubed-mcp plugin loaders.
 - `resources/list` lists each skill's `SKILL.md` and each library's `_files.md`; the `_index.md` files still read, unlisted.
 - Built on kubed-mcp 0.5: VS Code is listed `list_resources` and `read_resource` with no header, and `initialize` and `server/discover` report what they resolved in `_meta["io.kubed/delivery"]`.
+- kubed-mcp 0.5.2 or later is required: it is what leaves a skill's hidden files (a `.gitkeep`, a `.env`) out while serving the rest of the skill.
 
 ### Fixed
 

@@ -37,12 +37,11 @@ Four hooks make what kubed-mcp serves kb's:
 what kubed-mcp reports serving -- each added plugin's ``skills`` URIs -- so no
 index, hint, listing or rewritten name points at a skill that does not read.
 Anything either side has alone is logged once, and a skill only kubed-mcp found
-is failed in the rewriter, so it is not served either: kb never vetted it
-(N13); an agent file only kubed-mcp found is refused in ``agent_meta`` alike
-(D4). The agents served are each added plugin's ``agent_files``. A plugin
-kubed-mcp refuses is a conflict in its library, as LIB-28's are. kb's prompts
-are what the reader read as the set was staged, kept to the names kubed-mcp
-serves (D5).
+is failed in the rewriter, so it is not served either: kb never vetted it; an
+agent file only kubed-mcp found is refused in ``agent_meta`` alike (D4). The
+agents served are each added plugin's ``agent_files``. A plugin kubed-mcp
+refuses is a conflict in its library, as LIB-28's are. kb's prompts are what
+the reader read as the set was staged, kept to the names kubed-mcp serves (D5).
 
 ``/health`` reads what the layer serves (K6). Each ``ok`` plugin's skills,
 prompts and agents are counted from the first library that adds it, and are 0
@@ -84,7 +83,6 @@ the re-read, its pin for the rewriter included (SKL-37, N6).
 from __future__ import annotations
 
 import logging
-import os
 import re
 import threading
 from collections.abc import Mapping, Sequence
@@ -216,16 +214,12 @@ class _Watch:
 class _Published:
     """What one generation is served from: its snapshot, narrowed, and its table.
 
-    ``hidden`` is the addresses of the skills holding a hidden path, which the
-    rewriter fails in every build (N13): while the set is staged every skill
-    kb found that holds one, once published those the layer would serve.
     ``source`` is the snapshot as it was handed to ``publish``, which a re-read
     narrows again, and ``live`` each live plugin's watch, by key.
     """
 
     snapshot: Snapshot
     table: Table
-    hidden: frozenset[str] = frozenset()
     source: Snapshot | None = None
     live: Mapping[Key, _Watch] = field(default_factory=dict)
     # What the reader made of each added plugin's prompt files as it entered
@@ -237,16 +231,6 @@ class _Published:
     agent_reads: Mapping[Key, Mapping[str, Mapping[str, object]]] = field(
         default_factory=dict
     )
-
-
-def holds_hidden(folder: Path) -> bool:
-    """Whether ``folder`` holds a hidden path at any depth: a file or a folder
-    whose name starts with ``.``. FastMCP reads a skill folder whole, so a skill
-    holding one would serve it (N13)."""
-    for _, dirnames, filenames in os.walk(folder):
-        if any(name.startswith(".") for name in (*dirnames, *filenames)):
-            return True
-    return False
 
 
 # The published state of the set the current request's build belongs to, and
@@ -343,9 +327,6 @@ class QuietSelection(logging.Filter):
                 logger.addFilter(cls())
 
 
-HIDDEN = "skill {} holds a hidden file, which kubed-mcp would serve; not served"
-
-
 def _address_of(uri: str) -> str:
     """A ``SKILL.md`` URI's skill address."""
     return unquote(uri[len(SCHEME) : -len(_ENTRY)])
@@ -408,13 +389,6 @@ class SkillServing:
         for skill in catalogue.visible_skills():
             skills.setdefault((skill.library, skill.plugin), []).append(skill.address)
             found.setdefault((skill.library, skill.plugin), []).append(skill)
-        # Walked once a publish, before any plugin enters: ``agent_meta`` and
-        # the parity guard both read it (N13).
-        hidden = frozenset(
-            skill.address
-            for skill in catalogue.visible_skills()
-            if holds_hidden(skill.path)
-        )
 
         noted: set[str] = set()
         table: dict[tuple[str, str], _Row] = {}
@@ -423,7 +397,7 @@ class SkillServing:
         # added, and what it was published with for one kept (D5).
         prompts: dict[Key, Mapping[str, FilePrompt]] = {}
         agent_reads: dict[Key, Mapping[str, Mapping[str, object]]] = {}
-        entering = _ENTERING.set((self, _Published(snapshot, table, hidden)))
+        entering = _ENTERING.set((self, _Published(snapshot, table)))
         self._carried, self._reads, self._prompt_reads = {}, {}, {}
         staged = self._mcp.plugin_set()
         added: list[tuple[Library, Plugin, Served]] = []
@@ -545,14 +519,14 @@ class SkillServing:
                 # Read from another export than the one it was added from: a
                 # refresh moved the fetch under this re-read, and publishes it.
                 raise _Abandoned
-        published, served_hidden = self._narrowed(
-            snapshot, added, refused, skills, noted, prompts, hidden, found
+        published = self._narrowed(
+            snapshot, added, refused, skills, noted, prompts, found
         )
         # Before serve(): a build of the new set must find its own generation.
         # A serve that raises serves nothing new, so what was published stays.
         previous = self._published
         self._published = _Published(
-            published, table, served_hidden, snapshot, live, prompts, agent_reads
+            published, table, snapshot, live, prompts, agent_reads
         )
         try:
             self._mcp.serve(staged)
@@ -784,17 +758,14 @@ class SkillServing:
         skills: dict[tuple[str, str], list[str]],
         noted: set[str],
         reads: Mapping[Key, Mapping[str, FilePrompt]],
-        hidden: frozenset[str],
         found: Mapping[tuple[str, str], Sequence[Skill]],
-    ) -> tuple[Snapshot, frozenset[str]]:
+    ) -> Snapshot:
         """``snapshot`` less what kubed-mcp does not serve, with its ``/health``
-        reading what it does: the parity guard (D3, D11). Also the skills it
-        would serve of those ``hidden`` gives, which hold a hidden path and
-        which kb does not let it serve (N13).
+        reading what it does: the parity guard (D3, D11).
 
         Every ``ok`` plugin's ``skills``, ``prompts`` and ``agents`` are what
         the first library that adds it serves, and 0 when none does (K6 D3):
-        its skills kb found less any held hidden, the prompts kb's reader read
+        the skills both kb and the layer have, the prompts kb's reader read
         as it entered the set, the first read of each name kubed-mcp serves
         (D5), and its ``agent_files`` (AGT-14). Its ``skipped`` is kb's own
         rows, then that add's rows for each skill folder kb found
@@ -803,7 +774,6 @@ class SkillServing:
         first reason kept (K6 D4). ``found`` is kb's skills by library and
         plugin, which place a skill's folder for the parity guard's note."""
         catalogue = snapshot.catalogue
-        served_hidden: set[str] = set()
         kept = {(lib.name, plugin.id) for lib, plugin, _ in added}
         gone: list[str] = []
         for (library, pid), addresses in skills.items():
@@ -834,14 +804,7 @@ class SkillServing:
             mine = set(skills.get((lib.name, plugin.id), ()))
             theirs = {_address_of(uri) for uri in served.skills}
             skill_rows = self._skills_of(plugin, served, snapshot)
-            plugin_skills.setdefault(
-                plugin.id, (len((mine & theirs) - hidden), skill_rows)
-            )
-            for address in sorted(mine & theirs):
-                if address in hidden:
-                    served_hidden.add(address)
-                    gone.append(address)
-                    self._note(noted, HIDDEN.format(address))
+            plugin_skills.setdefault(plugin.id, (len(mine & theirs), skill_rows))
             # A folder with a row is said by ``log_changes``, with its reason.
             listed = {row["path"] for row in skill_rows}
             folders = self._folders(plugin, found.get((lib.name, plugin.id)))
@@ -924,7 +887,7 @@ class SkillServing:
             else:
                 entry.pop("skipped", None)
             status_plugins[pid] = entry
-        published = replace(
+        return replace(
             snapshot,
             index=snapshot.index.without(gone),
             catalogue=narrowed,
@@ -936,7 +899,6 @@ class SkillServing:
                 "plugins": status_plugins,
             },
         )
-        return published, frozenset(served_hidden)
 
     def _skills_of(
         self, plugin: Plugin, served: Served, snapshot: Snapshot
@@ -1246,12 +1208,10 @@ class SkillServing:
             if root not in site.skills.values():
                 return text
             address = unquote(root[len(SCHEME) :])
-            if address in published.hidden:
-                # Fails the whole skill, in every build (PLUG-59): N13.
-                raise ValueError(f"skill {address} holds a hidden file")
             if published.snapshot.index.get(address) is None:
-                # One kb's harvest did not find, so never vetted for N13: fail
-                # closed, as for a hidden one. The parity guard said why, once.
+                # One kb's harvest did not find, so one kb never vetted: fail
+                # closed, the whole skill (PLUG-59). The parity guard said why,
+                # once.
                 raise ValueError(f"skill {address} is not one kb found")
             return catalogue.instructions(address, text, requested_scope())
         if site.kind in ("agent", "command"):
@@ -1330,8 +1290,7 @@ class SkillServing:
         is what kubed-mcp's own parser makes of the file, so the two keys agree:
         read from the file when its plugin is added, and as that add read it
         when the plugin is kept unread, live or not. ``skills`` is narrowed to
-        the skills the layer serves of its plugin, less any the parity guard
-        drops for a hidden path (N13)."""
+        the skills the layer serves of its plugin that kb found."""
         published, _ = self._reading()
         key = (plugin.namespace, plugin.address)
         row = published.table.get(key)
@@ -1341,7 +1300,8 @@ class SkillServing:
         if path is None:
             return None
         if path not in published.snapshot.agent_files.get(row.plugin.id, ()):
-            # Fail closed, as the rewriter fails a skill kb never found (N13).
+            # One kb never vetted: fail closed, as the rewriter fails a skill
+            # kb never found.
             raise ValueError(f"agent file {path} is not one kb found")
         catalogue = published.snapshot.catalogue
         carried = self._carried.get(key)
@@ -1363,12 +1323,9 @@ class SkillServing:
         index = published.snapshot.index
 
         def serves(uri: str) -> bool:
-            # The parity guard runs after the set is staged, so a skill it drops
-            # for a hidden path (N13) is still the layer's here: leave it out.
-            address = _address_of(uri)
-            if uri not in served or index.get(address) is None:
-                return False
-            return address not in published.hidden
+            # The parity guard runs after the set is staged, so a skill kb did
+            # not find is still the layer's here: leave it out.
+            return uri in served and index.get(_address_of(uri)) is not None
 
         value["skills"] = {k: v for k, v in value["skills"].items() if serves(v)}
         return {AGENT_META: value}

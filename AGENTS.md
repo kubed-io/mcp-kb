@@ -433,13 +433,14 @@ which generation is being served, and has a refresh picked up an edit yet.
   lock there deadlocks the boot publish. `renarrowed` takes none for the same
   reason, and the live re-read takes `SkillServing`'s own lock without blocking,
   never kb's.
-- **A skill holding a hidden file or a symlink is not served at all** (SKL-3,
-  N13, N14). FastMCP reads a skill folder whole, dot files included, so kb fails
-  the skill's `SKILL.md` in its rewriter when its folder holds a hidden path at
-  any depth, and FastMCP refuses a skill holding a symlink; the parity guard
-  drops either from the catalogue and logs it once. One `.gitkeep` under
-  `assets/` is enough, and it is the whole skill that goes, until kubed-mcp skips
-  hidden files.
+- **A skill holding a symlink is not served at all; one holding a hidden file is
+  served without it** (SKL-3, N14). kubed-mcp refuses a skill whose folder holds
+  a symlink, and the parity guard drops it from the catalogue and logs it once.
+  A hidden path (`.gitkeep`, `.env`, `.git/`) is left out by kubed-mcp itself
+  from 0.5.2 (quick-mcp's SKL-24): it reads as a missing file and is in no
+  folder, `_manifest` or entry. kb has no guard of its own for it any more, so
+  that floor in `pyproject.toml` is what keeps a skill's `.env` unserved — never
+  lower it below 0.5.2.
 - **An export is named by its version, so a rebuild of a version that has not
   moved is a rebuild over a tree being read.** That is the one case a repair
   happens at all — an export that lost files, or one a killed fetch left a temp
