@@ -214,6 +214,10 @@ logger in the process. `LOG_LEVEL` is read case-insensitively, so `debug` is `DE
 **HTTP-40.** Per-request traffic lines (uvicorn's access log, httpx's per-request lines) are
 written only when the level is `DEBUG`.
 
+**HTTP-48.** On a stop with clients connected, each open `subscriptions/listen` stream ends
+cleanly. HTTP calls in flight get `serving.graceful_timeout` seconds (`GRACEFUL_TIMEOUT`,
+`--graceful-timeout`, 15 by default) to finish. The pod's termination grace period must be longer.
+
 ## The resource tools
 
 **TOOL-1.** The server has two tools, kubed-mcp's resource pair (DLV-6). It is registered once kb

@@ -766,6 +766,14 @@ def test_log_level_reads_case_insensitively_and_a_flag_beats_it():
     assert load([], environ={}).config.serving.log_level == "INFO"
 
 
+@pytest.mark.unit
+def test_graceful_timeout_is_a_serving_item():
+    assert load([], environ={}).config.serving.graceful_timeout == 15
+    assert load([], environ={"GRACEFUL_TIMEOUT": "30"}).config.serving.graceful_timeout == 30
+    flagged = load(["--graceful-timeout", "5"], environ={"GRACEFUL_TIMEOUT": "30"})
+    assert flagged.config.serving.graceful_timeout == 5
+
+
 def test_the_schema_is_the_composed_one():
     published = schema()
     assert published == config_schema(*SECTIONS)

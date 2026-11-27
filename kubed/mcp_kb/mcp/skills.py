@@ -144,8 +144,9 @@ RENAMED = "named {name} by the plugin layer and {expected} by kb"
 _SKIP_LINE = "prompt %s is skipped: %s"
 # The plugin layer's lines for every other skip kb lists and logs itself, or
 # says once (D6), by logger: each a template with the number of args it takes,
-# matched as written, never by the formatted text, which quotes a cache path. A
-# skills folder's nested ``SKILL.md`` (a note kb does not read) is not here.
+# matched as written, never by the formatted text, which quotes a cache path. The
+# layer no longer logs a skills folder's nested ``SKILL.md``, so there is nothing
+# of it to drop.
 _QUIET: Mapping[str, Mapping[str, int]] = {
     "kubed.mcp.plugins": {
         _SKIP_LINE: 2,
