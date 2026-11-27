@@ -122,13 +122,14 @@ load time.
 set by their `TELEMETRY_*` variables and `--telemetry-*` flags (CFG-1), which the server kubed-mcp
 builds reads off the config: `profiles` (a Pyroscope address; setting it turns profiles on),
 `profile_cpu` and `profile_memory` (both `true` by default), `otel` (`false` by default;
-OpenTelemetry traces and call metrics, configured by the standard `OTEL_*` variables) and `tags` (a
-string map of labels). Absent, every signal is off. An unknown key in it is a config error (CFG-5).
-kb adds only the `profiles` guard: an address carrying userinfo is a config error, as a source URL
-is (SRC-3), and the error does not quote it. Profiles, traces and
-metrics carry the service name `OTEL_SERVICE_NAME`, else `mcp-kb`. Metrics leave as
-`OTEL_METRICS_EXPORTER` says: pushed over OTLP, or scraped from the exporter's own port with
-`prometheus`. The server adds no metrics route.
+OpenTelemetry traces, call metrics and the interpreter's garbage-collection metrics
+(`cpython.gc.collections`, `cpython.gc.duration`), configured by the standard `OTEL_*` variables)
+and `tags` (a string map of labels). Absent, every signal is off. An unknown key in it is a config
+error (CFG-5). kb adds only the `profiles` guard: an address carrying userinfo is a config error, as
+a source URL is (SRC-3), and the error does not quote it. Profiles, traces and metrics carry the
+service name `OTEL_SERVICE_NAME`, else `mcp-kb`. Metrics leave as `OTEL_METRICS_EXPORTER` says:
+pushed over OTLP, or scraped from the exporter's own port with `prometheus`. The server adds no
+metrics route.
 
 ```yaml
 telemetry:
