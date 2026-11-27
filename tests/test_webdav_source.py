@@ -403,6 +403,24 @@ def test_download_stages_its_file_outside_the_export(webdav, tmp_path):
         assert tmp.parent == root.parent / exports.WORK_DIR
 
 
+def test_a_failed_write_names_the_reason_and_not_the_path(webdav, tmp_path):
+    """An ``OSError`` carries the temporary file's path; the message does not."""
+    source = _fetch(webdav)
+    root = materialise_webdav(source, tmp_path)
+    secret = tmp_path / "cache" / "secret-dir" / "part"
+
+    class _Full:
+        def get_file(self, rel, local):
+            raise OSError(28, "No space left on device", str(secret))
+
+    with pytest.raises(SourceError) as raised:
+        download(source, root, SKILL, _Full())
+
+    assert "No space left on device" in str(raised.value)
+    assert "secret-dir" not in str(raised.value)
+    assert str(tmp_path) not in str(raised.value)
+
+
 def test_a_temp_file_a_killed_fetch_left_does_not_truncate_the_export(webdav, tmp_path):
     source = _fetch(webdav)
     root = materialise_webdav(source, tmp_path)

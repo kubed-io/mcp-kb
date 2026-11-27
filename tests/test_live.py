@@ -717,6 +717,30 @@ def test_the_ttl_runs_from_the_answer_and_not_from_the_question(
 # -- the machinery ------------------------------------------------------------
 
 
+def test_a_thread_that_will_not_start_fails_no_read(webdav, tmp_path, monkeypatch, caplog):
+    """SRC-23: the kick swallows a start failure, logs it and frees the flag."""
+    knowledge_base = _knowledge_base(webdav, tmp_path)
+    revalidator = knowledge_base.snapshot.live
+    path = knowledge_base.index.get("notes/x").path
+    assert revalidator.wait(5)
+
+    with monkeypatch.context() as patched:
+
+        def refuse(self):
+            raise RuntimeError("can't start new thread")
+
+        patched.setattr(live.threading.Thread, "start", refuse)
+        with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
+            revalidator.revalidate(path)
+
+    lines = [r.getMessage() for r in caplog.records if "could not start" in r.getMessage()]
+    assert lines == [f"{KEY}: revalidating could not start: can't start new thread"]
+
+    revalidator.revalidate(path)
+    assert revalidator._thread is not None, "the flag was released, so a pass started"
+    assert revalidator.wait(5)
+
+
 def test_the_revalidator_follows_the_export_a_refresh_created(webdav, tmp_path):
     """A refresh moves the source to a new directory; live reads must follow it.
 
@@ -1723,7 +1747,6 @@ def test_a_plugin_refused_at_publish_is_not_reread(webdav, tmp_path, monkeypatch
     conflicts = knowledge_base.status["libraries"]["other"]["conflicts"]
     assert conflicts == {"other": "conflict: other is refused here"}
     assert asked == ["notes", "other"]
-    webdav.requests.clear()
 
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
     landed(knowledge_base)

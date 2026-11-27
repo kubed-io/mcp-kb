@@ -163,6 +163,13 @@ class Revalidator:
             )
             try:
                 thread.start()
+            except Exception as exc:  # noqa: BLE001
+                # No read fails for a revalidation (SRC-23). Nothing is written
+                # to the fetch's state here: only a pass writes it (D3), so a
+                # failed start does not cool the fetch; the next read kicks again.
+                self._running.release()
+                log.warning("%s: revalidating could not start: %s", live.fetch.key, exc)
+                return
             except BaseException:
                 self._running.release()
                 raise

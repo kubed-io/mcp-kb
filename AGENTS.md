@@ -277,10 +277,12 @@ one set of bytes:
   `/health`'s counts and the scope refusal read what is served. A plugin
   kubed-mcp refuses is a conflict in its library (LIB-29), a prompt name an
   earlier plugin serves included. A live re-read narrows the catalogue again
-  and logs what it changed, as a refresh does, and the request that re-reads
-  serves the edit: the view re-reads before kb's state and kubed-mcp's are
-  pinned (SKL-37). What it cannot cover is a skill that fails one
-  view's build alone (N15): that one is still named in kb's indexes under that view.
+  and logs what it changed, as a refresh does: on the first request after a
+  background pass moved a file, the view re-reads before kb's state and
+  kubed-mcp's are pinned (SKL-37), so that request serves the edit. What it
+  cannot cover is a skill that fails
+  one view's build alone (N15): that one is still named in kb's indexes under
+  that view.
 
 A served prompt's file reads, unlisted, at `prompts://<namespace>/<place>`, the place being its path
 below the commands folder it was read from, or the path its manifest lists it by (PRM-63), and an
@@ -401,7 +403,8 @@ which generation is being served, and has a refresh picked up an edit yet.
   `Revalidator` has the same shape of bug and a nastier
   symptom: a refresh exports a source to a *new* directory, so one that outlives
   its snapshot goes on revalidating into a tree nothing is serving, and the edit
-  never appears. It is built in `build_snapshot` and retired with the snapshot.
+  never appears. It is built in `build_snapshot`, and `KnowledgeBase.refresh` retires
+  it once its snapshot is swapped out.
 - **`live` is a per-file ETag revalidation, not fsspec's `filecache`.** Chaining
   `filecache::webdav+https://…` is the off-the-shelf answer and the wrong one:
   it stores files under hashed names in a cache directory of its own, and
@@ -413,18 +416,20 @@ which generation is being served, and has a refresh picked up an edit yet.
   `index.json`. Whatever a new backend's fingerprint returns is a thing an
   operator reads and a thing rewritten to disk on every rebuild — a WebDAV
   source's whole `{path: etag}` map does not belong in either.
-- **A live read blocks the whole event loop.** The resource handlers are
-  `async` and `Catalogue.read` under them is synchronous, so ten concurrent
-  reads of a source 300 ms away take 3.0 s, perfectly serialized, with nothing
-  else on the loop running meanwhile — not another source's read and not
-  `/health`. What is bounded is the *failure*: `REVALIDATE_TIMEOUT` caps one
-  read and `COOLDOWN_SECONDS` stops a wedged server costing anything after the
-  first. **Making the read path async — a thread for the blocking call, or an
-  async WebDAV client — is the outstanding follow-up**, and it is a change to
-  `mcp/resources.py`, `catalogue/uris.py` (the library-file read, and
-  `Catalogue.live_stamp`) and `mcp/skills.py` (`_stamp`, which the view calls
-  to revalidate a live plugin's skill, agent and prompt files before kubed-mcp
-  builds), not to `sources/live.py`.
+- **No network on the request path.** kubed-mcp calls `view()` synchronously on
+  the event loop, so a blocking call under it holds every request, `/health`
+  included. A `cache: live` fetch is priced only by its `Revalidator`'s one
+  background pass (`kb-revalidate`, a daemon thread, one at a time per
+  snapshot). `revalidate(path)`, called from `_stamp`, `Catalogue.live_stamp`,
+  `LibraryFiles` and `Snapshot.revalidate`, only starts that pass when the fetch
+  is due. The pass lists each due fetch once with `webdav.remote_etags` (one
+  `Depth: 1` PROPFIND per directory, because Nextcloud refuses `Depth: infinity`
+  by default) and downloads what moved with `webdav.download`; `REVALIDATE_TIMEOUT`
+  caps one call and `COOLDOWN_SECONDS` stops a wedged server costing anything
+  after the first. The next request's view stamps from disk and re-reads. Only
+  the pass writes `_Live`, and no lock is shared beyond the single-flight flag,
+  which is taken without blocking. Anything that talks to a server goes in that
+  pass, never under a handler.
 - **A plugin named like one of its library's main plugin's skills is a
   conflict.** Its namespace, `<library>/<plugin>`, is that skill's own address,
   so its skills sit inside the skill: the later of the two in the library's order

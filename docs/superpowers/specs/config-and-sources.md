@@ -277,7 +277,7 @@ library file is read off disk each time.
 skills, agents or prompts under a scope admitting one of its plugins, starts the fetch's
 revalidation in the background if one is due (SKL-37). It is served from the local copy as it
 is. A revalidation lists the fetch's folder once, one PROPFIND per directory, and downloads each
-file the local copy holds whose ETag differs from the local copy's. An edit is served from the
+file the local copy holds whose ETag differs from the local copy's, and each one the local copy has lost. An edit is served from the
 first request after the revalidation that found it.
 
 **SRC-22.** A download is staged in `<cache>/src/<slug>/.work/` and renamed over the local copy in
