@@ -808,9 +808,13 @@ def test_one_client_serves_every_live_read(webdav, tmp_path, monkeypatch):
 async def test_health_reports_what_a_live_source_revalidated(webdav, tmp_path):
     knowledge_base = _knowledge_base(webdav, tmp_path)
     read_served(knowledge_base, URI)
+    # A pass still listing while the edit lands would download the half-written
+    # file twice (size 0, then the final ETag), so settle the pass first.
+    assert knowledge_base.snapshot.live.wait(5), "no pass overlaps the edit"
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
     landed(knowledge_base)
     read_served(knowledge_base, URI)
+    assert knowledge_base.snapshot.live.wait(5)
 
     transport = httpx.ASGITransport(app=server_of(knowledge_base).http_app())
     async with httpx.AsyncClient(transport=transport, base_url="http://knowledge_base") as http:
@@ -819,7 +823,7 @@ async def test_health_reports_what_a_live_source_revalidated(webdav, tmp_path):
     fetch = body["fetches"][KEY]
     assert fetch["live"] is True
     # Every file of the export, once per pass: the boot publish's and landed's
-    # at least (L3).
+    # at least (L3). The read's own pass is settled above, so the counts are final.
     files = len(live.recorded_etags(knowledge_base.served_tree(KEY)))
     assert files == 2
     assert fetch["revalidated"] >= 2 * files

@@ -438,8 +438,9 @@ which generation is being served, and has a refresh picked up an edit yet.
   by default) and downloads what moved with `webdav.download`; `REVALIDATE_TIMEOUT`
   caps one call and `COOLDOWN_SECONDS` stops a wedged server costing anything
   after the first. The next request's view stamps from disk and re-reads. Only
-  the pass writes `_Live`, and no lock is shared beyond the single-flight flag,
-  which is taken without blocking. Anything that talks to a server goes in that
+  the pass writes `_Live`; a kick takes the single-flight flag without blocking,
+  and `_starting` only while it starts and records the pass's thread, so no
+  request waits on a pass. Anything that talks to a server goes in that
   pass, never under a handler.
 - **A plugin named like one of its library's main plugin's skills is a
   conflict.** Its namespace, `<library>/<plugin>`, is that skill's own address,

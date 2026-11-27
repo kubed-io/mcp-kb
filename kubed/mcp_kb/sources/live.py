@@ -187,8 +187,10 @@ class Revalidator:
     def retire(self) -> None:
         """Start no pass from now on, and stop the one running at its next step.
 
-        A download already under way finishes its one atomic replace into this
-        snapshot's export, which nothing reads once the snapshot is retired.
+        A download already under way still finishes its atomic replace. When the
+        next snapshot serves the same export, that replace can land after the new
+        revalidator's own download of a newer version of the file, and the file
+        then stays stale until the next upstream edit or refresh.
         """
         self._retired = True
 
