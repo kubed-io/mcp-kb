@@ -174,8 +174,9 @@ There is one config. Every row below after the first is an item of it, and each 
 | `HOST` | `--host` | `0.0.0.0` | Bind address, http only |
 | `PORT` | `--port` | `8000` | Port, http only |
 | `LOG_LEVEL` | `--log-level` | `INFO` | The level for every logger in the process |
+| `GRACEFUL_TIMEOUT` | `--graceful-timeout` | 15 | Seconds in-flight calls get to finish on a stop |
 | `TELEMETRY_*` | `--telemetry-*` | kubed-mcp's | The `telemetry` section: profiles, traces and metrics |
-| `DELIVERY_*` | `--delivery-*` | none | The `delivery` section: the defaults for `resources`, `listed` and `via` |
+| `DELIVERY_*` | `--delivery-*` | none | The `delivery` section: the defaults for `resources`, `listed`, `via` and `max` |
 
 Profiles to Pyroscope and OpenTelemetry traces and metrics are switched on in the `telemetry` section (`profiles: http://pyroscope.example.com:4040`, `otel: true`, or `TELEMETRY_PROFILES` and `TELEMETRY_OTEL=true`), with metrics pushed over OTLP or scraped from the exporter's own port with `OTEL_METRICS_EXPORTER=prometheus`. The image ships the packages, and a pip install needs `kubed-mcp-kb[telemetry]`.
 
@@ -188,6 +189,7 @@ Per request, on the MCP URL — each with a header form that beats it:
 | `?category=<name>` | `Kb-Category` | Restricts it to the libraries listing that category and the plugins declaring it |
 | `?tag=a,b` | `Kb-Tag` | Restricts it to what carries all of those tags; repeat for any-of |
 | `?listed=` | `Kb-Listed` | What the listing holds: `skills` (the default), `prompts`, `agents` or `none` |
+| `?max=<n>` | `Kb-Max` | Lists at most n skills (100 by default); all for every one |
 | `?prefix=kb+` | `Kb-Resource-Prefix` | Writes a gateway's prefix before addresses in text |
 
 The old `X-Skill-*` and `X-MCP-Resource-Prefix` names (and `?categories=`, `?tags=`) still work, though a pin under an old header yields to a client-sent `Kb-` one.

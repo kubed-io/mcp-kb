@@ -18,6 +18,7 @@ from kubed.mcp.protocol import MCPError, RequestParams, types
 from pydantic import ConfigDict, TypeAdapter
 
 from kubed.mcp_kb import KnowledgeBase
+from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.request import AGENTS_EXTENSION_ID, EXTENSION_ID
 from kubed.mcp_kb.mcp.scope import Scope
 from tests.conftest import DEEP_YAML, make_config, server_of
@@ -624,3 +625,82 @@ async def test_a_refresh_moves_both_handshakes_alike(tmp_path):
     skill.unlink()
     kb.refresh(force=True)
     assert await both() == [{"directoryRead": True}, {"directoryRead": True}]
+
+
+_VIEWS = ("_manifest", "_index.md", "_index.json")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "skill://flatsource/alpha",
+        "skill://flatsource",
+        "skill://deepsource/plugin-a",
+    ],
+)
+async def test_a_directory_read_is_complete(skills_dir, uri):
+    """SKL-51: every directory read carries ``resultType: complete``."""
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    async with Client(server_of(server)) as client:
+        got = await request(client, "resources/directory/read", uri=uri)
+        assert got["resultType"] == "complete"
+
+
+@pytest.mark.unit
+async def test_no_entry_lists_a_view_and_each_view_reads(skills_dir):
+    """SKL-24, SKL-46, SKL-56, SKL-57: a view is in no entry, and reads at its URI."""
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    async with Client(server_of(server)) as client:
+        listing = await request(client, "skills/list")
+        assert listing["skills"]
+        for entry in listing["skills"]:
+            for resource in entry["resources"]:
+                assert not resource["uri"].endswith(tuple(f"/{v}" for v in _VIEWS))
+            root = entry["uri"].removesuffix("/SKILL.md")
+            for view in _VIEWS:
+                result = await client.read_resource(f"{root}/{view}")
+                assert result[0].text
+
+
+@pytest.mark.unit
+async def test_a_fallback_file_reads_and_is_in_no_entry(skills_dir):
+    """SKL-30, SKL-33: the plugin-root fallback reads, and no entry lists it."""
+    fallback = "skill://deepsource/plugin-a/gamma/README.md"
+    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    async with Client(server_of(server)) as client:
+        assert (await client.read_resource(fallback))[0].text == "not a skill\n"
+        got = await request(
+            client, "skills/get", uri="skill://deepsource/plugin-a/gamma/SKILL.md"
+        )
+        assert fallback not in {r["uri"] for r in got["skill"]["resources"]}
+
+
+@pytest.mark.unit
+async def test_the_rewriter_writes_no_view(tmp_path):
+    """SKL-63: a rewritten name or placeholder is never a view's address."""
+    root = tmp_path / "kit"
+    for name, body in {
+        "alpha": "See flatsource:beta, ${CLAUDE_PLUGIN_ROOT}/x.md and "
+        "${CLAUDE_SKILL_DIR}/notes.md.\n",
+        "beta": "Body.\n",
+    }.items():
+        skill = root / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: The {name}.\n---\n{body}"
+        )
+    (root / "x.md").write_text("x\n")
+    config = Config.model_validate(
+        {
+            "plugins": [
+                {"name": "flatsource", "source": f"file://{root}"}
+            ],
+            "libraries": [{"name": "flatsource", "plugins": ["flatsource"]}],
+        }
+    )
+    server = KnowledgeBase(config, tmp_path / "cache")
+    async with Client(server_of(server)) as client:
+        text = (await client.read_resource(ALPHA))[0].text
+        assert "skill://flatsource/beta/SKILL.md" in text
+        assert not any(v in text for v in _VIEWS)

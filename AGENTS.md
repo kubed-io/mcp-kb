@@ -69,7 +69,7 @@ installer's, against whatever image tag it chooses.
 | ⤷⤷ `detect.py` | which dialect a file is, strongest signal first |
 | ⤷⤷ `mcpkb.py`, `claude.py`, `copilot.py` | one module per dialect: `parse` into `Parsed`, `substitute` back out |
 | ⤷ `placeholders.py` | the two `${CLAUDE_*}` placeholders this server is the authority on |
-| ⤷ `instructions.py` | `build_instructions` — the server `instructions` for a scope, mode and Via mode, as text. Imports no FastMCP |
+| ⤷ `instructions.py` | `build_instructions` — the server `instructions` for a scope, mode and Via mode, as text, with INS-24's cut line from the skill count. Imports no FastMCP |
 | ⤷ `index.py` | `Index`, `FetchRecord`: the on-disk `index.json`, the fetch records a cold start keeps |
 | ⤷ `snapshot.py` | `Snapshot`, `Harvest`, `build_snapshot`: the immutable view every request reads, and the in-memory harvest it is built from |
 | ⤷ `refresh.py` | when a fetch is due to be looked at again, bounded to the shortest configured interval, and what a failure does to the last good one |
@@ -79,7 +79,7 @@ installer's, against whatever image tag it chooses.
 | ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `LabelKbReads` |
 | ⤷ `tools.py`, `prompts.py` | `prompts.py` `MCPFilePrompt` and `adapt`, the `Prompt` kb's reader hands the plugin layer; `tools.py` names kubed-mcp's resource pair (DLV-6) and the delivery inputs for the wiki, and defines no tool |
 | ⤷ `request.py`, `scope.py` | what the current request says about itself, and the `Scope` it becomes |
-| ⤷ `instructions.py` | `ScopedInstructions`: the `instructions` hook kubed-mcp calls with each `initialize` and `server/discover` request's resolution, passing its Via on, and never fails a handshake: a failure is logged, credentials masked, and answered with the mode's footer |
+| ⤷ `instructions.py` | `ScopedInstructions`: the `instructions` hook kubed-mcp calls with each `initialize` and `server/discover` request's resolution, passing its Via on, and kubed-mcp's skill count (`Resolved.skills`) for INS-24's cut line, and never fails a handshake: a failure is logged, credentials masked, and answered with the mode's footer |
 | ⤷ `announce.py` | `AnnounceChanges` — telling a session its listing moved |
 | ⤷ `pins.py` | `RefuseEmptyScope` — a scope that names nothing fails every request, saying what there is |
 | `kubed/mcp_kb/spec/` | `builder.py`, the OpenAPI document for the HTTP surface |
@@ -149,7 +149,9 @@ names with a prefix, and these names are the agent's API.
   They are served at `skill://<library>/<path>` and listed under `_files.md`,
   never indexed as skills. A citation that misses inside a skill is tried once
   against the plugin root, which is that fallback's ceiling — nothing is
-  rewritten and a file the skill has always wins.
+  rewritten and a file the skill has always wins. The fallback reads
+  through `resources/read` alone. Its file is in no entry, so a host that verifies a skill
+  against its entry refuses it (SKL-30). Do not list it in an entry by any workaround.
 - **A `<plugin>:<skill>` name in served text** → `catalogue/names.py`, resolved
   through `Catalogue.qualified_names`. It is rewritten to an address, never to a
   name, because a client picks its own names for kb's skills. Commands and bare
@@ -209,7 +211,7 @@ no tools:
 
 | call | returns | cost |
 | --- | --- | --- |
-| list | one `SKILL.md` per skill in scope, plus `_files.md` | grows with the catalogue |
+| list | one `SKILL.md` per skill in scope, plus `_files.md` | grows with the catalogue, up to the max (100 by default) |
 | read `skill://grafana/grafana-lgtm/_index.md` | that folder's skills, as URIs | ~4k chars |
 | read `skill://grafana/grafana-lgtm/loki/SKILL.md` | the instructions to follow | one file |
 
@@ -257,6 +259,8 @@ one set of bytes:
   it. So the entry's digests, the `_manifest` and the read agree. A middleware
   that rewrote a `skill://` file on read would break every client that verifies a
   skill.
+  A `_manifest`, `_index.md` or `_index.json` is a view and is in no entry (SKL-24), and the
+  rewriter never writes one's address into a skill's file (SKL-63).
 - **`CatalogueProvider` is registered after it, and never answers a skill's
   file** (`Catalogue.read` answers none): it serves the indexes,
   `_files.md`, library files and the fallbacks. `create_app` attaches
@@ -297,6 +301,13 @@ kubed-mcp's own types and naming apply to a skill's files: a file that is not
 UTF-8 text, or has no or an unknown extension, is a blob (SKL-22), its media type is the plugin layer's (SKL-23), and
 `_manifest` names the skill by its `name` (SKL-24). Once a skill is served, `server/discover` and
 legacy `initialize` both advertise the Skills extension with `directoryRead` (kubed-mcp mirrors it onto legacy `initialize`, so kb adds no middleware of its own for it).
+
+**The listing cap is kubed-mcp's** (SKL-64). `skills/list`, and the skill rows of
+`resources/list` and `list_resources`, hold at most the request's max (`Kb-Max`,
+`X-MCP-Max`, `?max=`, `delivery.max`), 100 by default. The rows kept are the first in the
+order kb adds plugins, so the config's library and plugin order decides what is cut. A cut
+skill still gets, reads and is indexed; `_files.md` is never cut. kb sets no
+`delivery.max`, and its only part in this is INS-24's line, from `Resolved.skills`.
 
 The **Agents extension** is kubed-mcp's too: `agents/list` and `agents/get` serve
 the subagents Claude-format plugins ship, from the same plugin set, and add no

@@ -78,8 +78,8 @@ Its `built` is when this generation harvested it.
 **HTTP-45.** Each skip kb reports logs one line, kb's. The plugin layer's own line for that skip is
 dropped, matched on its template and its number of arguments: a skipped command file, a skipped
 agent file (of a plugin or of the whole set), a duplicate claim, a duplicate skill folder, an
-`agent_meta` refusal, and the `ERROR` for a skill folder it does not load. The layer's line for a
-`SKILL.md` deeper than a skill folder is kept.
+`agent_meta` refusal, and the `ERROR` for a skill folder it does not load. The plugin layer logs no line for a
+`SKILL.md` deeper than a skill folder.
 
 **HTTP-46.** A skill folder or agent file the plugin layer skips that kb's harvest never found is
 no row. kb logs it once, `'<path>' of plugin <id> is not served: <reason>`, unless it is an agent
@@ -164,7 +164,8 @@ entry FastMCP stamps in a modern-era result's `_meta`. It is never FastMCP's own
 resolved for the request, from the `Kb-` and `X-MCP-` headers, their query parameters, kb's
 defaults and its table of known clients. Its `resources` is the setting that lists the resource
 pair (TOOL-2), and its `prefix` is the resource prefix every served address carries (GW-4, GW-11),
-or `null`. Its `via` is the mode the instructions were written for.
+or `null`. Its `via` is the mode the instructions were written for. Its `max` is the cap resolved for the
+request (SCP-3), or `"all"` for none.
 
 **HTTP-29.** Every cacheable result (`tools/list`, `prompts/list`, `resources/list`,
 `resources/templates/list`, `resources/read`, `server/discover`) carries `ttlMs` equal to the
@@ -213,6 +214,10 @@ logger in the process. `LOG_LEVEL` is read case-insensitively, so `debug` is `DE
 
 **HTTP-40.** Per-request traffic lines (uvicorn's access log, httpx's per-request lines) are
 written only when the level is `DEBUG`.
+
+**HTTP-48.** On a stop with clients connected, each open `subscriptions/listen` stream ends
+cleanly. HTTP calls in flight get `serving.graceful_timeout` seconds (`GRACEFUL_TIMEOUT`,
+`--graceful-timeout`, 15 by default) to finish. The pod's termination grace period must be longer.
 
 ## The resource tools
 

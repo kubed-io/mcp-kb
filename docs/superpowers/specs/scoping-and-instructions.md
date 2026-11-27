@@ -23,12 +23,16 @@ Each is read per MCP request from an HTTP header or a query parameter on the MCP
 | Resource prefix | `Kb-Resource-Prefix` | `prefix` | `X-MCP-Resource-Prefix` | — |
 | Resources | `Kb-Resources` | `resources` | `X-MCP-Resources` | — |
 | Via | `Kb-Via` | `via` | `X-MCP-Via` | — |
+| Max | `Kb-Max` | `max` | `X-MCP-Max` | — |
 
 **SCP-3.** The resource prefix and the resources setting are read by the same rules as the
-scope (SCP-4 to SCP-7). The resource prefix, the resources setting, the listed setting and Via
+scope (SCP-4 to SCP-7). The resource prefix, the resources setting, the listed setting, Via and the max
 are kubed-mcp's own inputs, read with the server's header prefix `Kb`, so a `Kb-` header beats its
 `X-MCP-` alias (DLV-16). Via is `mcp` (the default), `extension` or `local`, matched without
-regard to case; any other value resolves to `mcp`. What the listed setting and the
+regard to case; any other value resolves to `mcp`. Max is a whole number of 1 or more, or
+`all` for no cap, matched without regard to case. Any other value is ignored with one warning,
+and the next of its sources answers. With none, it is the config's `delivery.max`, else 100.
+What the listed setting, the max and the
 prefix do is specified in [skills.md](skills.md), and the resources setting in
 [http-and-tools.md](http-and-tools.md).
 
@@ -246,17 +250,17 @@ INS-17 and INS-18 stay as they are: their libraries are shown without prompts or
 
 **INS-20.** The text takes one of three shapes, by the request's Via:
 
-| Via | Description and notes | `Skills:` pointer, `Prompts:` and `Agents:` lines | Skill names (INS-11) | Footer |
-|---|---|---|---|---|
-| `mcp` | yes | yes | per INS-11 | INS-15 |
-| `extension` | yes | yes | never | INS-21 |
-| `local` | yes | no | never | none |
+| Via | Description and notes | `Skills:` pointer, `Prompts:` and `Agents:` lines | Skill names (INS-11) | Cut line (INS-24) | Footer |
+|---|---|---|---|---|---|
+| `mcp` | yes | yes | per INS-11 | yes | INS-15 |
+| `extension` | yes | yes | never | yes | INS-21 |
+| `local` | yes | no | never | never | none |
 
 INS-6 (which libraries), INS-7 (their order) and INS-13 (a `[<library>]` heading when several are
 selected) hold under every Via.
 
 **INS-21.** Under `extension` the footer is fixed, whatever `resources` resolved to:
-`Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its _manifest lists the other files it ships.`
+`Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its entry lists the files it ships.`
 It is written with the prefix as INS-16 says.
 
 **INS-22.** Under `local` a library whose description and notes are both empty has no section, and
@@ -267,11 +271,19 @@ when libraries are selected.
 logged at ERROR with credentials masked, and the text is the footer of the request's Via (INS-15
 or INS-21), or empty under `local`.
 
+**INS-24.** When kubed-mcp's count for the request (DLV-11) says its cap left skills out of the
+listing (SKL-64), the text under `mcp` and `extension` has one more paragraph, after the sections
+and before the footer:
+`<listed> of <total> skills are listed; every skill reads through its library's _index.md.`
+`<total>` is the skills listed plus those cut. kubed-mcp counts on `initialize` and
+`server/discover`. With no count, or none cut, there is no such paragraph. It is never written
+under `local`, nor in INS-23's footer.
+
 ### Layout and footer
 
-**INS-14.** Sections are separated by one blank line, and the footer comes last after one blank
-line. With no library selected, the text is the footer alone under `mcp` and `extension`, and
-empty under `local` (INS-22).
+**INS-14.** Sections are separated by one blank line. INS-24's line, when there is one, comes
+after them, and the footer comes last, each after one blank line. With no library selected, the text
+is the footer alone under `mcp` and `extension`, and empty under `local` (INS-22).
 
 **INS-15.** Under `mcp`, the footer follows the client's mode and is not configurable:
 
@@ -324,5 +336,5 @@ Prompts: prompts://grafana/_index.md
 Penpot design tooling.
 Skills: skill://penpot/_index.md
 
-Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its _manifest lists the other files it ships.
+Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its entry lists the files it ships.
 ```

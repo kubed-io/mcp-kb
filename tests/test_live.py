@@ -207,7 +207,8 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
     ``_meta`` key included, and the next one from the new generation (AGT-17).
     Since kubed-mcp 0.4.2 it takes its state after the view, so a refresh inside
     the view would land before both pins; the build's first rewrite is where
-    one lands after them."""
+    one lands after them. The rewriter goes in after the handshake because, from
+    kubed-mcp 0.6, the handshake's skill count builds too."""
     import contextvars
     from concurrent.futures import ThreadPoolExecutor
     from dataclasses import replace
@@ -246,10 +247,10 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
                 refreshed.append(done.result())
         return text
 
-    # After kb's own rewriter, as a build calls them in order.
-    serving._mcp.add_rewriter(refresh_inside_the_build)
-
     async def get_twice(client):
+        # After kb's own rewriter, as a build calls them in order, and after
+        # the handshake, whose skill count builds too.
+        serving._mcp.add_rewriter(refresh_inside_the_build)
         first = await ext_request(client, "agents/get", name="notes_a")
         return first, await ext_request(client, "agents/get", name="notes_a")
 

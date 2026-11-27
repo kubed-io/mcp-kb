@@ -11,21 +11,22 @@ config that serves nothing is the worst failure a config file has. The
 composition is also the published schema: ``config.schema.json`` is
 ``schema()`` and a test fails when the two drift.
 
-=====================  ================  =================  =====================
-Item                   Env               Flag               Default
-=====================  ================  =================  =====================
-the file               ``CONFIG_FILE``   ``--config-file``  none
-``sources``            ``KB_SOURCES``    ``--sources``      ``[]``
-``plugins``            ``KB_PLUGINS``    ``--plugins``      ``[]``
-``libraries``          ``KB_LIBRARIES``  ``--libraries``    ``[]``
-``cache_dir``          ``CACHE_DIR``     ``--cache-dir``    ``/var/cache/mcp-kb``
-``serving.transport``  ``TRANSPORT``     ``--transport``    ``http``
-``serving.host``       ``HOST``          ``--host``         ``0.0.0.0``
-``serving.port``       ``PORT``          ``--port``         ``8000``
-``serving.log_level``  ``LOG_LEVEL``     ``--log-level``    ``INFO``
-``telemetry.*``        ``TELEMETRY_*``   ``--telemetry-*``  kubed-mcp's
-``delivery.*``         ``DELIVERY_*``    ``--delivery-*``   none
-=====================  ================  =================  =====================
+============================  ====================  ======================  =====================
+Item                          Env                   Flag                    Default
+============================  ====================  ======================  =====================
+the file                      ``CONFIG_FILE``       ``--config-file``       none
+``sources``                   ``KB_SOURCES``        ``--sources``           ``[]``
+``plugins``                   ``KB_PLUGINS``        ``--plugins``           ``[]``
+``libraries``                 ``KB_LIBRARIES``      ``--libraries``         ``[]``
+``cache_dir``                 ``CACHE_DIR``         ``--cache-dir``         ``/var/cache/mcp-kb``
+``serving.transport``         ``TRANSPORT``         ``--transport``         ``http``
+``serving.host``              ``HOST``              ``--host``              ``0.0.0.0``
+``serving.port``              ``PORT``              ``--port``              ``8000``
+``serving.log_level``         ``LOG_LEVEL``         ``--log-level``         ``INFO``
+``serving.graceful_timeout``  ``GRACEFUL_TIMEOUT``  ``--graceful-timeout``  ``15``
+``telemetry.*``               ``TELEMETRY_*``       ``--telemetry-*``       kubed-mcp's
+``delivery.*``                ``DELIVERY_*``        ``--delivery-*``        none
+============================  ====================  ======================  =====================
 
 A list read from an env var or a flag is JSON, and replaces the file's list
 whole. The image names its file with ``CONFIG_FILE=/etc/mcp-kb/config.yaml``;
@@ -55,7 +56,7 @@ file is safe to commit and to publish as a ConfigMap. The ref moves onto the
 plugin's address, beside go-getter's ``//`` for a subdirectory, because the
 identity of a fetch is the URL *and* the ref while the credential is the
 source's.
-"""
+"""  # noqa: E501 -- the table above is as wide as its widest row
 
 from __future__ import annotations
 
@@ -600,7 +601,8 @@ class Serving(ServingSettings):
 
     kb serves ``http`` on every address by default, as a container does, and
     serves ``stdio`` or ``http`` alone: ``sse`` and ``streamable-http`` are a
-    config error. ``port`` and ``log_level`` are kubed-mcp's as they are.
+    config error. ``port``, ``log_level`` and ``graceful_timeout`` are
+    kubed-mcp's as they are.
     """
 
     transport: Literal["stdio", "http"] = Item(

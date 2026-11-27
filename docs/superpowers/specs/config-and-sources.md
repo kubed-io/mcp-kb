@@ -23,6 +23,7 @@ below it whole. A blank value is unset.
 | `serving.host` | `HOST` | `--host` | `0.0.0.0` |
 | `serving.port` | `PORT` | `--port` | `8000` |
 | `serving.log_level` | `LOG_LEVEL` | `--log-level` | `INFO` |
+| `serving.graceful_timeout` | `GRACEFUL_TIMEOUT` | `--graceful-timeout` | `15` |
 | `telemetry.profiles` | `TELEMETRY_PROFILES` | `--telemetry-profiles` | none |
 | `telemetry.profile_cpu` | `TELEMETRY_PROFILE_CPU` | `--telemetry-profile-cpu` | `true` |
 | `telemetry.profile_memory` | `TELEMETRY_PROFILE_MEMORY` | `--telemetry-profile-memory` | `true` |
@@ -31,6 +32,7 @@ below it whole. A blank value is unset.
 | `delivery.resources` | `DELIVERY_RESOURCES` | `--delivery-resources` | none |
 | `delivery.listed` | `DELIVERY_LISTED` | `--delivery-listed` | none |
 | `delivery.via` | `DELIVERY_VIA` | `--delivery-via` | none |
+| `delivery.max` | `DELIVERY_MAX` | `--delivery-max` | none (the cap is 100) |
 
 **CFG-2.** There is one config. What to serve, how to run, what the process reports and the
 delivery defaults are all items of it, and each one can be set in the file, an env var or a flag.
@@ -140,8 +142,10 @@ kind's pattern, never by its address: `skill://{library}/_index.md`,
 `skill://{library}/{folder}/_index.md`, `skill://{library}/_index.json`,
 `skill://{library}/{folder}/_index.json`, `skill://{library}/_files.md`, and
 `skill://{library}/{+path}`. `{folder}` is the address's second segment, and
-`skill://{library}/{+path}` is any other address kb answers: a library file, a plugin-root
-fallback (SKL-30, SKL-31), or a deeper folder's `_index.json`. The pattern is read from the
+`skill://{library}/{+path}` is any other address kb answers: a library file, a library-level
+fallback (SKL-31), or a deeper folder's `_index.json`. A read below a skill's own directory, the
+plugin-root fallback (SKL-30) included, is labelled by kubed-mcp, as
+`skill://{library}/{path}`. The pattern is read from the
 address with its dot segments resolved. A read through the `read_resource` tool is labelled the
 same. A read kb misses carries no label, as before, and an out-of-scope read is labelled as an
 absent one is. These patterns are labels only: `resources/templates/list` still lists the one row

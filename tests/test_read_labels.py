@@ -46,6 +46,7 @@ LIBRARY_JSON = "skill://{library}/_index.json"
 FOLDER_JSON = "skill://{library}/{folder}/_index.json"
 FILES = "skill://{library}/_files.md"
 PATH = "skill://{library}/{+path}"
+LAYER_PATH = "skill://{library}/{path}"
 PATTERNS = {LIBRARY_INDEX, FOLDER_INDEX, LIBRARY_JSON, FOLDER_JSON, FILES, PATH}
 
 # Two addresses of each kind, in the synthetic tree: one series per kind, however
@@ -67,9 +68,10 @@ KINDS = [
     # Only deepsource lists files; the same address twice still adds one series.
     (FILES, ["skill://deepsource/_files.md", "skill://deepsource/_files.md"]),
     (PATH, ["skill://deepsource/README.md", "skill://deepsource/shared/guide.md"]),
-    # The plugin-root fallback (SKL-30): a citation inside a skill that misses there.
+    # The plugin-root fallback (SKL-30): a citation inside a skill that misses
+    # there. kubed-mcp labels a read below a skill as its own, the fallback included.
     (
-        PATH,
+        LAYER_PATH,
         [
             "skill://deepsource/plugin-a/gamma/README.md",
             "skill://deepsource/plugin-b/delta/shared/guide.md",
@@ -168,7 +170,7 @@ async def test_no_concrete_address_is_ever_a_label(knowledge_base, reader):
                 await client.read_resource(uri)
 
     labels = await _labels(reader, reads)
-    assert set(labels) <= PATTERNS
+    assert set(labels) <= PATTERNS | {LAYER_PATH}
     assert not any(label in uris for label in labels)
 
 
@@ -334,7 +336,8 @@ async def test_a_served_read_marks_its_pattern(provider, pattern, uris):
             assert await provider._get_resource(uri) is not None
         finally:
             _SERVED.reset(token)
-        assert served.pattern == pattern
+        # kb marks a fallback as PATH; the layer relabels it on the metric.
+        assert served.pattern == (PATH if pattern == LAYER_PATH else pattern)
 
 
 @pytest.mark.parametrize(
