@@ -250,11 +250,11 @@ INS-17 and INS-18 stay as they are: their libraries are shown without prompts or
 
 **INS-20.** The text takes one of three shapes, by the request's Via:
 
-| Via | Description and notes | `Skills:` pointer, `Prompts:` and `Agents:` lines | Skill names (INS-11) | Footer |
-|---|---|---|---|---|
-| `mcp` | yes | yes | per INS-11 | INS-15 |
-| `extension` | yes | yes | never | INS-21 |
-| `local` | yes | no | never | none |
+| Via | Description and notes | `Skills:` pointer, `Prompts:` and `Agents:` lines | Skill names (INS-11) | Cut line (INS-24) | Footer |
+|---|---|---|---|---|---|
+| `mcp` | yes | yes | per INS-11 | yes | INS-15 |
+| `extension` | yes | yes | never | yes | INS-21 |
+| `local` | yes | no | never | never | none |
 
 INS-6 (which libraries), INS-7 (their order) and INS-13 (a `[<library>]` heading when several are
 selected) hold under every Via.
@@ -271,10 +271,18 @@ when libraries are selected.
 logged at ERROR with credentials masked, and the text is the footer of the request's Via (INS-15
 or INS-21), or empty under `local`.
 
+**INS-24.** When kubed-mcp's count for the request (DLV-11) says its cap left skills out of the
+listing (SKL-64), the text under `mcp` and `extension` has one more paragraph, after the sections
+and before the footer:
+`<listed> of <total> skills are listed; every skill reads through its library's _index.md.`
+`<total>` is the skills listed plus those cut. kubed-mcp counts on `initialize` and
+`server/discover`. With no count, or none cut, there is no such paragraph. It is never written
+under `local`, nor in INS-23's footer.
+
 ### Layout and footer
 
-**INS-14.** Sections are separated by one blank line, and the footer comes last after one blank
-line. With no library selected, the text is the footer alone under `mcp` and `extension`, and
+**INS-14.** Sections are separated by one blank line. INS-24's line, when there is one, comes
+after them, and the footer comes last, each after one blank line. With no library selected, the text is the footer alone under `mcp` and `extension`, and
 empty under `local` (INS-22).
 
 **INS-15.** Under `mcp`, the footer follows the client's mode and is not configurable:

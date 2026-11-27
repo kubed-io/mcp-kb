@@ -45,6 +45,14 @@ RES_FOOTER = (
     "_manifest in place of SKILL.md for the other files it ships."
 )
 TOOLS_FOOTER = "Read these with read_resource."
+CUT = "3 of 4 skills are listed; every skill reads through its library's _index.md."
+
+
+def _resolved(resources="on", extensions=None, prefix=None, via="mcp", skills=None):
+    """What kubed-mcp hands the hook; the real one always has ``skills``."""
+    return SimpleNamespace(
+        resources=resources, extensions=extensions, prefix=prefix, via=via, skills=skills
+    )
 
 
 def _catalogue(tmp_path, libraries):
@@ -539,22 +547,18 @@ def test_the_fn_builds_from_the_resolution(tmp_path):
     fn = ScopedInstructions(
         lambda: SimpleNamespace(catalogue=cat, folders=lambda scope: {}), list
     )
-    on = SimpleNamespace(resources="on", extensions=None, prefix="kb+", via="mcp")
+    on = _resolved("on", None, "kb+", "mcp")
     # unprefixed: kubed-mcp writes the prefix over what the fn returns
     assert fn(on).startswith("Skills (skill://penpot/_index.md)")
     assert fn(on).endswith(RES_FOOTER)
-    off = SimpleNamespace(
-        resources="off", extensions=frozenset(), prefix=None, via="mcp"
-    )
+    off = _resolved("off", frozenset(), None, "mcp")
     assert fn(off).endswith(TOOLS_FOOTER)
-    declared = SimpleNamespace(
-        resources="on", extensions=frozenset({EXTENSION_ID}), prefix=None, via="mcp"
-    )
+    declared = _resolved("on", frozenset({EXTENSION_ID}), None, "mcp")
     assert fn(declared).startswith("Skills: skill://penpot/_index.md")
-    extension = SimpleNamespace(resources="on", extensions=None, prefix=None, via="extension")
+    extension = _resolved("on", None, None, "extension")
     text = fn(extension)
     assert text.endswith(EXTENSION_FOOTER) and "Skills (" not in text
-    local = SimpleNamespace(resources="on", extensions=None, prefix=None, via="local")
+    local = _resolved("on", None, None, "local")
     assert fn(local) == ""  # a library with no description or notes
 
 
@@ -818,7 +822,7 @@ def test_a_refresh_between_the_pin_and_the_instructions(tmp_path):
     server_of(kb)
     serving = serving_of(kb)
     instructions = ScopedInstructions(serving.served_snapshot, list)
-    on = SimpleNamespace(resources="on", extensions=None, prefix=None, via="mcp")
+    on = _resolved("on", None, None, "mcp")
     request = contextvars.copy_context()
     request.run(serving.view)  # pins the published state, off-request: everything
 
@@ -1053,7 +1057,7 @@ def test_a_failing_build_logs_and_answers_the_footer(
     fn = ScopedInstructions(
         lambda: SimpleNamespace(catalogue=None, folders=lambda s: {}), lambda: [secret]
     )
-    got = fn(SimpleNamespace(resources=resources, extensions=None, prefix=None, via=via))
+    got = fn(_resolved(resources, None, None, via))
     assert got == expected
     [record] = [r for r in caplog.records if r.name == "kubed.mcp_kb.mcp.instructions"]
     assert record.levelname == "ERROR"
@@ -1067,7 +1071,7 @@ def test_a_failing_snapshot_read_is_caught_too(caplog):
         raise RuntimeError("no snapshot")
 
     fn = ScopedInstructions(broken, list)
-    got = fn(SimpleNamespace(resources="on", extensions=None, prefix=None, via="mcp"))
+    got = fn(_resolved("on", None, None, "mcp"))
     assert got == RES_FOOTER
     assert [r.levelname for r in caplog.records] == ["ERROR"]
 
@@ -1236,3 +1240,82 @@ def test_the_extension_footer_names_no_view():
     )
     assert "_manifest" not in EXTENSION_FOOTER
     assert "_manifest" in footer(resources=True)
+
+
+# -- the cut line (INS-24) ----------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("via", "closing"), [("mcp", RES_FOOTER), ("extension", EXTENSION_FOOTER)]
+)
+def test_a_cut_adds_its_line_before_the_footer(tmp_path, via, closing):
+    a, b = LibraryText("a", "A."), LibraryText("b", "B.")
+    cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
+    out = _build(cat, via=via, skills=(3, 1))
+    assert out.endswith("Skills: skill://b/_index.md\n\n" + CUT + "\n\n" + closing)
+
+
+@pytest.mark.unit
+def test_no_count_or_no_cut_writes_no_line(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("a"): ["x"]})
+    assert _build(cat, skills=None) == _build(cat) == _build(cat, skills=(4, 0))
+    assert "skills are listed" not in _build(cat, resources=False, skills=(4, 0))
+
+
+@pytest.mark.unit
+def test_local_never_writes_the_line(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("a", "A."): ["x"]})
+    assert _build(cat, via="local", skills=(3, 1)) == "A."
+
+
+@pytest.mark.unit
+def test_the_hook_passes_kubed_mcps_count(tmp_path):
+    cat = _catalogue(tmp_path, {LibraryText("a", "A."): ["x"]})
+    fn = ScopedInstructions(
+        lambda: SimpleNamespace(catalogue=cat, folders=lambda s: {}), list
+    )
+    counted = _resolved(skills=SimpleNamespace(listed=3, cut=1))
+    assert fn(counted).endswith(CUT + "\n\n" + RES_FOOTER)
+    assert "skills are listed" not in fn(_resolved(skills=None))
+
+
+@pytest.mark.unit
+def test_a_failing_build_with_a_count_answers_the_bare_footer(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("broke")
+
+    monkeypatch.setattr("kubed.mcp_kb.mcp.instructions.build_instructions", boom)
+    fn = ScopedInstructions(
+        lambda: SimpleNamespace(catalogue=None, folders=lambda s: {}), list
+    )
+    got = fn(_resolved(skills=SimpleNamespace(listed=3, cut=1)))
+    assert got == RES_FOOTER
+
+
+@pytest.mark.integration
+@ERAS
+@pytest.mark.parametrize(
+    ("headers", "line"),
+    [
+        ({"Kb-Max": "3"}, CUT),
+        ({"Kb-Max": "3", "Kb-Via": "extension"}, CUT),
+        ({"Kb-Max": "3", "Kb-Resource-Prefix": "kb+"}, CUT),  # same text, prefixed
+        (
+            {"Kb-Library": "flatsource", "Kb-Max": "1"},
+            "1 of 2 skills are listed; every skill reads through its library's _index.md.",
+        ),
+    ],
+)
+async def test_the_cut_line_is_told_on_connect(server_url, mode, headers, line):  # noqa: F811
+    text = await told(server_url, mode, headers)
+    assert text.split("\n\n")[-2] == line
+
+
+@pytest.mark.integration
+@ERAS
+@pytest.mark.parametrize(
+    "headers", [{}, {"Kb-Max": "4"}, {"Kb-Max": "3", "Kb-Via": "local"}]
+)
+async def test_a_max_that_cuts_nothing_writes_no_line(server_url, mode, headers):  # noqa: F811
+    assert "skills are listed" not in await told(server_url, mode, headers)

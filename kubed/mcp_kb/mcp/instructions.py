@@ -18,6 +18,9 @@ of a generation the layer is not serving to that request.
 The text follows the request's Via mode (INS-20): ``mcp``, ``extension`` or
 ``local``, handed to the builder as the plain string kubed-mcp resolved.
 
+When the cap left skills out of the listing, kubed-mcp's count says so and the
+text gains one line for it, passed on as two plain ints (INS-24).
+
 Building the text never fails a handshake (INS-23). Everything, from reading the
 snapshot to the build, sits in one ``try``; a failure is logged at ERROR with
 its traceback masked of credentials, and the answer is the mode's footer, or
@@ -67,6 +70,11 @@ class ScopedInstructions:
                 skills_extension=EXTENSION_ID in (delivery.extensions or ()),
                 folders=snapshot.folders(scope),
                 via=delivery.via,
+                skills=(
+                    None
+                    if delivery.skills is None
+                    else (delivery.skills.listed, delivery.skills.cut)
+                ),
             )
         except Exception as exc:  # noqa: BLE001 - a handshake never fails (INS-23)
             trace = "".join(traceback.format_exception(exc))
