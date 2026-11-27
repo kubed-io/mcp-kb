@@ -4,33 +4,45 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 import pytest
+from kubed.mcp.protocol import MCPError
 
-from kubed.mcp_kb.sources import live
 from tests.live.kb import agent_names, definition, health
 from tests.webdav_server import PASSWORD
 
 pytestmark = pytest.mark.live
 
 
-async def _settle(kb_url: str) -> None:
-    """Outwait the TTL, start the background pass with a read, and let it land."""
-    await asyncio.sleep(live.TTL_SECONDS + 0.5)
-    await agent_names(kb_url, "dav")
-    await asyncio.sleep(1.0)
+def _fetched(kb_url: str) -> int:
+    """Files the live fetch has downloaded: it climbs only when a moved one is."""
+    fetches = health(kb_url)["fetches"].values()
+    return next(f for f in fetches if f.get("live") is True)["fetched"]
+
+
+async def _settle(kb_url: str, before: int) -> None:
+    """Read until the background pass has downloaded what moved (a read starts it)."""
+    deadline = time.monotonic() + 15
+    while True:
+        await agent_names(kb_url, "dav")
+        await asyncio.sleep(0.25)
+        if _fetched(kb_url) > before:
+            return
+        assert time.monotonic() < deadline, "the live fetch never picked up the edit"
 
 
 async def _edit(path: Path, text: str, kb_url: str) -> None:
-    """Write `text`, which must differ in length, and let the background pass land.
+    """Write `text`, which must differ in length, and wait for the pass to land.
 
     wsgidav's ETag is `inode-mtime-size`, so a same-length edit within the same
     second would be the same ETag and the re-read would pass for no reason.
     """
     assert len(text.encode()) != path.stat().st_size
+    before = _fetched(kb_url)
     path.write_text(text)
-    await _settle(kb_url)
+    await _settle(kb_url, before)
 
 
 def _agent(frontmatter: str, body: str) -> str:
@@ -38,12 +50,13 @@ def _agent(frontmatter: str, body: str) -> str:
 
 
 async def test_a_live_agent_is_reread(kb_url, dav_dir):
-    """AGT-16: an edit shows on the next `agents/get`; a broken one falls back."""
+    """AGT-9, AGT-16: an edit is served once the pass found it; a broken one keeps
+    the edited build; a renamed agent is served under its new name."""
     path = dav_dir / "agents/editable.md"
     original = path.read_text()
     try:
         first = await definition(kb_url, "dav_editable", "dav")
-        assert first["instructions"] == "Original body.\n"
+        assert first["instructions"] == "Original body."
 
         await _edit(
             path,
@@ -54,11 +67,11 @@ async def test_a_live_agent_is_reread(kb_url, dav_dir):
             kb_url,
         )
         edited = await definition(kb_url, "dav_editable", "dav")
-        assert edited["instructions"] == "The edited body, which is longer.\n"
+        assert edited["instructions"] == "The edited body, which is longer."
 
         await _edit(path, "---\nname: [unclosed\n---\nHalf saved.\n", kb_url)
         broken = await definition(kb_url, "dav_editable", "dav")
-        assert broken["instructions"] == "Original body.\n"
+        assert broken["instructions"] == "The edited body, which is longer."
 
         await _edit(
             path,
@@ -68,15 +81,19 @@ async def test_a_live_agent_is_reread(kb_url, dav_dir):
             ),
             kb_url,
         )
-        renamed = await definition(kb_url, "dav_editable", "dav")
-        assert renamed["agent"] == "dav_editable"
-        assert renamed["instructions"] == "Renamed on disk.\n"
-        assert await agent_names(kb_url, "dav") == ["dav_editable"]
+        renamed = await definition(kb_url, "dav_renamed-on-disk", "dav")
+        assert renamed["agent"] == "dav_renamed-on-disk"
+        assert renamed["instructions"] == "Renamed on disk."
+        assert await agent_names(kb_url, "dav") == ["dav_renamed-on-disk"]
+        with pytest.raises(MCPError, match="Agent not found"):
+            await definition(kb_url, "dav_editable", "dav")
     finally:
         # Not `_edit`: its length guard would hide a failure before any edit.
         if path.read_text() != original:
+            before = _fetched(kb_url)
             path.write_text(original)
-            await _settle(kb_url)
+            await _settle(kb_url, before)
+    assert await agent_names(kb_url, "dav") == ["dav_editable"]
 
 
 def test_health_names_no_dav_url_or_credential(kb_url, dav_dir):
