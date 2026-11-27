@@ -192,7 +192,7 @@ alone, which every scope that sees the agent also sees.
   candidate, so a name of another plugin's skill never resolves. A bare `<skill>` resolves to the
   one served skill of that name in the agent's own plugin.
 - **The rest.** An entry that does not resolve is left out, and so is one that resolves to a skill
-  SKL-3 does not serve, and `skills` is `{}` when none are left.
+  that is not served (SKL-45), and `skills` is `{}` when none are left.
   `frontmatter` stays verbatim, and the addresses are never prefixed (SKL-41).
 
 **AGT-18.** An agent's file also reads as a resource at

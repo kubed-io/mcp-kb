@@ -128,19 +128,15 @@ def served(catalogue, uri: str, scope=None) -> str | None:
     It diverges from production, which kubed-mcp's plugin layer serves: there is
     no gateway prefix, no CRLF normalisation (SKL-22), no media type or blob
     (N16), and none of FastMCP's refusals (a misnamed folder, a symlink, N14)
-    or of kb's parity guard. It does follow N13: a skill holding a hidden path
-    serves nothing.
+    or of kb's parity guard. Like kubed-mcp, it serves no hidden path (SKL-3).
     """
     from kubed.mcp_kb.mcp.scope import EVERYTHING
-    from kubed.mcp_kb.mcp.skills import holds_hidden
 
     scope = EVERYTHING if scope is None else scope
     for skill in catalogue.visible_skills(scope):
         root = f"skill://{skill.address}/"
         if not uri.startswith(root):
             continue
-        if holds_hidden(skill.path):
-            return None
         rel = uri[len(root) :]
         target = skill.path / rel
         if rel.startswith(".") or "/." in rel or not target.is_file():

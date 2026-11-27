@@ -463,44 +463,52 @@ async def _agent_miss(client, name: str) -> tuple:
     return error.value.code, error.value.message, error.value.data
 
 
-# -- what FastMCP reads whole (N13, N14) --------------------------------------
-
-HIDDEN = "skill {} holds a hidden file, which kubed-mcp would serve; not served"
+# -- hidden paths and symlinks (SKL-3, N14) ----------------------------------
 
 
 @pytest.mark.parametrize("hidden", [".env", "refs/.cache/x.md", ".git/config"])
-async def test_a_skill_holding_a_hidden_path_is_not_served(tmp_path, caplog, hidden):
-    """N13: FastMCP reads a skill folder whole, dot files included, so a skill
-    holding one is not served at all; the others serve."""
+async def test_a_skill_holding_a_hidden_path_is_served_without_it(
+    tmp_path, caplog, hidden
+):
+    """SKL-3: kubed-mcp leaves a skill's hidden paths out, so the skill serves
+    and is listed, its hidden file reads as absent, and kb says nothing."""
     with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.mcp.skills"):
         knowledge_base = kit(
             tmp_path,
             **{
                 "skills/vault/SKILL.md": "---\nname: vault\ndescription: V.\n---\nV\n",
+                "skills/vault/ref.md": "ref\n",
                 f"skills/vault/{hidden}": "SECRET=1\n",
             },
         )
         server_of(knowledge_base)
-    async with Client(server_of(knowledge_base)) as client:
-        for uri in (
-            f"skill://lib/vault/{hidden}",
-            "skill://lib/vault/SKILL.md",
-            "skill://lib/vault/_manifest",
-        ):
-            with pytest.raises(MCPError):
-                await client.read_resource(uri)
-        listing = await ext_request(client, "skills/list")
-        index = await _text(client, "skill://lib/_index.md")
-        assert "The kit" in await _text(client, "skill://lib/kit/SKILL.md")
-        manifest = json.loads(await _text(client, "skill://lib/kit/_manifest"))
+        async with Client(server_of(knowledge_base)) as client:
+            assert await _miss(client, f"skill://lib/vault/{hidden}") == await _miss(
+                client, "skill://lib/vault/absent.md"
+            )
+            body = await _text(client, "skill://lib/vault/SKILL.md")
+            manifest = json.loads(await _text(client, "skill://lib/vault/_manifest"))
+            listing = await ext_request(client, "skills/list")
+            index = await _text(client, "skill://lib/_index.md")
+            folder = await _text(client, "skill://lib/vault/_index.md")
+            entry = await ext_request(
+                client, "skills/get", uri="skill://lib/vault/SKILL.md"
+            )
+    assert "V" in body
     uris = {entry["uri"] for entry in listing["skills"]}
-    assert uris == {"skill://lib/kit/SKILL.md", "skill://lib/other/SKILL.md"}
-    assert "vault" not in index
-    assert not [f for f in manifest["files"] if "/." in "/" + f["path"]]
-    assert "lib/vault" not in [s.address for s in knowledge_base.catalogue.visible_skills()]
+    assert uris == {
+        "skill://lib/kit/SKILL.md",
+        "skill://lib/other/SKILL.md",
+        "skill://lib/vault/SKILL.md",
+    }
+    assert "skill://lib/vault/SKILL.md" in index
+    assert {f["path"] for f in manifest["files"]} == {"SKILL.md", "ref.md"}
+    assert "lib/vault" in [s.address for s in knowledge_base.catalogue.visible_skills()]
     lines = [r.getMessage() for r in caplog.records if r.name == "kubed.mcp_kb.mcp.skills"]
-    assert lines == [HIDDEN.format("lib/vault")]
-    assert "SECRET" not in json.dumps(knowledge_base.status)
+    assert lines == []
+    seen = json.dumps([listing, manifest, index, folder, entry, knowledge_base.status])
+    assert "SECRET" not in seen
+    assert "/." not in seen.replace("://", "")
 
 
 async def test_a_skill_holding_a_symlink_is_not_served(tmp_path, caplog):
@@ -535,7 +543,7 @@ async def test_a_skill_holding_a_symlink_is_not_served(tmp_path, caplog):
 
 
 async def test_a_skill_kb_did_not_find_is_not_served(tmp_path, caplog, monkeypatch):
-    """M3: N13 fails closed. A skill the plugin layer finds and kb's harvest did
+    """M3: kb fails closed. A skill the plugin layer finds and kb's harvest did
     not is one kb never vetted, so its ``SKILL.md`` fails in kb's rewriter and
     it is not served at all; the server says so once."""
     from kubed.mcp_kb.catalogue import harvest

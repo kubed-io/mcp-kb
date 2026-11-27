@@ -292,9 +292,8 @@ async def test_a_hidden_file_in_a_skill_is_not_readable_by_guessing(tmp_path):
     """A caller never gets a hidden file by typing its name, through the
     resource or the mirror.
 
-    A `.env` beside a SKILL.md is exactly that file. kubed-mcp would serve it
-    with the skill, so kb serves none of the skill holding it (N13); the skill
-    beside it serves.
+    A `.env` beside a SKILL.md is exactly that file. kubed-mcp leaves it out,
+    and the skill holding it serves the rest (SKL-3).
     """
     skill = tmp_path / "src" / "skills" / "x"
     skill.mkdir(parents=True)
@@ -315,12 +314,12 @@ async def test_a_hidden_file_in_a_skill_is_not_readable_by_guessing(tmp_path):
 
     async with Client(server_of(server)) as client:
         visible = (await client.read_resource("skill://lib/y/notes.md"))[0].text
-        for uri in ("skill://lib/x/.env", "skill://lib/x/notes.md"):
-            with pytest.raises(Exception, match=r"[Uu]nknown|not found"):
-                await client.read_resource(uri)
+        beside = (await client.read_resource("skill://lib/x/notes.md"))[0].text
+        with pytest.raises(Exception, match=r"[Uu]nknown|not found"):
+            await client.read_resource("skill://lib/x/.env")
         mirrored = await call(client, "read_resource", uri="skill://lib/x/.env")
 
-    assert visible == "visible\n"
+    assert visible == beside == "visible\n"
     assert "hunter2" not in mirrored
 
 

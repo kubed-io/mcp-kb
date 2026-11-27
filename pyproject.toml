@@ -29,8 +29,10 @@ dependencies = [
   # the one route to FastMCP: the sibling namespace package kubed.mcp builds the
   # server and re-exports every FastMCP and MCP SDK name kb uses, and it owns the
   # FastMCP pin, so kb declares none of its own. Pre-1.0, so a minor is a break:
-  # the range takes 0.5's patches and stops short of 0.6, which a bump moves to.
-  "kubed-mcp>=0.5.0,<0.6",
+  # the range stops short of 0.6, which a bump moves to. The floor is 0.5.2, the
+  # first release that leaves a skill's hidden files (a `.env`) out: kb no longer
+  # guards them itself, so never lower it.
+  "kubed-mcp>=0.5.2,<0.6",
   "pyyaml>=6.0",
   "python-frontmatter>=1.1",
   # git sources. pygit2 bundles libgit2, so the image needs no git binary and

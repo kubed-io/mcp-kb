@@ -172,7 +172,7 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
 ):
     """A refresh publishing from another thread while a build is in flight: the
     build's rewriter reads the state its request's view pinned, not the new one;
-    a build no view pinned reads what is published now (N13).
+    a build no view pinned reads what is published now.
 
     The refresh lands inside an ``agents/get``'s build, after its view and
     kubed-mcp both pinned: that request answers from its own generation, kb's
@@ -204,8 +204,8 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
     )
     plugin = site.plugin
 
-    # x renamed y: x's folder now holds a hidden file, so x no longer serves.
-    webdav.write("skills/x/.draft.md", "draft\n")
+    # x renamed y: x's SKILL.md is gone, so x no longer serves.
+    (webdav.root / "skills/x/SKILL.md").unlink()
     webdav.skill("y", "renamed")
     refreshed: list[list[str]] = []
 
@@ -231,10 +231,10 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
     assert first["_meta"][AGENT_META]["skills"] == {"x": "skill://notes/x/SKILL.md"}
     assert then["instructions"] == "Use notes:x and skill://notes/y/SKILL.md."
     assert then["_meta"][AGENT_META]["skills"] == {"y": "skill://notes/y/SKILL.md"}
-    assert SKILL.removeprefix("skill://") in serving._published.hidden
+    assert serving._published.snapshot.index.get(SKILL.removeprefix("skill://")) is None
 
     assert "first" in pinned.run(serving.rewrite, site, text)
-    with pytest.raises(ValueError, match="hidden file"):
+    with pytest.raises(ValueError, match="not one kb found"):
         contextvars.Context().run(serving.rewrite, site, text)
 
     # The pinned build renders the command against its own generation's names,
@@ -1108,7 +1108,8 @@ def test_a_live_watch_stamps_the_agents_the_manifest_lists(webdav, tmp_path, clo
 def test_no_reread_while_a_refresh_builds(webdav, tmp_path, monkeypatch):
     """A refresh points the fetch at its new export before it builds and
     publishes. A re-read in that window would add the plugin from the new tree
-    while N13's check still walks the old one, so it waits for the publish."""
+    while the generation served is still the old tree's, so it waits for the
+    publish, which serves the edit and still no hidden file."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     mcp = serving_of(knowledge_base)._mcp
     seen = {}
@@ -1131,7 +1132,7 @@ def test_no_reread_while_a_refresh_builds(webdav, tmp_path, monkeypatch):
 
     assert seen == {"hidden": None, "moved": 0}
     assert read_served(knowledge_base, f"{SKILL}/.secret.md") is None
-    assert read_served(knowledge_base, URI) is None, "N13: x holds a hidden file"
+    assert "rather longer than before" in read_served(knowledge_base, URI)
 
 
 def test_a_publisher_that_raises_leaves_the_records_as_they_were(

@@ -69,10 +69,9 @@ def _build(base):
         "Traces are in [tempo](../tempo/SKILL.md).\n",
     )
     _write(grafana, "skills/grafana-lgtm/loki/references/LOGQL.md", "logql notes\n")
-    # A skill of its own holds the dot file: a skill holding one is not
-    # served at all (N13), so loki keeps serving.
-    _skill(grafana, "skills/grafana-lgtm/vault", "vault", "Holds a secret.")
-    _write(grafana, "skills/grafana-lgtm/vault/.env", "LOKI_SECRET=1\n")
+    # A dot file inside a served skill: loki serves, and the file is nowhere
+    # (SKL-3).
+    _write(grafana, "skills/grafana-lgtm/loki/.env", "LOKI_SECRET=1\n")
     _skill(
         grafana,
         "skills/grafana-lgtm/tempo",
@@ -238,8 +237,6 @@ async def _rows(url, query="", library=None, tags=None):
 
 LOKI = "skill://grafana/grafana-lgtm/loki"
 
-VAULT = "skill://grafana/grafana-lgtm/vault"
-
 
 # -- the grammar ------------------------------------------------------------------
 
@@ -258,19 +255,24 @@ async def test_a_skill_two_folders_down_is_served_at_its_real_path(url):
     )
 
 
-async def test_a_skill_holding_a_hidden_file_is_absent(url):
-    """SKL-3, N13: kubed-mcp would serve a skill's dot file, so kb serves none
-    of a skill holding one, and names it nowhere; the rest serve."""
-    for uri in (f"{VAULT}/.env", f"{VAULT}/SKILL.md", f"{VAULT}/_manifest"):
-        assert "not found" in await _read_error(url, uri)
-        assert "LOKI_SECRET" not in await _tool(url, uri)
+async def test_a_skill_holding_a_hidden_file_serves_without_it(url):
+    """SKL-3: the skill serves and is listed, and its dot file reads as a
+    missing one and is named nowhere."""
+    assert "not found" in await _read_error(url, f"{LOKI}/.env")
+    assert "LOKI_SECRET" not in await _tool(url, f"{LOKI}/.env")
+    assert "Query logs." in await _read(url, f"{LOKI}/SKILL.md")
+    manifest = await _read(url, f"{LOKI}/_manifest")
+    assert ".env" not in manifest
+    library = await _read(url, "skill://grafana/_index.md")
+    assert "skill://grafana/grafana-lgtm/_index.md: 3 skills" in library
+    assert ".env" not in library
     for index in (
-        "skill://grafana/_index.md",
         "skill://grafana/grafana-lgtm/_index.md",
         "skill://grafana/grafana-lgtm/_index.json",
     ):
-        assert "vault" not in await _read(url, index)
-    assert "Query logs." in await _read(url, f"{LOKI}/SKILL.md")
+        text = await _read(url, index)
+        assert LOKI in text
+        assert ".env" not in text
 
 
 async def test_a_sibling_reference_resolves_to_the_siblings_uri(url):
@@ -439,8 +441,8 @@ async def test_a_dot_segment_read_out_of_scope_reads_as_a_missing_one(url):
 
 async def test_a_hidden_file_reached_through_dot_segments_is_still_refused(url):
     for uri in (
-        f"{LOKI}/../vault/.env",
-        f"{VAULT}/references/../.env",
+        f"{LOKI}/../tempo/../loki/.env",
+        f"{LOKI}/references/../.env",
         f"{LOKI}/../loki/.env",
     ):
         assert "LOKI_SECRET" not in await _raw(url, uri)

@@ -151,16 +151,15 @@ async def test_a_files_only_library_is_served_its_files_md(tmp_path):
         assert await resource_uris(url, "?library=docs") == ["skill://docs/_files.md"]
 
 
-def _plugin(root, name, tag, skill_extra=None):
+def _plugin(root, name, tag, link=None):
     skill = root / name / "only"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text(
         "---\nname: only\ndescription: The only skill.\n---\n\n# only\n"
     )
-    if skill_extra:
-        path = skill / skill_extra
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("")
+    if link:
+        # A symlink: the plugin layer refuses the skill holding it (N14).
+        (skill / link).symlink_to(skill / "SKILL.md")
     return {
         "name": name,
         "source": f"file://{root / name}",
@@ -175,7 +174,7 @@ def _plugin(root, name, tag, skill_extra=None):
 def test_the_pin_still_counts_served_skills(tmp_path):
     plugins = [
         _plugin(tmp_path, "good", "s"),
-        _plugin(tmp_path, "bad", "t", "assets/.gitkeep"),
+        _plugin(tmp_path, "bad", "t", "ref.md"),
     ]
     config = Config.model_validate(
         {

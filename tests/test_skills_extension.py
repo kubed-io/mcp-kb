@@ -105,19 +105,21 @@ async def test_the_manifest_the_entry_and_the_read_are_one_set_of_bytes(skills_d
             assert resource["size"] == len(text.encode()) == hashes[resource["uri"]]["size"]
 
 
-async def test_a_skill_holding_a_dot_file_is_not_offered(skills_dir):
-    """SKL-3, N13: kubed-mcp would offer a skill's dot file, so kb offers none
-    of a skill holding one; the rest are offered."""
+async def test_a_skill_holding_a_dot_file_is_offered_without_it(skills_dir):
+    """SKL-3: a skill holding a dot file is offered, and its entry names
+    every file but the dot file."""
     (skills_dir / "flatsource" / "alpha" / ".env").write_text("secret")
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
     async with Client(server_of(server)) as client:
         listing = await request(client, "skills/list")
+        alpha = await request(client, "skills/get", uri=ALPHA)
         with pytest.raises(MCPError):
-            await request(client, "skills/get", uri=ALPHA)
-        beta = await request(client, "skills/get", uri="skill://flatsource/beta/SKILL.md")
+            await client.read_resource("skill://flatsource/alpha/.env")
     uris = {entry["uri"] for entry in listing["skills"]}
-    assert ALPHA not in uris and len(uris) == 3
-    assert not any("/." in r["uri"] for r in beta["skill"]["resources"])
+    assert ALPHA in uris and len(uris) == 4
+    assert alpha["skill"]["resources"]
+    assert not any("/." in r["uri"] for r in alpha["skill"]["resources"])
+    assert "secret" not in json.dumps(alpha)
 
 
 async def test_direct_get_needs_no_listing_and_follows_refresh(skills_dir):

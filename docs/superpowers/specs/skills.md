@@ -21,9 +21,11 @@ declared. A declared `skills: []` serves no skill (PLG-9).
 
 **SKL-3.** A path is **hidden** when any segment starts with `.`, except `.github`, `.claude` and
 `.agents`, kept at any depth. Hidden paths are never harvested, listed or read. A skill whose
-folder holds a file or a folder whose name starts with `.`, at any depth and with no exception, is
-not served at all (SKL-45), and the server logs it once. Neither is a skill whose folder holds a
-symlink.
+folder holds a file or a folder whose name starts with `.`, at any depth, is served without it:
+inside a skill, kubed-mcp's plugin layer leaves out every such path with no exception (quick-mcp's
+SKL-24, kubed-mcp 0.5.2 and later), so it is in no read, folder, index, `_manifest` or entry, and
+reads as a missing one. A skill whose folder holds a symlink that is not hidden is not served at
+all (SKL-45).
 
 **SKL-4.** A skill folder, like a pattern hit, is kept only when it resolves inside the plugin
 root. It is named by the path it was reached by, not by its symlink target.
@@ -156,8 +158,8 @@ URI per line. With no library file in scope it reads as nothing.
 ## Reading a skill's files
 
 **SKL-21.** A path under a skill reads the regular file at that path in the skill's directory. A
-served skill holds no symlink and no hidden path (SKL-3). A directory and a missing file read as
-nothing. A file named `_index.md` or `_index.json` at any depth of a
+served skill holds no symlink (SKL-45), and a hidden path in it reads as nothing (SKL-3). A
+directory and a missing file read as nothing. A file named `_index.md` or `_index.json` at any depth of a
 skill, and one named `_manifest` at its root, is not one of its files: the server answers that URI
 with an index or the manifest.
 
@@ -374,8 +376,8 @@ does not declare it either.
 
 **SKL-45.** Every served skill passes FastMCP's checks: strict YAML frontmatter that converts to
 JSON, a `name` matching its address's last segment, a `description` of 1 to 1024 characters,
-relative paths, no symlink, at most 512 files and 16 MiB. It holds no hidden path either (SKL-3). A
-skill that fails is not served at all: none of its files reads, and no index, listing row, entry,
+relative paths, no symlink, at most 512 files and 16 MiB. Its hidden paths count for none of
+these: the plugin layer leaves them out, and one reads as nothing (SKL-3). A skill that fails is not served at all: none of its files reads, and no index, listing row, entry,
 hint or rewritten name points at it. The server logs why, once. kb's catalogue is narrowed to what
 the plugin layer serves once per generation, and again after a live re-read (SKL-37). A skill that
 fails only in one view's build, such as under a prefix that takes its description past 1024
