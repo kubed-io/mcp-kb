@@ -20,12 +20,13 @@ Three things this module is careful about:
   is -- so nothing that lands under the cache, in a log line or in the errors
   ``/health`` publishes can carry it. An HTTP failure is reported as its status
   and nothing more.
-- **A live read replaces one file, atomically.** ``fetch_file`` is the other
-  half of ``cache: live``: one PROPFIND, and only if the ETag moved, one GET
-  into a temporary file in ``.work/`` beside the export that is then renamed
-  over the local copy. A reader holding the old file reads the old file to its
-  end, and a download that is killed half way through leaves nothing inside
-  the export for the next pass to read as a missing file.
+- **A live revalidation replaces one file at a time, atomically.** The
+  background pass of ``cache: live`` (``live.py``) lists the folder with
+  ``remote_etags`` and calls ``download`` for each file whose ETag moved: one
+  GET into a temporary file in ``.work/`` beside the export, which is then
+  renamed over the local copy. A reader holding the old file reads the old
+  file to its end, and a download that is killed half way through leaves
+  nothing inside the export for the next pass to read as a missing file.
 
 Read-only throughout: a fetch is copied from and never written to.
 """
@@ -37,6 +38,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -54,6 +56,11 @@ from .export import WORK_PREFIX, Exports, workspace
 if TYPE_CHECKING:
     from httpx import URL
 
+# Every file kb writes into an export starts with this, and no upstream file or
+# folder that does is ever listed, recorded or copied: a remote name like a
+# stamp would otherwise be revalidated over kb's own, or sit where it is written.
+RESERVED = ".mcp-kb-"
+
 # Written at the root of an export: what every file's ETag was when it was
 # copied, which is what a live read revalidates against. Hidden, so harvest.py's
 # dot-file rule keeps it out of every listing by itself.
@@ -63,7 +70,13 @@ ETAGS_FILE = ".mcp-kb-etags.json"
 # took. export.py writes it, last of all.
 VERSION_FILE = ".mcp-kb-version"
 
+
 VERSION = re.compile(r"^[0-9a-f]{64}$")
+
+
+def reserved(rel: str) -> bool:
+    """Whether any segment of the path is one of kb's own names (``RESERVED``)."""
+    return any(part.startswith(RESERVED) for part in rel.split("/"))
 
 
 class _Client(Client):
@@ -92,8 +105,9 @@ def client(fetch: Fetch, *, timeout: float | None = None) -> WebdavFileSystem:
     it changes underneath us.
 
     ``timeout`` is per HTTP operation and left to httpx's own default here --
-    an index-time copy of a large folder is allowed to take its time. A read
-    is not, and ``live.py`` passes one; see ``REVALIDATE_TIMEOUT``.
+    an index-time copy of a large folder is allowed to take its time. A live
+    revalidation pass is not, and ``live.py`` passes one; see
+    ``REVALIDATE_TIMEOUT``.
     """
     if fetch.auth is None:
         # SourceConfig refuses an anonymous webdav source; a Fetch built by
@@ -117,12 +131,20 @@ def client(fetch: Fetch, *, timeout: float | None = None) -> WebdavFileSystem:
 def materialise_webdav(fetch: Fetch, cache: Path) -> Path:
     """Copy the folder into the cache under the digest of its ETags, and return it."""
     fs = client(fetch)
-    etags = _etags(fetch, fs)
+    etags = remote_etags(fetch, fs)
 
     def build(tmp: Path) -> None:
         with _reporting(fetch, "copy"):
             fs.get("", str(tmp), recursive=True)
         tmp.mkdir(parents=True, exist_ok=True)
+        # The copy takes everything upstream holds; kb's stamps are the only
+        # names of that kind an export may have, a folder of one included.
+        for path in list(tmp.rglob("*")):  # the tree changes under the walk
+            if path.name.startswith(RESERVED) and path.exists():
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink(missing_ok=True)
         (tmp / ETAGS_FILE).write_text(
             json.dumps(etags, indent=1, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -152,7 +174,7 @@ def fingerprint_webdav(fetch: Fetch, cache: Path, root: Path) -> dict:
     exported = exports.exported(root)
     if exported is None:
         raise SourceError(f"{fetch.key}: nothing exported under the cache")
-    etags = _etags(fetch, client(fetch))
+    etags = remote_etags(fetch, client(fetch))
     return {
         "exported": exported[0],
         "files": exports.count(root),
@@ -161,40 +183,13 @@ def fingerprint_webdav(fetch: Fetch, cache: Path, root: Path) -> dict:
     }
 
 
-def fetch_file(
-    fetch: Fetch,
-    root: Path,
-    rel: str,
-    etag: str | None = None,
-    *,
-    fs: WebdavFileSystem | None = None,
-) -> str | None:
-    """Revalidate one file against the server; re-download it only if it moved.
+def download(fetch: Fetch, root: Path, rel: str, fs: WebdavFileSystem) -> None:
+    """Download one file over its local copy, atomically.
 
-    ``etag`` is what the file was when it was copied -- the caller's record of
-    it, or the export's own if the caller has none. Returns the ETag the file
-    has now, which is the same object when nothing changed, or None when the
-    file is gone upstream: a deleted file is not a deleted skill, and the local
-    copy goes on being served until a refresh rebuilds the fetch without it.
-
-    ``fs`` lets a caller reuse one client across many reads, which is the whole
-    difference between a live fetch and a slow one.
+    Raises ``SourceError`` (``AccessRefused`` for a 401 or a 403) and refuses a
+    ``rel`` that leaves ``root``.
     """
     target = _inside(fetch, root, rel)
-    fs = fs or client(fetch)
-    recorded = etag if etag is not None else recorded_etags(root).get(rel)
-
-    try:
-        info = fs.info(rel)
-    except FileNotFoundError:
-        return None
-    except Exception as exc:
-        raise SourceError(f"{fetch.key}: {_failure(exc)} for {rel}") from exc
-
-    current = _etag(info)
-    if current == recorded and target.is_file():
-        return current
-
     target.parent.mkdir(parents=True, exist_ok=True)
     # Staged beside the export, never inside it: a download killed part way
     # through would otherwise leave a file the export's own count includes and
@@ -211,7 +206,6 @@ def fetch_file(
         tmp.replace(target)
     finally:
         tmp.unlink(missing_ok=True)
-    return current
 
 
 # -- the folder ----------------------------------------------------------------
@@ -222,13 +216,18 @@ def _exports(fetch: Fetch, cache: Path) -> Exports:
     return Exports.under(cache, fetch.slug, stamp=VERSION_FILE, version=VERSION)
 
 
-def _etags(fetch: Fetch, fs: WebdavFileSystem) -> dict[str, str]:
+def remote_etags(fetch: Fetch, fs: WebdavFileSystem) -> dict[str, str]:
     """``{path: etag}`` for every file in the folder, in path order.
 
-    One recursive listing, which is one PROPFIND per directory -- webdav4
-    passes the ETag through from the same response that enumerates the
-    children, so a listing prices every file's freshness for free. Sorted, so
-    two equal folders produce two equal dicts and one digest.
+    One recursive listing, which is one ``Depth: 1`` PROPFIND per directory
+    (webdav4's walk), not ``Depth: infinity``, which Nextcloud refuses by
+    default. webdav4 passes the ETag through from the same response that
+    enumerates the children, so a listing prices every file's freshness for
+    free. Sorted, so two equal folders produce two equal dicts and one digest.
+
+    A path that is ``reserved``, a file of kb's names or anything under a folder
+    of one, is left out, so no recorded map, digest or live download ever names
+    one: this listing is the single gate.
     """
     with _reporting(fetch, "listing"):
         try:
@@ -244,7 +243,7 @@ def _etags(fetch: Fetch, fs: WebdavFileSystem) -> dict[str, str]:
     return {
         path: _etag(info)
         for path, info in sorted(found.items())
-        if info.get("type") == "file"
+        if info.get("type") == "file" and not reserved(path)
     }
 
 
@@ -337,6 +336,9 @@ def _failure(exc: Exception) -> str:
         return f"HTTP {exc.status_code}" + (f": {meaning}" if meaning else "")
     if isinstance(exc, ClientError):
         return str(exc)
+    if isinstance(exc, OSError) and exc.strerror:
+        # Its filename is a path under the cache: a download's temporary file.
+        return f"{type(exc).__name__}: {exc.strerror}"
     return f"{type(exc).__name__}: {exc}"
 
 

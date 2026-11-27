@@ -111,11 +111,14 @@ served skill in scope: the URI `skill://<namespace>/<skill>/SKILL.md`, the name
 `<namespace>/<skill>/SKILL.md`, the skill's own `description` and the `mimeType` `text/markdown`.
 Under Via `extension` and `local` the default lists none (DLV-9). A `Listed` setting read from the
 level Via was read from, or an earlier one (the `Kb-` header, then `X-MCP-`, then the query),
-replaces the default under every Via; one from a later level is ignored (DLV-9). `skills` lists the
+replaces the default under every Via; one from a later level is ignored (DLV-9). Under every Via
+and `Listed` setting, the skill rows are at most the request's max (SCP-3): 100 unless the request
+or the config sets another. SKL-64 says which are kept. `skills` lists the
 skills, `prompts` the prompt files and `agents` the agent files, and `none` lists none. Then, under
 every setting, one row per
 library with a library file in scope, in library name order: `skill://<library>/_files.md`, with the
-description `Files the <library> library ships outside any skill, which its skills reference.` No
+description `Files the <library> library ships outside any skill, which its skills reference.` A
+`_files.md` row is not a skill row, and the max never cuts one. No
 `_index.md` is listed, and each one still reads (SKL-17).
 
 **SKL-15.** The `_files.md` row's `name` is its URI without `skill://`, its `mimeType` is
@@ -187,7 +190,10 @@ text whatever its type. A library file named `_manifest` is not JSON.
 **SKL-24.** A skill's `_manifest` names the skill by its `name` and lists every file a read of the
 skill serves (SKL-21), sorted by path: the same files as its extension entry (SKL-46). Size and
 hash describe the bytes a read returns under the same request headers, after kb's rewriter
-(SKL-60) and the prefix, so they equal the entry's.
+(SKL-60) and the prefix, so they equal the entry's. The `_manifest` is a view: it reads at its
+exact URI and is in no entry's `resources` (SKL-46), as the `_index.md` and `_index.json` beside
+every directory are (SKL-56, SKL-57). A host that verifies a skill by SEP-2640 refuses a view
+reached from inside the skill.
 
 ```json
 {"skill": "loki",
@@ -246,6 +252,11 @@ frontmatter as written. Every text file of a skill (SKL-22) has its line endings
 Everything else is served as written. The gateway prefix (SKL-41) is the plugin layer's to write,
 after kb's rewriter.
 
+**SKL-63.** No text kb's rewriter writes into a skill's file (SKL-60) names a view (SKL-24). A
+qualified name reads as a skill's `SKILL.md` (SKL-55), and a placeholder as a library, a skill's
+directory or a path below one (SKL-25, SKL-52). A view's address the skill's author wrote is served
+as written.
+
 **SKL-26.** A read returns only the file addressed. Nothing a file cites is fetched with it.
 
 ## Library files
@@ -266,7 +277,9 @@ path and is in scope.
 **SKL-30.** When a path under a skill names no file of the skill, it reads the file at the same
 path below the root of the skill's own plugin: `skill://penpot/penpot-router/shared/api.md` reads
 that plugin's `shared/api.md`. It never reaches another plugin's root. Neither serves an agent file
-(AGT-3).
+(AGT-3). The fallback reads through `resources/read`, and so through the
+`read_resource` tool, alone. Its file is in no entry (SKL-33), so a host that verifies a skill's
+files against its entry, as a Via `extension` client does, refuses it.
 
 **SKL-31.** When a library-level path names no library file, it reads the file at that path from
 the first in-scope plugin root of the library, in the library's order, that has one. It does not
@@ -277,8 +290,8 @@ apply to a path inside any skill's address, under any scope. Neither serves an a
 the library, served or skipped.
 
 **SKL-33.** A file the skill has always wins over the fallback. Nothing is redirected: each address
-reads the same bytes in place. Neither fallback adds a row to any listing, `_files.md` or
-`_manifest`.
+reads the same bytes in place. Neither fallback adds a row to any listing, `_files.md`,
+`_manifest` or extension entry.
 
 ## Misses and directories
 
@@ -305,19 +318,23 @@ prefix (SKL-41) and without `skill://`.
 
 ## Live reads
 
-**SKL-37.** When a file read belongs to a `cache: live` source
-([config-and-sources.md](config-and-sources.md)), the read first revalidates that one file against
-the server: library files and both fallbacks alike. A request that reads skills, agents or prompts
-first revalidates every file of each live skill, and each agent and prompt file, of the plugins its
-scope admits. A file that moved re-reads that plugin and serves it again, every other plugin kept as
-it is served, and from that request on a skill's files, its `_manifest`, its extension entry and
-the plugin's agents and prompts describe the new bytes: the request that re-reads reads the new
-bytes.
-A request that arrives while a refresh is publishing re-reads nothing.
+**SKL-37.** When a file read, or a request that reads skills, agents or prompts, touches a
+`cache: live` source ([config-and-sources.md](config-and-sources.md)), it starts that fetch's
+revalidation in the background if one is due (SKL-38), and serves what is on disk now. That
+covers library files and both fallbacks, and every file of each live skill, and each agent and
+prompt file, of the plugins its scope admits. A read never waits for the server. A revalidation
+lists the fetch once and downloads each of its files whose ETag moved. The first request after a
+revalidation that moved a file re-reads that plugin and serves it again, every other plugin kept
+as it is served. From that request on, a skill's files, its `_manifest`, its extension entry and
+the plugin's agents and prompts describe the new bytes. So an edit is served once a revalidation
+has seen it: about 2 seconds and one revalidation behind under steady traffic, and one request
+behind on a quiet server. A request that arrives while a refresh is publishing re-reads nothing.
 
-**SKL-38.** A revalidated file is trusted for 2 seconds. A revalidation that fails, including a
-request that takes over 1 second, serves the copy on disk, and that source is not revalidated for
-30 seconds.
+**SKL-38.** A fetch revalidated within the last 2 seconds, counted from when that revalidation
+ended, is not revalidated again. One revalidation request times out after 1 second. A
+revalidation that fails serves the copy on disk, and that fetch is not revalidated for 30
+seconds. One revalidation at a time runs for the generation being served, and it covers every
+live fetch that is due.
 
 **SKL-39.** A live read changes only the bytes of files already harvested. What the plugin layer
 serves follows a live re-read (SKL-37): a skill's files, its `_manifest`, its extension entry and
@@ -394,20 +411,32 @@ under it still name it.
 
 `frontmatter` is the served `SKILL.md`'s frontmatter as FastMCP parses it: the YAML between the
 `---` lines, so a block-scalar value ending the block has no final newline. `resources` holds every
-file a read of the skill serves (SKL-21), `SKILL.md` included, by URI.
+file a read of the skill serves (SKL-21), `SKILL.md` included, by URI, and no view (SKL-24).
 
 **SKL-47.** Each `digest` and `size` describe the UTF-8 bytes `resources/read` returns for that URI
 under the same request headers, and equal the skill's `_manifest` (SKL-24). An entry is offered
 only when every file it names reads as listed (F59).
 
-**SKL-48.** `skills/list` returns every in-scope skill's entry, except under SKL-62, by URI, as
+**SKL-48.** `skills/list` returns the in-scope skills' entries, at most the request's max of them
+(SKL-64), except under SKL-62, by URI, as
 `{"resultType": "complete", "ttlMs": 0, "cacheScope": "private", "skills": [...]}`. It pages by the
-server's page size, and kb sets none, so one page holds every entry and a `cursor` the server never
-issued is ignored.
+server's page size, and kb sets none, so one page holds every entry listed. A skill the max leaves
+out still answers `skills/get` and `resources/read`, and stays in every `_index.md` and
+`_index.json`. A `cursor` the server never issued is ignored, which is kubed-mcp's known deviation
+from SEP-2640.
 
 **SKL-62.** Under Via `local`, `skills/list` lists no skill, and `skills/get` still serves each one
-in scope (DLV-9, DLV-10). Under `mcp` and `extension` it lists them all. `Listed` does not change
-it. kb adds no filter of its own.
+in scope (DLV-9, DLV-10). Under `mcp` and `extension` it lists them up to the request's max
+(SKL-64). `Listed` does not change it. kb adds no filter of its own. Under `local` none is listed
+and none counts as cut.
+
+**SKL-64.** A listing the max cuts (SKL-14, SKL-48) keeps the first skills in the plugin layer's
+order and leaves out the rest. That order is the one kb adds plugins in (SKL-58): libraries in
+config order, each library's plugins in its order, and a plugin served by two libraries once in
+each. A plugin's skills come folder by folder as the plugin layer finds them (SKL-1), and each
+folder's skills by name. So a route over the max loses the last skills of its last library's last
+plugins, and an operator chooses what is left out by the order of the config's libraries and of
+each library's plugins. A scope cuts from what it admits. kb sets no `delivery.max`.
 
 **SKL-49.** `skills/get` takes `uri`, which MUST be exactly a skill's `SKILL.md` address (after
 SKL-42), and returns the same envelope with `skill`. Anything else, and an out-of-scope skill, fail
@@ -417,7 +446,8 @@ with `-32602` `Unknown skill URI: <uri>`.
 message, as in [scoping-and-instructions.md](scoping-and-instructions.md).
 
 **SKL-51.** `resources/directory/read` takes `uri` and lists one directory's direct children as
-`Resource` objects, sorted by URI, a page of 100 at a time with a decimal `cursor`. A directory is a
+`Resource` objects, sorted by URI, a page of 100 at a time with a decimal `cursor`. Every result
+carries `resultType: "complete"`: a skill's directory's, a library's and a folder's. A directory is a
 library, a folder, a skill's root or a folder inside a skill (SEP-2640): its URI has no trailing `/`
 and it is never listed. A subdirectory is a child with `mimeType` `inode/directory`; the indexes,
 `_files.md` and `_manifest` are beside a directory, not in it. A library's or folder's children are
@@ -431,9 +461,9 @@ file, an absent address and an out-of-scope one fail alike with `-32602` `Direct
 `resources/directory/read` returns for it, every page at once, with `mimeType`
 `application/json`. Like the directory, it is not found where the directory is. It is text a client
 reads, so with a prefix (SKL-41) every address in it, each `uri` included, carries the prefix, as
-the `_index.md` beside it does and the plugin layer's `_index.json` inside a skill does (N18).
+the `_index.md` beside it does and the plugin layer's `_index.json` inside a skill does (N18). It is a view (SKL-24).
 
 **SKL-57.** Inside a skill, an `_index.md` beside its root and each of its folders reads one
 `<uri>: <description>` line per child, a file's description being its first `# ` heading, else
 `File from <name> skill`, and a folder's `A folder of the <name> skill`. Its text carries the prefix
-(SKL-41). A library's and a folder's `_index.md` are SKL-17's.
+(SKL-41). A library's and a folder's `_index.md` are SKL-17's. It is a view (SKL-24).

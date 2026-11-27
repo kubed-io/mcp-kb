@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A restart with clients connected closes their streams cleanly; `GRACEFUL_TIMEOUT` (15 s) sets how long in-flight calls get.
 - Send `Kb-Via: extension` or `local` (or `?via=`) and the instructions point at where your client gets its skills.
 - A client now connects knowing what each library in its scope is for; set a library's `description`, `notes` and `listSkills` to shape it.
 - Discover and load verified skills in MCP Skills clients through `skills/list` and `skills/get`.
@@ -45,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING:** A deployment serving more than 100 skills now lists only the first 100 (in config order) in `skills/list` and `resources/list` unless `Kb-Max` (`?max=`, `DELIVERY_MAX`) is set, `all` for every one; a cut skill still reads, and the instructions say when the list was cut.
 - **BREAKING:** `CONFIG_FILE` and `--config-file` name the config file, in place of `CONFIG` and `--config`; a leftover `CONFIG` stops the boot, and outside the image no file is read unless one is named.
 - `mcp-kb schema` prints the whole config's schema, with each item's env var and flag.
 - Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Resource-Prefix` and `Kb-Resources`; the old `X-` names are still accepted.
@@ -65,11 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `skills/get` of a skill that is not served answers `Unknown skill URI: <uri>`.
 - Plugin sources (git, WebDAV, `file://`) load through kubed-mcp plugin loaders.
 - `resources/list` lists each skill's `SKILL.md` and each library's `_files.md`; the `_index.md` files still read, unlisted.
-- Built on kubed-mcp 0.5: VS Code is listed `list_resources` and `read_resource` with no header, and `initialize` and `server/discover` report what they resolved in `_meta["io.kubed/delivery"]`.
+- Built on kubed-mcp 0.6: VS Code is listed `list_resources` and `read_resource` with no header, and `initialize` and `server/discover` report what they resolved in `_meta["io.kubed/delivery"]`.
 - kubed-mcp 0.5.2 or later is required: it is what leaves a skill's hidden files (a `.gitkeep`, a `.env`) out while serving the rest of the skill.
 
 ### Fixed
 
+- A slow Nextcloud no longer stalls other requests or fails health probes: live sources revalidate in the background.
 - A command or skill citing a skill of its own plugin through `${CLAUDE_PLUGIN_ROOT}/skills/<skill>/…` now renders an address that reads.
 - Docker quick start works without a checkout; native setup documents explicit config and cache paths on Windows and POSIX systems.
 - `serverInfo` now reports kb's own version, not FastMCP's.
@@ -80,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A marketplace plugin's version is now its `plugin.json`'s when both declare one, as in Claude Code.
 - `/health` lists the skill folders a plugin cannot serve, and counts no skills, prompts or agents for a plugin that is not served.
 - A VS Code client with no header is told to read with `read_resource`, matching the tools it is listed.
+- Metrics label kb's index and library-file reads by pattern, so reading more addresses adds no series.
 
 ### Removed
 

@@ -1,7 +1,8 @@
 """The server ``instructions`` for one request, as text.
 
 Pure: a catalogue, a scope, three inputs (whether the client reads resources,
-whether it declared the Skills extension, and its Via) and where the prompts and
+whether it declared the Skills extension, and its Via), kubed-mcp's count of
+skills listed and cut as two plain ints, and where the prompts and
 agents are served in, a string out. No FastMCP, so the wording is tested
 without a server and the middleware only decides when to call it.
 The text is unprefixed; ``mcp/instructions.py`` writes the gateway prefix over it.
@@ -23,8 +24,11 @@ RESOURCES_FOOTER = (
 TOOLS_FOOTER = "Read these with read_resource."
 EXTENSION_FOOTER = (
     "Skills arrive through the Skills extension; each reads at "
-    "skill://<library>/<path>/SKILL.md, and its _manifest lists the other "
-    "files it ships."
+    "skill://<library>/<path>/SKILL.md, and its entry lists the files it ships."
+)
+CUT_LINE = (
+    "{listed} of {total} skills are listed; every skill reads through its "
+    "library's _index.md."
 )
 
 
@@ -87,8 +91,9 @@ def build_instructions(
     skills_extension: bool,
     folders: Mapping[str, Folders] | None = None,
     via: Via = "mcp",
+    skills: tuple[int, int] | None = None,
 ) -> str:
-    """One section per selected library, then the footer for the mode.
+    """One section per selected library, the cut line if any, then the footer.
 
     Skill names are listed only under ``mcp``, when exactly one library is
     selected, it asks for them, and the client has no skills extension to
@@ -96,6 +101,9 @@ def build_instructions(
     alone, and one with neither is left out, heading too (INS-20, INS-22).
     ``folders`` is ``Snapshot.folders`` for the scope: where each library's
     prompts and agents are served, pointed at after its skills (INS-19).
+    ``skills`` is ``(listed, cut)``, kubed-mcp's count for the request: when
+    ``cut`` is above 0, ``mcp`` and ``extension`` say how many of how many are
+    listed, between the sections and the footer (INS-24).
     """
     selected = catalogue.selected(scope)
     single = len(selected) == 1
@@ -111,5 +119,8 @@ def build_instructions(
         if not single:
             lines.insert(0, f"[{text.name}]")
         sections.append("\n".join(lines))
+    if via != "local" and skills is not None and skills[1] > 0:
+        listed, cut = skills
+        sections.append(CUT_LINE.format(listed=listed, total=listed + cut))
     closing = footer(resources=resources, via=via)
     return "\n\n".join([*sections, closing] if closing else sections)

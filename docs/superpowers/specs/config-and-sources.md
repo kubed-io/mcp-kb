@@ -23,6 +23,7 @@ below it whole. A blank value is unset.
 | `serving.host` | `HOST` | `--host` | `0.0.0.0` |
 | `serving.port` | `PORT` | `--port` | `8000` |
 | `serving.log_level` | `LOG_LEVEL` | `--log-level` | `INFO` |
+| `serving.graceful_timeout` | `GRACEFUL_TIMEOUT` | `--graceful-timeout` | `15` |
 | `telemetry.profiles` | `TELEMETRY_PROFILES` | `--telemetry-profiles` | none |
 | `telemetry.profile_cpu` | `TELEMETRY_PROFILE_CPU` | `--telemetry-profile-cpu` | `true` |
 | `telemetry.profile_memory` | `TELEMETRY_PROFILE_MEMORY` | `--telemetry-profile-memory` | `true` |
@@ -31,6 +32,7 @@ below it whole. A blank value is unset.
 | `delivery.resources` | `DELIVERY_RESOURCES` | `--delivery-resources` | none |
 | `delivery.listed` | `DELIVERY_LISTED` | `--delivery-listed` | none |
 | `delivery.via` | `DELIVERY_VIA` | `--delivery-via` | none |
+| `delivery.max` | `DELIVERY_MAX` | `--delivery-max` | none (the cap is 100) |
 
 **CFG-2.** There is one config. What to serve, how to run, what the process reports and the
 delivery defaults are all items of it, and each one can be set in the file, an env var or a flag.
@@ -135,6 +137,21 @@ telemetry:
   tags: {team: platform}
 ```
 
+**CFG-21.** A `resources/read` that kb itself answers is labelled in the call metrics by its
+kind's pattern, never by its address: `skill://{library}/_index.md`,
+`skill://{library}/{folder}/_index.md`, `skill://{library}/_index.json`,
+`skill://{library}/{folder}/_index.json`, `skill://{library}/_files.md`, and
+`skill://{library}/{+path}`. `{folder}` is the address's second segment, and
+`skill://{library}/{+path}` is any other address kb answers: a library file, a library-level
+fallback (SKL-31), or a deeper folder's `_index.json`. A read below a skill's own directory, the
+plugin-root fallback (SKL-30) included, is labelled by kubed-mcp, as
+`skill://{library}/{path}`. The pattern is read from the
+address with its dot segments resolved. A read through the `read_resource` tool is labelled the
+same. A read kb misses carries no label, as before, and an out-of-scope read is labelled as an
+absent one is. These patterns are labels only: `resources/templates/list` still lists the one row
+`skill://{library}/{+path}`, and a miss is never read through a template. A skill's own files are
+labelled by kubed-mcp.
+
 ## Delivery
 
 **CFG-19.** The optional `delivery` mapping is kubed-mcp's defaults for the delivery inputs:
@@ -234,6 +251,8 @@ access refusal ([SRC-41](#startup)).
 **SRC-16.** A webdav fetch's URL is the folder. Its whole content is copied to
 `<cache>/src/<slug>/<version>`, the version being the SHA-256 of its sorted `path → ETag` map. A
 file with no ETag stands in `<modified>:<size>`.
+Names starting `.mcp-kb-` are kb's own stamps: a file or a folder of that name, and everything
+under such a folder, is left out of the map and the export.
 
 **SRC-17.** A folder whose ETag map has not moved resolves to the export on disk and is not
 downloaded.
@@ -260,29 +279,38 @@ library file is read off disk each time.
 
 ## `cache: live`
 
-**SRC-21.** On a live fetch, each read of one of its library files first
-revalidates that file, and each request that reads skills, agents or prompts first revalidates
-every file of the live skills, and each agent and prompt file, of the plugins its scope admits
-(SKL-37): one request for its ETag, and a download only if the ETag differs from the local copy's.
-A skill's, an agent's or a prompt's edit found that way is served to the request that found it.
+**SRC-21.** On a live fetch, each read of one of its library files, and each request that reads
+skills, agents or prompts under a scope admitting one of its plugins, starts the fetch's
+revalidation in the background if one is due (SKL-37). It is served from the local copy as it
+is. A revalidation lists the fetch's folder once, one PROPFIND per directory, and downloads each
+file the local copy holds whose ETag differs from the local copy's, and each one the local copy has lost. An edit is served from the
+first request after the revalidation that found it.
 
 **SRC-22.** A download is staged in `<cache>/src/<slug>/.work/` and renamed over the local copy in
 one step, so a reader sees one whole version of the file.
 
 | Bound | Value |
 |---|---|
-| a file revalidated this recently is served without asking | 2 s |
+| a fetch revalidated this recently is not revalidated again | 2 s |
 | one revalidation request times out after | 1 s |
 | after a failure, the fetch is not revalidated for | 30 s |
+| revalidations running at once for the generation served | 1 |
 
-**SRC-23.** A failed revalidation logs a warning and serves the local copy; the read never fails
-for it. While the fetch is cooling, `/health` shows `cooling: true`.
+**SRC-23.** A failed revalidation logs one warning, `<fetch>: revalidating the listing failed:
+<reason>` or `<fetch>: revalidating <path> failed: <reason>`, with no URL or credential. The local
+copy goes on serving, and no read fails or waits for it. While the fetch is cooling, `/health`
+shows `cooling: true`.
 
 **SRC-24.** A file deleted upstream is served from the local copy until the fetch is rebuilt. A
 file added or renamed upstream, and an edited description in a listing, wait for a rebuild.
 
-**SRC-25.** A live fetch's `/health` entry carries `live: true` and the counts `revalidated` and
-`fetched`.
+**SRC-25.** A live fetch's `/health` entry carries `live: true` and two counts: `revalidated`,
+the files a revalidation compared against the server's listing, and `fetched`, the ones
+downloaded again.
+
+**SRC-54.** A live fetch's revalidation belongs to the generation it serves. Once a refresh swaps
+in a new generation, the previous one's revalidation starts nothing, and one it is running stops
+before its next file and logs nothing more.
 
 ## The cache directory
 

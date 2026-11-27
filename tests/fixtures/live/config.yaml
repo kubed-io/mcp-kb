@@ -1,7 +1,7 @@
 # Replace @ROOT@ with the repository root (sed), as CONTRIBUTING.md's
 # "Live checks" section shows.
-# `dav` has no `refresh` on purpose: an unrefreshed fetch is never rebuilt, so
-# the snapshot's agent name stands, and what AGT-16 sees is the live re-read.
+# `dav` has no `refresh` on purpose: what the re-read check sees is the live
+# re-read alone (AGT-16), never a rebuild.
 sources:
   - name: dav
     url: "webdav+http://127.0.0.1:8090"

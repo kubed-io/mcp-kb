@@ -28,7 +28,7 @@
     },
     "DeliverySettings": {
       "additionalProperties": false,
-      "description": "The config's defaults for the delivery inputs: None leaves the built-in one.\n\nEach is a lax string, checked when the server is built: a value its input doesn't\ntake is warned once and ignored, and the next level answers.",
+      "description": "The config's defaults for the delivery inputs: None leaves the built-in one.\n\nEach is a lax string, and ``max`` may be a whole number too, checked when the server\nis built: a value its input doesn't take is warned once and ignored, and the next\nlevel answers.",
       "properties": {
         "resources": {
           "anyOf": [
@@ -74,6 +74,24 @@
           "description": "How the client takes the plugins: mcp, extension or local.",
           "env": "DELIVERY_VIA",
           "title": "Via"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "arg": "--delivery-max",
+          "default": null,
+          "description": "How many skills a listing shows, a whole number or all for no cap; it counts skills only.",
+          "env": "DELIVERY_MAX",
+          "title": "Max"
         }
       },
       "title": "DeliverySettings",
@@ -307,7 +325,7 @@
     },
     "Serving": {
       "additionalProperties": false,
-      "description": "How kb serves: kubed-mcp's ``serving`` section, with kb's defaults.\n\nkb serves ``http`` on every address by default, as a container does, and\nserves ``stdio`` or ``http`` alone: ``sse`` and ``streamable-http`` are a\nconfig error. ``port`` and ``log_level`` are kubed-mcp's as they are.",
+      "description": "How kb serves: kubed-mcp's ``serving`` section, with kb's defaults.\n\nkb serves ``http`` on every address by default, as a container does, and\nserves ``stdio`` or ``http`` alone: ``sse`` and ``streamable-http`` are a\nconfig error. ``port``, ``log_level`` and ``graceful_timeout`` are\nkubed-mcp's as they are.",
       "properties": {
         "transport": {
           "arg": "--transport",
@@ -351,6 +369,15 @@
           "env": "LOG_LEVEL",
           "title": "Log Level",
           "type": "string"
+        },
+        "graceful_timeout": {
+          "arg": "--graceful-timeout",
+          "default": 15,
+          "description": "Seconds in-flight HTTP requests get to finish when the server stops; a stop by signal ends listen streams at once, a programmatic stop waits up to graceful_timeout for them. stdio doesn't read it.",
+          "env": "GRACEFUL_TIMEOUT",
+          "minimum": 0,
+          "title": "Graceful Timeout",
+          "type": "number"
         }
       },
       "title": "Serving",

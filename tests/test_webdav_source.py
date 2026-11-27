@@ -24,11 +24,13 @@ from kubed.mcp_kb.sources import AccessRefused, SourceError
 from kubed.mcp_kb.sources import export as exports
 from kubed.mcp_kb.sources.webdav import (
     ETAGS_FILE,
+    VERSION,
     VERSION_FILE,
     client,
-    fetch_file,
+    download,
     fingerprint_webdav,
     materialise_webdav,
+    remote_etags,
 )
 from tests.conftest import served
 from tests.webdav_server import FOLDER, PASSWORD, USERNAME
@@ -337,67 +339,95 @@ def test_the_fingerprint_moves_when_the_export_loses_a_file(webdav, tmp_path):
 # -- a live read's half: one file, revalidated ---------------------------------
 
 
-def test_fetch_file_returns_the_etag_unchanged_when_the_file_has_not_moved(
-    webdav, tmp_path
-):
+def test_download_replaces_the_local_copy(webdav, tmp_path):
     source = _fetch(webdav)
     root = materialise_webdav(source, tmp_path)
-    recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
-    webdav.requests.clear()
-
-    assert fetch_file(source, root, SKILL) == recorded
-    assert webdav.method("GET") == [], "an unchanged file is not downloaded"
-
-
-def test_fetch_file_replaces_the_local_copy_when_the_etag_moved(webdav, tmp_path):
-    source = _fetch(webdav)
-    root = materialise_webdav(source, tmp_path)
-    recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
     webdav.skill("x", "edited in nextcloud, longer than before")
 
-    moved = fetch_file(source, root, SKILL, etag=recorded)
+    download(source, root, SKILL, client(source))
 
-    assert moved != recorded
     assert "edited in nextcloud" in _body(root)
-    assert fetch_file(source, root, SKILL, etag=moved) == moved
 
 
-def test_a_missing_upstream_file_leaves_the_local_copy(webdav, tmp_path):
+def test_remote_etags_lists_every_file_with_its_etag(webdav, tmp_path):
     source = _fetch(webdav)
-    root = materialise_webdav(source, tmp_path)
-    (webdav.root / SKILL).unlink()
 
-    assert fetch_file(source, root, SKILL) is None
-    assert "first" in _body(root), "a deleted upstream file is not a deleted skill"
+    etags = remote_etags(source, client(source))
+
+    assert set(etags) >= {SKILL, "docs/guide.md"}
+    assert etags == json.loads(
+        (materialise_webdav(source, tmp_path) / ETAGS_FILE).read_text()
+    )
 
 
-def test_a_live_fetch_replaces_the_local_copy_rather_than_rewriting_it(
+def test_a_remote_file_named_like_kbs_own_stamps_is_neither_listed_nor_exported(
     webdav, tmp_path
 ):
+    """Names starting ``.mcp-kb-`` are kb's: an upstream file of that name is
+    not in the listing, the recorded map or the export, and the stamps stay kb's."""
+    webdav.write(ETAGS_FILE, '{"forged": "yes"}')
+    webdav.write(VERSION_FILE, "forged\n")
+    webdav.write("docs/.mcp-kb-other", "nested\n")
+    source = _fetch(webdav)
+
+    assert not [p for p in remote_etags(source, client(source)) if ".mcp-kb-" in p]
+    root = materialise_webdav(source, tmp_path)
+
+    recorded = json.loads((root / ETAGS_FILE).read_text())
+    assert recorded and not [p for p in recorded if ".mcp-kb-" in p]
+    assert (root / VERSION_FILE).read_text().split()[0] == root.name
+    assert not (root / "docs" / ".mcp-kb-other").exists()
+    assert fingerprint_webdav(source, tmp_path, root)["exported"] == root.name
+
+
+def test_a_remote_folder_named_like_kbs_own_stamps_is_neither_listed_nor_exported(
+    webdav, tmp_path
+):
+    """The reservation holds for a folder too: one named like a stamp would
+    otherwise be copied over the place the stamp is written, and fail the export
+    with a path under the cache in its message."""
+    webdav.write(f"{ETAGS_FILE}/a.md", "under a stamp\n")
+    webdav.write(f"{VERSION_FILE}/b.md", "under the other\n")
+    source = _fetch(webdav)
+
+    assert not [p for p in remote_etags(source, client(source)) if ".mcp-kb-" in p]
+    root = materialise_webdav(source, tmp_path)
+
+    recorded = json.loads((root / ETAGS_FILE).read_text())
+    assert recorded and not [p for p in recorded if ".mcp-kb-" in p]
+    assert (root / ETAGS_FILE).is_file() and (root / VERSION_FILE).is_file()
+    assert (root / VERSION_FILE).read_text().split()[0] == root.name
+    assert not list(root.rglob("a.md")) and not list(root.rglob("b.md"))
+    held = exports.Exports.under(
+        tmp_path, source.slug, stamp=VERSION_FILE, version=VERSION
+    )
+    assert held.complete(root, root.name)
+    assert fingerprint_webdav(source, tmp_path, root)["exported"] == root.name
+
+
+def test_download_replaces_the_local_copy_rather_than_rewriting_it(webdav, tmp_path):
     """The atomicity, pinned. A reader that already opened the file must read
     the bytes it opened all the way to the end -- which a rename gives it and a
     write over the same inode takes away."""
     source = _fetch(webdav)
     root = materialise_webdav(source, tmp_path)
-    recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
     webdav.skill("x", "edited in nextcloud, and very much longer than it was")
 
     with (root / SKILL).open("rb") as handle:
-        fetch_file(source, root, SKILL, etag=recorded)
+        download(source, root, SKILL, client(source))
         held = handle.read().decode()
 
     assert "first" in held, "a reader holding the old file must read the old file"
     assert "edited in nextcloud" in _body(root)
 
 
-def test_a_live_fetch_stages_its_download_outside_the_export(webdav, tmp_path):
+def test_download_stages_its_file_outside_the_export(webdav, tmp_path):
     """A download the kernel kills leaves its temp file behind, and ``finally``
     does not run. Inside the export that file counts towards the export's
     extent, so the tree looks truncated for good -- and ``collect`` walks the
     source's home, so it could never reach one buried in a skill directory."""
     source = _fetch(webdav)
     root = materialise_webdav(source, tmp_path)
-    recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
     webdav.skill("x", "edited in nextcloud, and longer than before")
     staged = []
 
@@ -407,19 +437,34 @@ def test_a_live_fetch_stages_its_download_outside_the_export(webdav, tmp_path):
         def __init__(self, real):
             self._real = real
 
-        def info(self, rel):
-            return self._real.info(rel)
-
         def get_file(self, rel, local):
             staged.append(Path(local))
             return self._real.get_file(rel, local)
 
-    fetch_file(source, root, SKILL, etag=recorded, fs=_Watched(client(source)))
+    download(source, root, SKILL, _Watched(client(source)))
 
     assert staged, "nothing was downloaded, so this test proved nothing"
     for tmp in staged:
         assert not tmp.is_relative_to(root)
         assert tmp.parent == root.parent / exports.WORK_DIR
+
+
+def test_a_failed_write_names_the_reason_and_not_the_path(webdav, tmp_path):
+    """An ``OSError`` carries the temporary file's path; the message does not."""
+    source = _fetch(webdav)
+    root = materialise_webdav(source, tmp_path)
+    secret = tmp_path / "cache" / "secret-dir" / "part"
+
+    class _Full:
+        def get_file(self, rel, local):
+            raise OSError(28, "No space left on device", str(secret))
+
+    with pytest.raises(SourceError) as raised:
+        download(source, root, SKILL, _Full())
+
+    assert "No space left on device" in str(raised.value)
+    assert "secret-dir" not in str(raised.value)
+    assert str(tmp_path) not in str(raised.value)
 
 
 def test_a_temp_file_a_killed_fetch_left_does_not_truncate_the_export(webdav, tmp_path):
@@ -461,16 +506,16 @@ def test_a_name_that_needs_encoding_is_revalidated_like_any_other(webdav, tmp_pa
     root = materialise_webdav(source, tmp_path)
     webdav.write(rel, "edited upstream, and rather longer than before\n")
 
-    assert fetch_file(source, root, rel) is not None
+    download(source, root, rel, client(source))
     assert "edited upstream" in (root / rel).read_text()
 
 
-def test_fetch_file_refuses_a_path_that_leaves_the_export(webdav, tmp_path):
+def test_download_refuses_a_path_that_leaves_the_export(webdav, tmp_path):
     source = _fetch(webdav)
     root = materialise_webdav(source, tmp_path)
 
     with pytest.raises(SourceError, match="outside"):
-        fetch_file(source, root, "../escaped.md")
+        download(source, root, "../escaped.md", client(source))
 
 
 # -- through the catalogue -----------------------------------------------------

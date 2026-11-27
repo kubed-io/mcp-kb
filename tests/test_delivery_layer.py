@@ -130,7 +130,8 @@ async def test_the_resource_pair_is_annotated_as_tool_6_says(tmp_path):
 @pytest.mark.unit
 async def test_list_resources_is_not_paged(tmp_path):
     names = [f"s{i:03d}" for i in range(120)]
-    mcp = _served(tmp_path, skills=names, extras=False)
+    # The max is lifted so the cap (tested elsewhere) does not cut the listing.
+    mcp = _served(tmp_path, delivery={"max": "all"}, skills=names, extras=False)
     async with Client(mcp.server) as client:
         page = await client.session.list_resources()
         assert page.next_cursor is None

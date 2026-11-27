@@ -383,11 +383,13 @@ class Catalogue:
         return files
 
     def live_stamp(self, skill: Skill) -> tuple:
-        """What ``skill``'s files hold on disk now, revalidated if it is live.
+        """What ``skill``'s files hold on disk now, each one starting its fetch's
+        background revalidation if it is live.
 
         Empty for a skill that is not live: an export never moves under a
-        generation. A server that keeps what it read of a live skill reads it
-        again when this changes (SKL-37).
+        generation. The stamp is of the disk as it is: a revalidation this
+        starts lands for a later call. A server that keeps what it read of a
+        live skill reads it again when this changes (SKL-37).
         """
         if not skill.live:
             return ()
@@ -819,8 +821,9 @@ class Catalogue:
     def _text(self, skill: Skill, target: Path) -> str:
         """One file of ``skill`` as text, read once unless the skill is live.
 
-        A live skill's file is read off disk each time, and revalidated by
-        ``live_stamp``, which its reader asks first.
+        A live skill's file is read off disk each time. ``live_stamp``, which
+        its reader asks first, starts the background revalidation that keeps
+        it level with its server.
         """
         if skill.live:
             return target.read_text(encoding="utf-8", errors="replace")

@@ -55,6 +55,21 @@ class Webdav:
     # serving when the server it revalidates against stops answering, and the
     # only honest way to test that is to stop the server.
     stop: Callable[[], None] = lambda: None
+    # What ``stall`` holds, by method: how long, and the Event its first
+    # request sets. ``released`` is set by ``stop``, which lets every one go.
+    stalls: dict[str, tuple[float, threading.Event]] = field(default_factory=dict)
+    released: threading.Event = field(default_factory=threading.Event)
+
+    def stall(self, verb: str, seconds: float) -> threading.Event:
+        """Hold every ``verb`` request from now on up to ``seconds`` before it is
+        served; the Event returned is set when the first one arrives.
+
+        A server that is slow to answer, which is the failure a request must
+        not wait on. ``stop`` releases every held request before it stops.
+        """
+        arrived = threading.Event()
+        self.stalls[verb] = (seconds, arrived)
+        return arrived
 
     def method(self, verb: str) -> list[str]:
         """The paths ``verb`` has been requested on, in order."""
@@ -74,16 +89,27 @@ class Webdav:
 class _Recorder:
     """WSGI middleware: one entry per request, before authentication decides."""
 
-    def __init__(self, app, requests: list[tuple[str, str]]) -> None:
+    def __init__(
+        self, app, requests: list[tuple[str, str]], served: Webdav | None = None
+    ) -> None:
         self._app = app
         self._requests = requests
+        self._served = served
 
     def __call__(self, environ, start_response):
-        self._requests.append((environ["REQUEST_METHOD"], environ.get("PATH_INFO", "")))
+        method = environ["REQUEST_METHOD"]
+        self._requests.append((method, environ.get("PATH_INFO", "")))
+        stall = None if self._served is None else self._served.stalls.get(method)
+        if stall is not None:
+            seconds, arrived = stall
+            arrived.set()
+            self._served.released.wait(seconds)
         return self._app(environ, start_response)
 
 
-def _app(root: Path, requests: list[tuple[str, str]]) -> _Recorder:
+def _app(
+    root: Path, requests: list[tuple[str, str]], served: Webdav | None = None
+) -> _Recorder:
     dav = WsgiDAVApp(
         {
             "provider_mapping": {f"/{FOLDER}": str(root)},
@@ -100,7 +126,7 @@ def _app(root: Path, requests: list[tuple[str, str]]) -> _Recorder:
             "verbose": 1,
         }
     )
-    return _Recorder(dav, requests)
+    return _Recorder(dav, requests, served)
 
 
 @pytest.fixture
@@ -115,7 +141,7 @@ def webdav(tmp_path_factory) -> Iterator[Webdav]:
     served.skill("x", "first")
     served.write("docs/guide.md", "library-level guidance\n")
 
-    server = wsgi.Server(("127.0.0.1", 0), _app(root, served.requests))
+    server = wsgi.Server(("127.0.0.1", 0), _app(root, served.requests, served))
     server.prepare()
     served.url = f"webdav+http://127.0.0.1:{server.bind_addr[1]}"
     thread = threading.Thread(target=server.serve, daemon=True)
@@ -128,6 +154,8 @@ def webdav(tmp_path_factory) -> Iterator[Webdav]:
         nonlocal stopped
         if not stopped:
             stopped = True
+            # A held request would hold the stop until its stall ran out.
+            served.released.set()
             server.stop()
             thread.join(timeout=5)
 

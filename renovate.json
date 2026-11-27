@@ -1,0 +1,10 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "packageRules": [
+    {
+      "description": "Hold the interpreter at 3.14: pyroscope-io (kubed-mcp[telemetry], installed in the image) ships no cp315 wheel, and its sdist needs a Rust toolchain the builder lacks. Lift this rule once pyroscope-io publishes cp315 wheels; then move the Dockerfile, the workflow pins, the test.yml matrix and the classifiers to 3.15 together.",
+      "matchDepNames": ["python"],
+      "allowedVersions": "<3.15"
+    }
+  ]
+}

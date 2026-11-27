@@ -1,6 +1,7 @@
 """Shared fixtures: a synthetic skills tree covering both nesting depths."""
 
 import contextlib
+import threading
 import weakref
 from pathlib import Path
 
@@ -93,6 +94,17 @@ V11_PLUGIN_ROW = {
 # What each synthetic library's plugins declare about themselves. A tag per
 # library, so a tag scope can tell the two apart the way a library scope can.
 PLUGIN_TAGS = {"flatsource": ("flat",), "deepsource": ("deep",)}
+
+
+@pytest.fixture(autouse=True)
+def _passes_end_with_their_test(monkeypatch):
+    """No revalidation pass outlives its test, or runs after its patches are undone."""
+    yield
+    for thread in [t for t in threading.enumerate() if t.name == "kb-revalidate"]:
+        thread.join(timeout=5)
+        if thread.is_alive():
+            pytest.fail("a revalidation pass outlived its test")
+
 
 # One app per knowledge base, so a test that reaches the server twice -- a route
 # added, then the ASGI app built -- reaches the same one.

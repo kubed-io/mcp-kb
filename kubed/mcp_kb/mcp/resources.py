@@ -31,13 +31,19 @@ the plugin-root fallbacks (SKL-30, SKL-31), so it never shadows a skill file.
 
 ``resources/templates/list`` carries one fixed row, ``skill://{library}/{+path}``.
 It is how a client learns the space exists, and it is never matched: a read
-that misses stays a miss, whatever the template would have expanded to.
+that misses stays a miss, whatever the template would have expanded to. A read
+this provider served is named by its kind's pattern, for the call metrics only
+(CFG-21), so reading more addresses adds no series.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Sequence
+from contextvars import ContextVar
+from dataclasses import dataclass
+from functools import cache
 from typing import Any
 
 from kubed.mcp import (
@@ -52,7 +58,15 @@ from kubed.mcp.gateway import prefix, prefixed
 from kubed.mcp.protocol import INVALID_PARAMS, MCPError, Provider, VersionSpec, types
 from kubed.mcp.skills import FolderNotFound, NameTheIndex
 
-from ..catalogue.uris import INDEX_JSON, SCHEME, Catalogue, climbs, resolved
+from ..catalogue.uris import (
+    INDEX,
+    INDEX_JSON,
+    LIBRARY_FILES,
+    SCHEME,
+    Catalogue,
+    climbs,
+    resolved,
+)
 from .request import requested_scope
 
 TEMPLATE_URI = "skill://{library}/{+path}"
@@ -62,6 +76,42 @@ TEMPLATE_DESCRIPTION = (
     " and {path} a path below it. Start at skill://{library}/_index.md;"
     " resources/list lists each skill's SKILL.md by default."
 )
+
+
+@dataclass
+class _Served:
+    """What kb answered one read as: its pattern, once kb has served it.
+
+    Mutable on purpose. FastMCP runs each provider in a child task, where a
+    ``ContextVar`` set is lost; the holder is set in the request's own task and
+    shared by reference, so what the provider writes into it survives.
+    """
+
+    pattern: str | None = None
+
+
+_SERVED: ContextVar[_Served | None] = ContextVar("_SERVED", default=None)
+
+
+def pattern_for(uri: str) -> str:
+    """The pattern a served read is labelled by, from its resolved address."""
+    parts = (resolved(uri) or uri).removeprefix(SCHEME).split("/")
+    last = parts[-1]
+    if len(parts) == 2 and last in (INDEX, INDEX_JSON, LIBRARY_FILES):
+        return f"{SCHEME}{{library}}/{last}"
+    if len(parts) == 3 and last in (INDEX, INDEX_JSON):
+        return f"{SCHEME}{{library}}/{{folder}}/{last}"
+    return TEMPLATE_URI
+
+
+def _parameters(pattern: str) -> dict[str, Any]:
+    """The JSON schema of a pattern's ``{name}`` and ``{+name}`` placeholders."""
+    names = re.findall(r"\{\+?(\w+)\}", pattern)
+    return {
+        "type": "object",
+        "properties": {name: {"type": "string"} for name in names},
+        "required": names,
+    }
 
 
 class SkillTemplate(ResourceTemplate):
@@ -74,6 +124,14 @@ class SkillTemplate(ResourceTemplate):
 
     def to_mcp_template(self, **overrides: Any) -> types.ResourceTemplate:
         return super().to_mcp_template(**{"mimeType": None, **overrides})
+
+
+@cache
+def _label(pattern: str) -> SkillTemplate:
+    """The unlisted template that names a served read, built once per pattern."""
+    return SkillTemplate(
+        uri_template=pattern, name="skill", parameters=_parameters(pattern)
+    )
 
 
 class CatalogueProvider(Provider):
@@ -125,6 +183,7 @@ class CatalogueProvider(Provider):
         if last == INDEX_JSON:
             children = await self.children(parent)
             if children is not None:
+                self._mark(uri)
                 return TextResource(
                     uri=uri,
                     name=name,
@@ -138,12 +197,20 @@ class CatalogueProvider(Provider):
         body = catalogue.read(uri, requested_scope())
         if body is None:
             return None
+        self._mark(uri)
         return TextResource(
             uri=uri,
             name=name,
             mime_type=catalogue.mime(uri),
             text=prefixed(body, p),
         )
+
+    @staticmethod
+    def _mark(uri: str) -> None:
+        """Name the read in flight by its pattern, in ``LabelKbReads``'s holder."""
+        served = _SERVED.get()
+        if served is not None:
+            served.pattern = pattern_for(uri)
 
     async def children(self, uri: str) -> list[dict] | None:
         """A library's or a folder's direct children, as wire ``Resource`` rows.
@@ -167,30 +234,28 @@ class CatalogueProvider(Provider):
                 uri_template=TEMPLATE_URI,
                 name="skill",
                 description=prefixed(TEMPLATE_DESCRIPTION, prefix()),
-                # ResourceTemplate requires it; never matched against, because
-                # _get_resource_template below returns None.
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "library": {"type": "string"},
-                        "path": {"type": "string"},
-                    },
-                    "required": ["library", "path"],
-                },
+                # ResourceTemplate requires it; this row is never matched against.
+                parameters=_parameters(TEMPLATE_URI),
             )
         ]
 
     async def _get_resource_template(
         self, uri: str, version: VersionSpec | None = None
     ) -> ResourceTemplate | None:
-        """Never match: the template is for discovery, not for reading.
+        """None for a miss; the read's pattern only after kb served it (CFG-21).
 
         FastMCP's ``read_resource`` falls back to this when ``_get_resource``
         misses, and the default would match any listed template, turning every
         miss into a template read and breaking ``NameTheFileToRead`` and the
-        rule that out-of-scope reads exactly as absent.
+        rule that out-of-scope reads exactly as absent. A miss leaves the holder
+        ``LabelKbReads`` set empty, so a template is never read through. Once kb
+        has served the read the holder names its pattern, and kubed-mcp's read
+        observer labels the call metric with it instead of the address.
         """
-        return None
+        served = _SERVED.get()
+        if served is None or served.pattern is None:
+            return None
+        return _label(served.pattern)
 
 
 class NameTheFileToRead(Middleware):
@@ -253,6 +318,25 @@ class NameTheFileToRead(Middleware):
             ) from None
 
 
+class LabelKbReads(Middleware):
+    """Give each read a holder for the pattern kb names it by, for the call metrics.
+
+    FastMCP's aggregate provider runs every provider in a child task, so a
+    ``ContextVar`` set inside ``CatalogueProvider`` is lost to the request. A
+    mutable holder set here, in the request's own task, is shared by reference
+    and survives. One per read, so a read inside the ``read_resource`` tool's
+    ``tools/call`` gets its own. It must enclose kubed-mcp's read observer, which
+    sits after ``_TakeThePrefix``, so it goes in outside kubed-mcp's middleware.
+    """
+
+    async def on_read_resource(self, context, call_next):
+        token = _SERVED.set(_Served())
+        try:
+            return await call_next(context)
+        finally:
+            _SERVED.reset(token)
+
+
 def register(mcp: QuickMCP, catalogue: Callable[[], Catalogue]) -> None:
     """Publish the catalogue as ``skill://`` resources, read per request.
 
@@ -261,9 +345,11 @@ def register(mcp: QuickMCP, catalogue: Callable[[], Catalogue]) -> None:
     so an error names the URI the client sent and its hint carries the prefix
     once: kb's own first, then kubed-mcp's for a folder inside a skill.
     QuickMCP has no way to add a middleware outside its own, so it goes first in
-    the FastMCP server's list. kubed-mcp hands every provider the plain address
-    (GW-4): the prefix off, and dot segments resolved on ``resources/read``.
+    the FastMCP server's list, and ``LabelKbReads`` right after it, so it too
+    encloses kubed-mcp's read observer. kubed-mcp hands every provider the plain
+    address (GW-4): the prefix off, and dot segments resolved on ``resources/read``.
     """
     mcp.add_provider(CatalogueProvider(catalogue))
     mcp.server.middleware.insert(0, NameTheFileToRead(catalogue))
+    mcp.server.middleware.insert(1, LabelKbReads())
     mcp.add_middleware(NameTheIndex())

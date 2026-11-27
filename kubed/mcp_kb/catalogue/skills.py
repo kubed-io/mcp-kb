@@ -227,8 +227,9 @@ class LibraryFiles:
 
     def __init__(self, revalidate: Callable[[Path], None] | None = None) -> None:
         self._roots: dict[str, list[_Root]] = {}
-        # A live fetch's files are revalidated as they are read, the same way
-        # uris.py does it for a skill's own files.
+        # A read of a live fetch's file starts that fetch's revalidation in
+        # the background, the same way uris.py does it for a skill's own
+        # files, and serves what is on disk now.
         self._revalidate = revalidate
 
     def add(
@@ -398,8 +399,9 @@ class LibraryFiles:
         return tuple(a for entry in self._roots.get(library, ()) for a in entry.agents)
 
     def _serve(self, target: Path) -> str:
-        # A live fetch's file may have moved since it was copied, and a read is
-        # the only thing that asks.
+        # A live fetch's file may have moved since it was copied: the read
+        # starts a background revalidation if one is due, and never waits for
+        # it. The first read after it lands serves the edit.
         if self._revalidate is not None:
             self._revalidate(target)
         return target.read_text(encoding="utf-8", errors="replace")

@@ -314,7 +314,6 @@ async def test_a_skipped_skills_own_files_neither_serve_nor_fail_the_plugin(tmp_
 
 # FastMCP's Agent Skills limit: SKILL.md and 512 more files is 513 (Task 0 (b)).
 BIG_REASON = "A skill may contain at most 512 files"
-NESTED = "a skill is one folder below its skills folder"
 HELLO = "---\ndescription: Hi.\n---\nHello.\n"
 
 
@@ -417,9 +416,8 @@ async def test_a_skill_folder_kb_did_not_find_is_said_once(tmp_path, caplog, mon
 
 
 async def test_a_nested_skill_is_no_row_and_no_note(tmp_path, caplog):
-    """kubed-mcp's line for a ``SKILL.md`` deeper than a skill folder is one of
-    its plugin's ``components.notes``, never ``skipped``: kb neither lists it
-    nor reads it into its own ``notes``, and the layer's line is kept."""
+    """A ``SKILL.md`` deeper than a skill folder is no skill: no row, no note,
+    nothing in ``/health``, and the plugin layer logs no line for it."""
 
     def build(root):
         _skill(root, "skills/ok", "ok", "Fine.")
@@ -430,8 +428,7 @@ async def test_a_nested_skill_is_no_row_and_no_note(tmp_path, caplog):
         health = await _health(kb)
     plugin = health["plugins"]["src"]
     assert "skipped" not in plugin and "notes" not in plugin
-    assert NESTED not in json.dumps(health)
-    assert any(NESTED in line for line in _theirs(caplog, "skills/g/y"))
+    assert _theirs(caplog, "skills/g/y") == []
 
 
 async def test_a_refused_plugin_counts_no_skills_prompts_or_agents(tmp_path):
