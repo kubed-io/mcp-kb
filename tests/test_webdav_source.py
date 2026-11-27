@@ -24,6 +24,7 @@ from kubed.mcp_kb.sources import AccessRefused, SourceError
 from kubed.mcp_kb.sources import export as exports
 from kubed.mcp_kb.sources.webdav import (
     ETAGS_FILE,
+    VERSION,
     VERSION_FILE,
     client,
     download,
@@ -376,6 +377,31 @@ def test_a_remote_file_named_like_kbs_own_stamps_is_neither_listed_nor_exported(
     assert recorded and not [p for p in recorded if ".mcp-kb-" in p]
     assert (root / VERSION_FILE).read_text().split()[0] == root.name
     assert not (root / "docs" / ".mcp-kb-other").exists()
+    assert fingerprint_webdav(source, tmp_path, root)["exported"] == root.name
+
+
+def test_a_remote_folder_named_like_kbs_own_stamps_is_neither_listed_nor_exported(
+    webdav, tmp_path
+):
+    """The reservation holds for a folder too: one named like a stamp would
+    otherwise be copied over the place the stamp is written, and fail the export
+    with a path under the cache in its message."""
+    webdav.write(f"{ETAGS_FILE}/a.md", "under a stamp\n")
+    webdav.write(f"{VERSION_FILE}/b.md", "under the other\n")
+    source = _fetch(webdav)
+
+    assert not [p for p in remote_etags(source, client(source)) if ".mcp-kb-" in p]
+    root = materialise_webdav(source, tmp_path)
+
+    recorded = json.loads((root / ETAGS_FILE).read_text())
+    assert recorded and not [p for p in recorded if ".mcp-kb-" in p]
+    assert (root / ETAGS_FILE).is_file() and (root / VERSION_FILE).is_file()
+    assert (root / VERSION_FILE).read_text().split()[0] == root.name
+    assert not list(root.rglob("a.md")) and not list(root.rglob("b.md"))
+    held = exports.Exports.under(
+        tmp_path, source.slug, stamp=VERSION_FILE, version=VERSION
+    )
+    assert held.complete(root, root.name)
     assert fingerprint_webdav(source, tmp_path, root)["exported"] == root.name
 
 

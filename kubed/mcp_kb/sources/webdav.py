@@ -38,6 +38,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -55,9 +56,9 @@ from .export import WORK_PREFIX, Exports, workspace
 if TYPE_CHECKING:
     from httpx import URL
 
-# Every file kb writes into an export starts with this, and no upstream file
-# that does is ever listed, recorded or copied: a remote file named like a stamp
-# would otherwise be revalidated over kb's own.
+# Every file kb writes into an export starts with this, and no upstream file or
+# folder that does is ever listed, recorded or copied: a remote name like a
+# stamp would otherwise be revalidated over kb's own, or sit where it is written.
 RESERVED = ".mcp-kb-"
 
 # Written at the root of an export: what every file's ETag was when it was
@@ -70,12 +71,12 @@ ETAGS_FILE = ".mcp-kb-etags.json"
 VERSION_FILE = ".mcp-kb-version"
 
 
-def reserved(rel: str) -> bool:
-    """Whether the path's file name is one of kb's own (``RESERVED``)."""
-    return rel.rsplit("/", 1)[-1].startswith(RESERVED)
-
-
 VERSION = re.compile(r"^[0-9a-f]{64}$")
+
+
+def reserved(rel: str) -> bool:
+    """Whether any segment of the path is one of kb's own names (``RESERVED``)."""
+    return any(part.startswith(RESERVED) for part in rel.split("/"))
 
 
 class _Client(Client):
@@ -137,10 +138,13 @@ def materialise_webdav(fetch: Fetch, cache: Path) -> Path:
             fs.get("", str(tmp), recursive=True)
         tmp.mkdir(parents=True, exist_ok=True)
         # The copy takes everything upstream holds; kb's stamps are the only
-        # files of those names an export may have.
-        for path in tmp.rglob("*"):
-            if path.is_file() and reserved(path.name):
-                path.unlink()
+        # names of that kind an export may have, a folder of one included.
+        for path in list(tmp.rglob("*")):  # the tree changes under the walk
+            if path.name.startswith(RESERVED) and path.exists():
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink(missing_ok=True)
         (tmp / ETAGS_FILE).write_text(
             json.dumps(etags, indent=1, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -221,8 +225,9 @@ def remote_etags(fetch: Fetch, fs: WebdavFileSystem) -> dict[str, str]:
     enumerates the children, so a listing prices every file's freshness for
     free. Sorted, so two equal folders produce two equal dicts and one digest.
 
-    A file whose name is ``reserved`` is left out, so no recorded map, digest or
-    live download ever names one: this listing is the single gate.
+    A path that is ``reserved``, a file of kb's names or anything under a folder
+    of one, is left out, so no recorded map, digest or live download ever names
+    one: this listing is the single gate.
     """
     with _reporting(fetch, "listing"):
         try:
