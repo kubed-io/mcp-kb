@@ -1445,6 +1445,39 @@ def test_no_reread_while_a_refresh_builds(webdav, tmp_path, monkeypatch):
     assert "rather longer than before" in read_served(knowledge_base, URI)
 
 
+def test_a_refresh_retires_the_revalidator_it_swaps_out(webdav, tmp_path):
+    kb = _knowledge_base(webdav, tmp_path)
+    serving_of(kb)
+    was = kb.snapshot.live
+    webdav.skill("y", "a second skill, which moves the whole folder's digest")
+    assert kb.refresh() == [KEY]
+    assert was.retired
+    assert kb.snapshot.live is not was and not kb.snapshot.live.retired
+
+
+def test_a_live_reread_does_not_retire_the_revalidator(webdav, tmp_path):
+    kb = _knowledge_base(webdav, tmp_path)
+    serving_of(kb)
+    live = kb.snapshot.live
+    webdav.skill("x", "edited live, and rather longer than it was before")
+    landed(kb)
+    assert "edited live" in read_served(kb, URI)
+    assert kb.snapshot.live is live
+    assert not live.retired
+
+
+def test_a_refresh_keeps_a_revalidator_the_swapped_in_snapshot_shares(
+    webdav, tmp_path, monkeypatch
+):
+    kb = _knowledge_base(webdav, tmp_path)
+    serving_of(kb)
+    served = kb.snapshot
+    monkeypatch.setattr(kb, "_publish", lambda built: served)
+    webdav.skill("y", "a second skill, which moves the whole folder's digest")
+    assert kb.refresh() == [KEY]
+    assert kb.snapshot is served and not served.live.retired
+
+
 def test_a_publisher_that_raises_leaves_the_records_as_they_were(
     webdav, tmp_path, monkeypatch
 ):
@@ -1462,10 +1495,12 @@ def test_a_publisher_that_raises_leaves_the_records_as_they_were(
     )
     publish = knowledge_base._publish
     raised = []
+    discarded = []
 
     def flaky(published):
         if not raised:
             raised.append(published.generation)
+            discarded.append(published.live)
             raise RuntimeError("the plugin layer fell over")
         return publish(published)
 
@@ -1475,6 +1510,11 @@ def test_a_publisher_that_raises_leaves_the_records_as_they_were(
         knowledge_base.refresh(force=True)
     assert raised
     assert knowledge_base.snapshot is snapshot
+    # The discarded build's revalidator is retired; the served one is not.
+    assert discarded[0] is not None and discarded[0] is not snapshot.live
+    assert discarded[0].retired
+    assert knowledge_base.snapshot.live is snapshot.live
+    assert not snapshot.live.retired
     assert (
         knowledge_base._fetches,
         knowledge_base._plugins,

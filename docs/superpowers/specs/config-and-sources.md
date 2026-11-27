@@ -302,6 +302,10 @@ file added or renamed upstream, and an edited description in a listing, wait for
 the files a revalidation compared against the server's listing, and `fetched`, the ones
 downloaded again.
 
+**SRC-54.** A live fetch's revalidation belongs to the generation it serves. Once a refresh swaps
+in a new generation, the previous one's revalidation starts nothing, and one it is running stops
+before its next file and logs nothing more.
+
 ## The cache directory
 
 **SRC-26.** A slug is the fetch key lower-cased, each run of other characters made `-`, cut to 60
