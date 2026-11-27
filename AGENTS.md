@@ -76,7 +76,7 @@ installer's, against whatever image tag it chooses.
 | `kubed/mcp_kb/sources/` | where bytes come from, one `Fetch` at a time — a loader per source in `__init__.py`, over `file.py`, `git.py`, `webdav.py`, the shared per-version `export.py`, `errors.py`, and `live.py`, because revalidation is a source concern; and `ServedTrees`, the one loader kubed-mcp is handed, which answers a plugin's address with the tree kb is serving for it and never fetches |
 | `kubed/mcp_kb/mcp/` | what an agent sees |
 | ⤷ `skills.py` | `SkillServing` — the skills, agents and prompts, served by kubed-mcp's plugin layer: `publish` adds every plugin to a plugin set each generation, its `commands` exactly kb's prompt files (`entry_for`), `view` is kb's scope, `rewrite` its one rewriter (a command's body included), `read_command` kb's dialect reader, `agent_meta` adds kb's `_meta` key, the parity guard narrows the catalogue to what is served, and the live re-read; `QuietSelection`, the log filter that drops the layer's own line for each skip kb reports, and for a file kb left out |
-| ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead` |
+| ⤷ `resources.py` | the resources, which are the interface, and the middleware — `NameTheFileToRead`, `LabelKbReads` |
 | ⤷ `tools.py`, `prompts.py` | `prompts.py` `MCPFilePrompt` and `adapt`, the `Prompt` kb's reader hands the plugin layer; `tools.py` names kubed-mcp's resource pair (DLV-6) and the delivery inputs for the wiki, and defines no tool |
 | ⤷ `request.py`, `scope.py` | what the current request says about itself, and the `Scope` it becomes |
 | ⤷ `instructions.py` | `ScopedInstructions`: the `instructions` hook kubed-mcp calls with each `initialize` and `server/discover` request's resolution, passing its Via on, and never fails a handshake: a failure is logged, credentials masked, and answered with the mode's footer |
@@ -227,11 +227,15 @@ keep it when changing this code.
 `resources/templates/list` holds one fixed row, `skill://{library}/{+path}`, so a
 client with several servers can tell which one serves `skill://` addresses; it
 is for discovery and reads nothing. `CatalogueProvider._get_resource_template`
-returns None on purpose: FastMCP falls back to a matching template on every read
-miss, and a template that matched would turn a miss, and its hint, into a
-template read. The `uriTemplate` is never prefixed, because a gateway prefixes
-it itself and kb doing so as well would prefix it twice; the description is
-text, and is prefixed like any other.
+returns None on purpose for a miss: FastMCP falls back to a matching template on
+every read miss, and a template that matched would turn a miss, and its hint,
+into a template read. It returns the read's pattern (CFG-21) only once kb has
+served that read, from the holder `LabelKbReads` sets per read, because FastMCP
+runs every provider in a child task, where a ContextVar set inside the provider
+is lost; so kubed-mcp's read observer labels kb's reads by kind, never by
+address. The `uriTemplate` is never prefixed, because a gateway prefixes it
+itself and kb doing so as well would prefix it twice; the description is text,
+and is prefixed like any other.
 
 **A skill's files are kubed-mcp's to serve** (SKL-58): `mcp/skills.py`'s
 `SkillServing.publish` adds every plugin of every library to a kubed-mcp plugin
@@ -463,7 +467,9 @@ which generation is being served, and has a refresh picked up an edit yet.
   hint middleware is inserted first in `mcp.server.middleware`, sees the URI as
   sent and the error as renamed, and prefixes its hint once (`prefixed`
   is idempotent). `tests/test_addressing_http.py` holds it, prefixed and plain,
-  for resources and the `read_resource` tool.
+  for resources and the `read_resource` tool. `LabelKbReads` goes in right after
+  it (index 1), still outside kubed-mcp's, so it encloses the read observer and
+  FastMCP's provider gather.
 
 ## House rules that apply here
 
