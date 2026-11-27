@@ -14,17 +14,17 @@ COMMANDS_NOTE = (
 
 
 async def test_a_manifest_skills_list_adds(kb_url):
-    """PLG-20: a manifest `skills` list adds to the default skills folder."""
+    """PLG-20, SKL-10: a manifest `skills` list adds; the folder is the plugin's."""
     assert health(kb_url)["plugins"]["skills-add@live"]["skills"] == 2
-    base = await read(kb_url, "skill://live/added-base/SKILL.md", "live")
-    extra = await read(kb_url, "skill://live/extra/added-extra/SKILL.md", "live")
+    base = await read(kb_url, "skill://live/skills-add/added-base/SKILL.md", "live")
+    extra = await read(kb_url, "skill://live/skills-add/added-extra/SKILL.md", "live")
     assert "name: added-base" in base
     assert "name: added-extra" in extra
 
 
 async def test_a_path_without_dot_slash_is_served_and_noted(kb_url):
     """PLG-24, PLG-16, PLG-26: a bare path is served; a bad one is noted."""
-    text = await read(kb_url, "skill://live/more/undotted-skill/SKILL.md", "live")
+    text = await read(kb_url, "skill://live/undotted/undotted-skill/SKILL.md", "live")
     assert "name: undotted-skill" in text
     notes = health(kb_url)["plugins"]["undotted@live"]["notes"]
     assert set(notes) == {
@@ -38,8 +38,6 @@ async def test_the_prompts_are_exactly_these(kb_url):
     assert set(await prompts(kb_url, "live")) == {
         "live_check",
         "live_db_migrate",
-        "live_deploy",
-        "live_greet",
         "live_kept",
         "live_listed",
         "live_ops_restart",
@@ -47,16 +45,15 @@ async def test_the_prompts_are_exactly_these(kb_url):
     }
 
 
-async def test_a_commands_map_names_and_describes(kb_url):
-    """PLG-21: a commands map names the prompt and its description wins."""
+async def test_a_commands_map_serves_nothing_and_replaces_the_conventions(kb_url):
+    """PLG-21, PLG-23: a commands object map serves nothing, and the folder is ignored."""
     served = await prompts(kb_url, "live")
-    assert served["live_deploy"] == "Deploy the service."
-    assert served["live_greet"] == "Greet someone."
-    notes = health(kb_url)["plugins"]["commands-map@live"]["notes"]
-    assert set(notes) == {
-        COMMANDS_NOTE,
-        "commands entry 'both' needs exactly one of source and content",
-    }
+    assert "live_deploy" not in served
+    assert "live_greet" not in served
+    assert "live_unlisted" not in served
+    plugin = health(kb_url)["plugins"]["commands-map@live"]
+    assert set(plugin["notes"]) == {COMMANDS_NOTE, "commands object map is not served"}
+    assert plugin["prompts"] == 0
 
 
 async def test_a_key_naming_its_folder_earns_no_note(kb_url):

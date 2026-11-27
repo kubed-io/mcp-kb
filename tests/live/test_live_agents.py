@@ -120,19 +120,19 @@ async def test_qualified_names_become_addresses(kb_url):
     """AGT-17, SKL-55, PRM-62: `<plugin>:<skill>` in served text is an address."""
     finder = await definition(kb_url, "live_finder", "live")
     assert finder["instructions"] == (
-        "Load skill://live/lookup/SKILL.md first, then run /names:lookup-cmd.\n"
+        "Load skill://live/names/lookup/SKILL.md first, then run /names:lookup-cmd."
     )
     assert finder["_meta"][META]["skills"] == {
-        "lookup": "skill://live/lookup/SKILL.md",
-        "names:lookup": "skill://live/lookup/SKILL.md",
+        "lookup": "skill://live/names/lookup/SKILL.md",
+        "names:lookup": "skill://live/names/lookup/SKILL.md",
     }
     assert finder["_meta"][META]["frontmatter"]["skills"] == [
         "lookup",
         "names:lookup",
         "nowhere",
     ]
-    skill = await read(kb_url, "skill://live/lookup/SKILL.md", "live")
-    assert "Pairs with skill://live/helper/SKILL.md." in skill
-    assert "Use skill://live/helper/SKILL.md." in await prompt_text(
+    skill = await read(kb_url, "skill://live/names/lookup/SKILL.md", "live")
+    assert "Pairs with skill://live/names/helper/SKILL.md." in skill
+    assert "Use skill://live/names/helper/SKILL.md." in await prompt_text(
         kb_url, "live_use", "live"
     )
