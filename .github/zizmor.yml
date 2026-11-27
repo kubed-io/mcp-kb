@@ -54,6 +54,7 @@ rules:
     - agent-issue.yml
     - agent-pr.yml
     - agent-review.yml
+    - agent-renovate.yml
 
   # The checkout in publish.yml MUST keep its credentials: duplocloud/version-bump
   # commits the rolled changelog and pushes the tag through the remote checkout
