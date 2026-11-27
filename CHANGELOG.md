@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Choose what `resources/list` lists with `Kb-Listed` (`?listed=`): `skills`, `prompts`, `agents` or `none`.
 - Set any config item from an env var or a flag: `KB_SOURCES`, `KB_PLUGINS`, `KB_LIBRARIES` (JSON), `CACHE_DIR`, `TRANSPORT`, `HOST`, `PORT`, `LOG_LEVEL`, `TELEMETRY_*` and `DELIVERY_*`.
 - The config file can set `cache_dir`, `serving` and `delivery` too.
+- Garbage-collection counts and pause times are exported with the other metrics.
 
 ### Changed
 
@@ -84,6 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/health` lists the skill folders a plugin cannot serve, and counts no skills, prompts or agents for a plugin that is not served.
 - A VS Code client with no header is told to read with `read_resource`, matching the tools it is listed.
 - Metrics label kb's index and library-file reads by pattern, so reading more addresses adds no series.
+- A session's first request no longer stalls for about 2 seconds.
 
 ### Removed
 
