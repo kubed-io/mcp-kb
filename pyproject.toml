@@ -72,6 +72,9 @@ test = [
   "pytest-asyncio",
   "ruff",
   "uvicorn",
+  # tests/test_read_labels.py drives kubed-mcp's own read observer with an
+  # in-memory metric reader. kubed-mcp owns the pins.
+  "kubed-mcp[telemetry]",
   # tests/test_packaging.py builds a wheel out of a checkout with no .git and
   # imports from it — the one way to catch a package the metadata forgot.
   "build",

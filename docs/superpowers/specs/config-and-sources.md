@@ -135,6 +135,19 @@ telemetry:
   tags: {team: platform}
 ```
 
+**CFG-21.** A `resources/read` that kb itself answers is labelled in the call metrics by its
+kind's pattern, never by its address: `skill://{library}/_index.md`,
+`skill://{library}/{folder}/_index.md`, `skill://{library}/_index.json`,
+`skill://{library}/{folder}/_index.json`, `skill://{library}/_files.md`, and
+`skill://{library}/{+path}`. `{folder}` is the address's second segment, and
+`skill://{library}/{+path}` is any other address kb answers: a library file, a plugin-root
+fallback (SKL-30, SKL-31), or a deeper folder's `_index.json`. The pattern is read from the
+address with its dot segments resolved. A read through the `read_resource` tool is labelled the
+same. A read kb misses carries no label, as before, and an out-of-scope read is labelled as an
+absent one is. These patterns are labels only: `resources/templates/list` still lists the one row
+`skill://{library}/{+path}`, and a miss is never read through a template. A skill's own files are
+labelled by kubed-mcp.
+
 ## Delivery
 
 **CFG-19.** The optional `delivery` mapping is kubed-mcp's defaults for the delivery inputs:
