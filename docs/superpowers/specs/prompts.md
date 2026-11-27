@@ -304,9 +304,10 @@ get the failure in PRM-52.
 ## Live prompts
 
 **PRM-58.** A prompt file of a `cache: live` source (see
-[config-and-sources.md](config-and-sources.md)) is revalidated with its plugin's skill and agent
-files, on each request whose scope admits the plugin (SKL-37). One that moved re-reads its plugin,
-and the prompt as edited serves from the request that found it.
+[config-and-sources.md](config-and-sources.md)) is revalidated in the background with its
+plugin's skill and agent files (SKL-37), started by each request whose scope admits the plugin.
+One that moved re-reads its plugin, and the prompt as edited serves from the first request after
+the revalidation that found it.
 
 **PRM-59.** The edit's arguments, defaults and dialect are read from the edited file and served
 with it; no refresh is needed.

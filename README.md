@@ -113,7 +113,7 @@ libraries:
 | `git+https://`, `git+http://`, `git+file://` | a git remote, cloned bare — shallow over the network, whole for `git+file://` (libgit2's local transport refuses a shallow fetch) — and exported at a commit |
 | `webdav+https://`, `webdav+http://` | a WebDAV folder — Nextcloud above all — copied into the cache |
 
-A plugin's address is `<source>://<path>[//<subdir>][?ref=<ref>]`, go-getter's grammar, the one kustomize reads. Pin a `?ref=` and the image serves the same bytes in a year; track a branch, give the source a `refresh:`, and something goes and looks. `cache: live` on a WebDAV source revalidates a file by ETag as it is read, so **a file edited in Nextcloud is served on the next read**. A credential lives on the source and is always an `{env: NAME}` reference — a URL carrying its own `user:token@` is refused.
+A plugin's address is `<source>://<path>[//<subdir>][?ref=<ref>]`, go-getter's grammar, the one kustomize reads. Pin a `?ref=` and the image serves the same bytes in a year; track a branch, give the source a `refresh:`, and something goes and looks. `cache: live` on a WebDAV source revalidates its files by ETag in the background, as they are read, so **a file edited in Nextcloud is served within seconds, with no refresh**. A credential lives on the source and is always an `{env: NAME}` reference — a URL carrying its own `user:token@` is refused.
 
 Nothing about a marketplace's plugin is editable here: to change one, declare your own plugin against the same repository, which costs no second clone.
 

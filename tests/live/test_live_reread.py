@@ -15,15 +15,22 @@ from tests.webdav_server import PASSWORD
 pytestmark = pytest.mark.live
 
 
-async def _edit(path: Path, text: str) -> None:
-    """Write `text`, which must differ in length, and outwait the revalidation TTL.
+async def _settle(kb_url: str) -> None:
+    """Outwait the TTL, start the background pass with a read, and let it land."""
+    await asyncio.sleep(live.TTL_SECONDS + 0.5)
+    await agent_names(kb_url, "dav")
+    await asyncio.sleep(1.0)
+
+
+async def _edit(path: Path, text: str, kb_url: str) -> None:
+    """Write `text`, which must differ in length, and let the background pass land.
 
     wsgidav's ETag is `inode-mtime-size`, so a same-length edit within the same
     second would be the same ETag and the re-read would pass for no reason.
     """
     assert len(text.encode()) != path.stat().st_size
     path.write_text(text)
-    await asyncio.sleep(live.TTL_SECONDS + 0.5)
+    await _settle(kb_url)
 
 
 def _agent(frontmatter: str, body: str) -> str:
@@ -44,11 +51,12 @@ async def test_a_live_agent_is_reread(kb_url, dav_dir):
                 "name: editable\ndescription: Edited live.",
                 "The edited body, which is longer.",
             ),
+            kb_url,
         )
         edited = await definition(kb_url, "dav_editable", "dav")
         assert edited["instructions"] == "The edited body, which is longer.\n"
 
-        await _edit(path, "---\nname: [unclosed\n---\nHalf saved.\n")
+        await _edit(path, "---\nname: [unclosed\n---\nHalf saved.\n", kb_url)
         broken = await definition(kb_url, "dav_editable", "dav")
         assert broken["instructions"] == "Original body.\n"
 
@@ -58,6 +66,7 @@ async def test_a_live_agent_is_reread(kb_url, dav_dir):
                 "name: renamed-on-disk\ndescription: Edited live.",
                 "Renamed on disk.",
             ),
+            kb_url,
         )
         renamed = await definition(kb_url, "dav_editable", "dav")
         assert renamed["agent"] == "dav_editable"
@@ -67,7 +76,7 @@ async def test_a_live_agent_is_reread(kb_url, dav_dir):
         # Not `_edit`: its length guard would hide a failure before any edit.
         if path.read_text() != original:
             path.write_text(original)
-            await asyncio.sleep(live.TTL_SECONDS + 0.5)
+            await _settle(kb_url)
 
 
 def test_health_names_no_dav_url_or_credential(kb_url, dav_dir):

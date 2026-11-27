@@ -305,19 +305,23 @@ prefix (SKL-41) and without `skill://`.
 
 ## Live reads
 
-**SKL-37.** When a file read belongs to a `cache: live` source
-([config-and-sources.md](config-and-sources.md)), the read first revalidates that one file against
-the server: library files and both fallbacks alike. A request that reads skills, agents or prompts
-first revalidates every file of each live skill, and each agent and prompt file, of the plugins its
-scope admits. A file that moved re-reads that plugin and serves it again, every other plugin kept as
-it is served, and from that request on a skill's files, its `_manifest`, its extension entry and
-the plugin's agents and prompts describe the new bytes: the request that re-reads reads the new
-bytes.
-A request that arrives while a refresh is publishing re-reads nothing.
+**SKL-37.** When a file read, or a request that reads skills, agents or prompts, touches a
+`cache: live` source ([config-and-sources.md](config-and-sources.md)), it starts that fetch's
+revalidation in the background if one is due (SKL-38), and serves what is on disk now. That
+covers library files and both fallbacks, and every file of each live skill, and each agent and
+prompt file, of the plugins its scope admits. A read never waits for the server. A revalidation
+lists the fetch once and downloads each of its files whose ETag moved. The first request after a
+revalidation that moved a file re-reads that plugin and serves it again, every other plugin kept
+as it is served. From that request on, a skill's files, its `_manifest`, its extension entry and
+the plugin's agents and prompts describe the new bytes. So an edit is served once a revalidation
+has seen it: about 2 seconds and one revalidation behind under steady traffic, and one request
+behind on a quiet server. A request that arrives while a refresh is publishing re-reads nothing.
 
-**SKL-38.** A revalidated file is trusted for 2 seconds. A revalidation that fails, including a
-request that takes over 1 second, serves the copy on disk, and that source is not revalidated for
-30 seconds.
+**SKL-38.** A fetch revalidated within the last 2 seconds, counted from when that revalidation
+ended, is not revalidated again. One revalidation request times out after 1 second. A
+revalidation that fails serves the copy on disk, and that fetch is not revalidated for 30
+seconds. One revalidation at a time runs for the generation being served, and it covers every
+live fetch that is due.
 
 **SKL-39.** A live read changes only the bytes of files already harvested. What the plugin layer
 serves follows a live re-read (SKL-37): a skill's files, its `_manifest`, its extension entry and

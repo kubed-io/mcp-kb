@@ -399,15 +399,31 @@ class KnowledgeBase:
             was = self._fetches, self._plugins, self._libraries, self._harvests
             self._fetches, self._plugins = fetches, plugins
             self._libraries, self._harvests = libraries, harvests
+            built = None
             try:
-                snapshot = self._build(generation=self.snapshot.generation + 1)
+                built = self._build(generation=self.snapshot.generation + 1)
+                snapshot = built
                 if self._publish is not None:
                     snapshot = self._publish(snapshot)
             except BaseException:
                 self._fetches, self._plugins, self._libraries, self._harvests = was
+                # A discarded build's revalidator may already have been kicked
+                # by the publish; nothing else would ever retire it.
+                if (
+                    built is not None
+                    and built.live is not None
+                    and built.live is not self.snapshot.live
+                ):
+                    built.live.retire()
                 raise
             log_changes(self.snapshot.status, snapshot.status)
+            old = self.snapshot
             self.snapshot = snapshot
+            # The swapped-out generation's revalidation starts nothing more. A
+            # snapshot narrowed in place shares its revalidator, so only a
+            # different one is retired.
+            if old.live is not None and old.live is not snapshot.live:
+                old.live.retire()
             # Best-effort and therefore last, after the swap: a raise here
             # leaves the harvests and the snapshot one generation, the new one.
             self._write_index()

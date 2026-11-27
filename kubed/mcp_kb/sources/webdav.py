@@ -20,12 +20,13 @@ Three things this module is careful about:
   is -- so nothing that lands under the cache, in a log line or in the errors
   ``/health`` publishes can carry it. An HTTP failure is reported as its status
   and nothing more.
-- **A live read replaces one file, atomically.** ``fetch_file`` is the other
-  half of ``cache: live``: one PROPFIND, and only if the ETag moved, one GET
-  into a temporary file in ``.work/`` beside the export that is then renamed
-  over the local copy. A reader holding the old file reads the old file to its
-  end, and a download that is killed half way through leaves nothing inside
-  the export for the next pass to read as a missing file.
+- **A live revalidation replaces one file at a time, atomically.** The
+  background pass of ``cache: live`` (``live.py``) lists the folder with
+  ``remote_etags`` and calls ``download`` for each file whose ETag moved: one
+  GET into a temporary file in ``.work/`` beside the export, which is then
+  renamed over the local copy. A reader holding the old file reads the old
+  file to its end, and a download that is killed half way through leaves
+  nothing inside the export for the next pass to read as a missing file.
 
 Read-only throughout: a fetch is copied from and never written to.
 """
@@ -92,8 +93,9 @@ def client(fetch: Fetch, *, timeout: float | None = None) -> WebdavFileSystem:
     it changes underneath us.
 
     ``timeout`` is per HTTP operation and left to httpx's own default here --
-    an index-time copy of a large folder is allowed to take its time. A read
-    is not, and ``live.py`` passes one; see ``REVALIDATE_TIMEOUT``.
+    an index-time copy of a large folder is allowed to take its time. A live
+    revalidation pass is not, and ``live.py`` passes one; see
+    ``REVALIDATE_TIMEOUT``.
     """
     if fetch.auth is None:
         # SourceConfig refuses an anonymous webdav source; a Fetch built by
@@ -117,7 +119,7 @@ def client(fetch: Fetch, *, timeout: float | None = None) -> WebdavFileSystem:
 def materialise_webdav(fetch: Fetch, cache: Path) -> Path:
     """Copy the folder into the cache under the digest of its ETags, and return it."""
     fs = client(fetch)
-    etags = _etags(fetch, fs)
+    etags = remote_etags(fetch, fs)
 
     def build(tmp: Path) -> None:
         with _reporting(fetch, "copy"):
@@ -152,7 +154,7 @@ def fingerprint_webdav(fetch: Fetch, cache: Path, root: Path) -> dict:
     exported = exports.exported(root)
     if exported is None:
         raise SourceError(f"{fetch.key}: nothing exported under the cache")
-    etags = _etags(fetch, client(fetch))
+    etags = remote_etags(fetch, client(fetch))
     return {
         "exported": exported[0],
         "files": exports.count(root),
@@ -161,40 +163,13 @@ def fingerprint_webdav(fetch: Fetch, cache: Path, root: Path) -> dict:
     }
 
 
-def fetch_file(
-    fetch: Fetch,
-    root: Path,
-    rel: str,
-    etag: str | None = None,
-    *,
-    fs: WebdavFileSystem | None = None,
-) -> str | None:
-    """Revalidate one file against the server; re-download it only if it moved.
+def download(fetch: Fetch, root: Path, rel: str, fs: WebdavFileSystem) -> None:
+    """Download one file over its local copy, atomically.
 
-    ``etag`` is what the file was when it was copied -- the caller's record of
-    it, or the export's own if the caller has none. Returns the ETag the file
-    has now, which is the same object when nothing changed, or None when the
-    file is gone upstream: a deleted file is not a deleted skill, and the local
-    copy goes on being served until a refresh rebuilds the fetch without it.
-
-    ``fs`` lets a caller reuse one client across many reads, which is the whole
-    difference between a live fetch and a slow one.
+    Raises ``SourceError`` (``AccessRefused`` for a 401 or a 403) and refuses a
+    ``rel`` that leaves ``root``.
     """
     target = _inside(fetch, root, rel)
-    fs = fs or client(fetch)
-    recorded = etag if etag is not None else recorded_etags(root).get(rel)
-
-    try:
-        info = fs.info(rel)
-    except FileNotFoundError:
-        return None
-    except Exception as exc:
-        raise SourceError(f"{fetch.key}: {_failure(exc)} for {rel}") from exc
-
-    current = _etag(info)
-    if current == recorded and target.is_file():
-        return current
-
     target.parent.mkdir(parents=True, exist_ok=True)
     # Staged beside the export, never inside it: a download killed part way
     # through would otherwise leave a file the export's own count includes and
@@ -211,7 +186,6 @@ def fetch_file(
         tmp.replace(target)
     finally:
         tmp.unlink(missing_ok=True)
-    return current
 
 
 # -- the folder ----------------------------------------------------------------
@@ -222,13 +196,14 @@ def _exports(fetch: Fetch, cache: Path) -> Exports:
     return Exports.under(cache, fetch.slug, stamp=VERSION_FILE, version=VERSION)
 
 
-def _etags(fetch: Fetch, fs: WebdavFileSystem) -> dict[str, str]:
+def remote_etags(fetch: Fetch, fs: WebdavFileSystem) -> dict[str, str]:
     """``{path: etag}`` for every file in the folder, in path order.
 
-    One recursive listing, which is one PROPFIND per directory -- webdav4
-    passes the ETag through from the same response that enumerates the
-    children, so a listing prices every file's freshness for free. Sorted, so
-    two equal folders produce two equal dicts and one digest.
+    One recursive listing, which is one ``Depth: 1`` PROPFIND per directory
+    (webdav4's walk), not ``Depth: infinity``, which Nextcloud refuses by
+    default. webdav4 passes the ETag through from the same response that
+    enumerates the children, so a listing prices every file's freshness for
+    free. Sorted, so two equal folders produce two equal dicts and one digest.
     """
     with _reporting(fetch, "listing"):
         try:
@@ -337,6 +312,9 @@ def _failure(exc: Exception) -> str:
         return f"HTTP {exc.status_code}" + (f": {meaning}" if meaning else "")
     if isinstance(exc, ClientError):
         return str(exc)
+    if isinstance(exc, OSError) and exc.strerror:
+        # Its filename is a path under the cache: a download's temporary file.
+        return f"{type(exc).__name__}: {exc.strerror}"
     return f"{type(exc).__name__}: {exc}"
 
 

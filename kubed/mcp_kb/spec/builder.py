@@ -131,8 +131,8 @@ FETCH_STATUS = {
         ),
         "revalidated": _field(
             "integer",
-            "Live fetches only: files priced against the server since this "
-            "snapshot was built.",
+            "Live fetches only: files compared against the server's listing "
+            "since this snapshot was built.",
         ),
         "fetched": _field(
             "integer",
@@ -142,7 +142,7 @@ FETCH_STATUS = {
         "cooling": _field(
             "boolean",
             "Live fetches only: present and true while a failed "
-            "revalidation has this fetch's reads suspended.",
+            "revalidation has this fetch's background revalidation suspended.",
         ),
     },
 }
