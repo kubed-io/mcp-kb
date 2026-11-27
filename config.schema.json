@@ -26,6 +26,59 @@
       "title": "BasicAuth",
       "type": "object"
     },
+    "DeliverySettings": {
+      "additionalProperties": false,
+      "description": "The config's defaults for the delivery inputs: None leaves the built-in one.\n\nEach is a lax string, checked when the server is built: a value its input doesn't\ntake is warned once and ignored, and the next level answers.",
+      "properties": {
+        "resources": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "arg": "--delivery-resources",
+          "default": null,
+          "description": "Whether the client reads resources, on, or takes them as tools, off.",
+          "env": "DELIVERY_RESOURCES",
+          "title": "Resources"
+        },
+        "listed": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "arg": "--delivery-listed",
+          "default": null,
+          "description": "What resources/list shows, a comma string of skills, prompts and agents.",
+          "env": "DELIVERY_LISTED",
+          "title": "Listed"
+        },
+        "via": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "arg": "--delivery-via",
+          "default": null,
+          "description": "How the client takes the plugins: mcp, extension or local.",
+          "env": "DELIVERY_VIA",
+          "title": "Via"
+        }
+      },
+      "title": "DeliverySettings",
+      "type": "object"
+    },
     "EnvRef": {
       "additionalProperties": false,
       "description": "A secret named by the environment variable that holds it.",
@@ -92,8 +145,7 @@
             {
               "type": "null"
             }
-          ],
-          "default": null
+          ]
         },
         "categories": {
           "description": "The library's categories: a category scope selects every library that lists one.",
@@ -253,6 +305,57 @@
       "title": "Selector",
       "type": "object"
     },
+    "Serving": {
+      "additionalProperties": false,
+      "description": "How kb serves: kubed-mcp's ``serving`` section, with kb's defaults.\n\nkb serves ``http`` on every address by default, as a container does, and\nserves ``stdio`` or ``http`` alone: ``sse`` and ``streamable-http`` are a\nconfig error. ``port`` and ``log_level`` are kubed-mcp's as they are.",
+      "properties": {
+        "transport": {
+          "arg": "--transport",
+          "default": "http",
+          "description": "The transport kb serves on: http or stdio.",
+          "enum": [
+            "stdio",
+            "http"
+          ],
+          "env": "TRANSPORT",
+          "title": "Transport",
+          "type": "string"
+        },
+        "host": {
+          "arg": "--host",
+          "default": "0.0.0.0",
+          "description": "The address the http transport binds.",
+          "env": "HOST",
+          "title": "Host",
+          "type": "string"
+        },
+        "port": {
+          "arg": "--port",
+          "default": 8000,
+          "description": "The port an HTTP transport listens on.",
+          "env": "PORT",
+          "title": "Port",
+          "type": "integer"
+        },
+        "log_level": {
+          "arg": "--log-level",
+          "default": "INFO",
+          "description": "The root logger's level, set when the server runs.",
+          "enum": [
+            "CRITICAL",
+            "ERROR",
+            "WARNING",
+            "INFO",
+            "DEBUG"
+          ],
+          "env": "LOG_LEVEL",
+          "title": "Log Level",
+          "type": "string"
+        }
+      },
+      "title": "Serving",
+      "type": "object"
+    },
     "SourceConfig": {
       "additionalProperties": false,
       "description": "A named backend: where bytes come from and how to log in, declared once.",
@@ -274,8 +377,7 @@
             {
               "type": "null"
             }
-          ],
-          "default": null
+          ]
         },
         "cache": {
           "default": "snapshot",
@@ -307,38 +409,48 @@
       "title": "SourceConfig",
       "type": "object"
     },
-    "TelemetrySettings": {
+    "Telemetry": {
       "additionalProperties": false,
-      "description": "A ``telemetry`` section a server's config can embed.\n\n``profiles`` is the address of the Pyroscope server. Setting it turns profiles\non; there is no separate enabled flag. ``profile_cpu`` and ``profile_memory``\nchoose which profiles are sent. ``otel`` turns OpenTelemetry on, configured by\nthe standard ``OTEL_*`` variables. ``tags`` are labels added to every profile\nand resource attributes on every trace and metric. An unknown key is an error,\nso a typo stops the boot; a server's own section may subclass it to add keys.",
+      "description": "What the process reports: kubed-mcp's ``telemetry`` section, profiles,\ntraces and metrics, with kb's one guard on the profiles address. Absent,\nevery signal is off.",
       "properties": {
         "profiles": {
           "anyOf": [
             {
-              "type": "string"
+              "format": "password",
+              "type": "string",
+              "writeOnly": true
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
+          "arg": "--telemetry-profiles",
           "description": "Pyroscope server address; setting it turns profiles on.",
+          "env": "TELEMETRY_PROFILES",
+          "sensitive": true,
           "title": "Profiles"
         },
         "profile_cpu": {
+          "arg": "--telemetry-profile-cpu",
           "default": true,
           "description": "Sample CPU while profiles are on.",
+          "env": "TELEMETRY_PROFILE_CPU",
           "title": "Profile Cpu",
           "type": "boolean"
         },
         "profile_memory": {
+          "arg": "--telemetry-profile-memory",
           "default": true,
           "description": "Sample allocations while profiles are on.",
+          "env": "TELEMETRY_PROFILE_MEMORY",
           "title": "Profile Memory",
           "type": "boolean"
         },
         "otel": {
+          "arg": "--telemetry-otel",
           "default": false,
           "description": "Run OpenTelemetry, configured by the standard OTEL_* variables.",
+          "env": "TELEMETRY_OTEL",
           "title": "Otel",
           "type": "boolean"
         },
@@ -346,19 +458,23 @@
           "additionalProperties": {
             "type": "string"
           },
+          "arg": "--telemetry-tags",
           "description": "Labels on every profile, and resource attributes on every trace and metric.",
+          "env": "TELEMETRY_TAGS",
           "title": "Tags",
           "type": "object"
         }
       },
-      "title": "TelemetrySettings",
+      "title": "Telemetry",
       "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "The whole config file: the sources, the plugins under them, the libraries,\nand the process's telemetry.",
   "properties": {
     "sources": {
+      "arg": "--sources",
+      "description": "Backends, named once: where bytes come from and how to log in.",
+      "env": "KB_SOURCES",
       "items": {
         "$ref": "#/$defs/SourceConfig"
       },
@@ -366,6 +482,9 @@
       "type": "array"
     },
     "plugins": {
+      "arg": "--plugins",
+      "description": "Folders of skills, agents and prompts under a source.",
+      "env": "KB_PLUGINS",
       "items": {
         "$ref": "#/$defs/PluginConfig"
       },
@@ -373,15 +492,32 @@
       "type": "array"
     },
     "libraries": {
+      "arg": "--libraries",
+      "description": "Saved queries over plugins: the first segment of every address served.",
+      "env": "KB_LIBRARIES",
       "items": {
         "$ref": "#/$defs/LibraryConfig"
       },
       "title": "Libraries",
       "type": "array"
     },
+    "cache_dir": {
+      "arg": "--cache-dir",
+      "default": "/var/cache/mcp-kb",
+      "description": "Where a non-file:// source materialises, and where index.json lives.",
+      "env": "CACHE_DIR",
+      "format": "path",
+      "title": "Cache Dir",
+      "type": "string"
+    },
+    "serving": {
+      "$ref": "#/$defs/Serving"
+    },
     "telemetry": {
-      "$ref": "#/$defs/TelemetrySettings",
-      "description": "What the process reports: kubed-mcp's profiles, traces and metrics. Absent, every signal is off."
+      "$ref": "#/$defs/Telemetry"
+    },
+    "delivery": {
+      "$ref": "#/$defs/DeliverySettings"
     }
   },
   "title": "Config",

@@ -6,12 +6,12 @@ import sys
 
 import pytest
 from fastmcp import Client
-from kubed.mcp import Inject
+from kubed.mcp import Inject, load_config
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.app import create_app
 from kubed.mcp_kb.catalogue.uris import Catalogue
-from kubed.mcp_kb.config import Config
+from kubed.mcp_kb.config import SECTIONS, Telemetry, load
 from tests.conftest import make_config
 
 pytestmark = pytest.mark.unit
@@ -67,11 +67,14 @@ async def test_the_telemetry_section_reaches_the_server(
     """The config is validated so that the section is the field's, not an
     attribute set on the side."""
     monkeypatch.setitem(sys.modules, "pyroscope", None)
-    base = make_config(skills_dir).model_dump(mode="json", by_alias=True)
-    config = Config.model_validate(
-        {**base, "telemetry": {"profiles": "http://pyroscope.example.com:4040"}}
+    loaded = load_config(
+        sections=SECTIONS,
+        config=[
+            make_config(skills_dir),
+            Telemetry(profiles="http://pyroscope.example.com:4040"),
+        ],
     )
-    app = create_app(KnowledgeBase(config, tmp_path / "cache"))
+    app = create_app(KnowledgeBase(loaded.config, tmp_path / "cache"), loaded=loaded)
     with caplog.at_level(logging.WARNING):
         async with Client(app.server) as client:
             assert await client.list_resources()
@@ -85,3 +88,27 @@ async def test_no_telemetry_section_starts_no_signal(skills_dir, tmp_path, caplo
         async with Client(app.server) as client:
             assert await client.list_resources()
     assert not [r for r in caplog.records if "kubed-mcp[telemetry]" in r.getMessage()]
+
+
+def test_a_load_of_another_config_is_refused(skills_dir, tmp_path):
+    knowledge_base = KnowledgeBase(make_config(skills_dir), tmp_path / "cache")
+    with pytest.raises(ValueError, match="loaded="):
+        create_app(knowledge_base, loaded=load([], environ={}))
+
+
+async def test_the_boot_line_names_a_reference_never_its_value(
+    tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setenv("KB_TEST_TOKEN", "s3cret-boot")
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "sources:\n- name: dav\n  url: webdav+https://dav.example.com/kb\n"
+        "  auth:\n    username: kb\n    password: {env: KB_TEST_TOKEN}\n"
+    )
+    loaded = load(["--config-file", str(path)], environ={})
+    app = create_app(KnowledgeBase(loaded.config, tmp_path / "cache"), loaded=loaded)
+    with caplog.at_level(logging.INFO, logger="kubed.mcp.config"):
+        async with Client(app.server):
+            pass
+    line = next(r.getMessage() for r in caplog.records if r.name == "kubed.mcp.config")
+    assert "KB_TEST_TOKEN" in line and "s3cret-boot" not in line

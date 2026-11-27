@@ -15,11 +15,11 @@ cannot read resources, and they are the server's only tools.
 
 from __future__ import annotations
 
-from kubed.mcp import QuickMCP
+from kubed.mcp import LoadedConfig, QuickMCP, load_config
 
 from . import routes
 from .catalogue.uris import Catalogue
-from .config import BUILTIN_SCHEMES, SERVER_NAME
+from .config import BUILTIN_SCHEMES, SECTIONS, SERVER_NAME
 from .mcp import resources
 from .mcp.announce import AnnounceChanges
 from .mcp.instructions import ScopedInstructions
@@ -30,13 +30,31 @@ from .sources import ServedTrees
 from .spec import package_version
 
 
-def create_app(knowledge_base: KnowledgeBase) -> QuickMCP:
-    """The ``mcp-kb`` server over ``knowledge_base``, ready to ``run()``."""
+def create_app(
+    knowledge_base: KnowledgeBase, *, loaded: LoadedConfig | None = None
+) -> QuickMCP:
+    """The ``mcp-kb`` server over ``knowledge_base``, ready to ``run()``.
+
+    ``loaded`` is the load ``main`` made, whose ``serving`` section ``run()``
+    reads; it must be the load of ``knowledge_base``'s own config, or the server
+    would serve one config while kb harvests another. Without it, the server is
+    built from a load of ``knowledge_base.config`` alone, every section at its
+    default. One load builds one server, so each app takes a load of its own.
+
+    Raises:
+        ValueError: ``loaded`` is a load of another config.
+    """
     config = knowledge_base.config
+    if loaded is None:
+        loaded = load_config(sections=SECTIONS, config=config)
+    elif loaded.config is not config:
+        raise ValueError(
+            "loaded= is a load of another config: load the knowledge base's own"
+        )
     ttl = config.min_refresh_seconds
     mcp = QuickMCP(
         SERVER_NAME,
-        config=config,
+        loaded=loaded,
         header_prefix="Kb",
         version=package_version(),
         lifespan=knowledge_base.lifespan,

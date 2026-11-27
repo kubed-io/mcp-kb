@@ -89,12 +89,15 @@ file under a nested skill belongs to the nested skill.
 **SKL-13.** Before any other check, the path below `skill://` has its `.` and `..` segments
 resolved as in RFC 3986, over the whole path: the library is a segment, not an authority. A `..`
 with nothing left to pop makes the address resolve to nothing, so no address climbs past the root.
-Scope applies to the resolved address. The plugin layer resolves the dots on `resources/read`
-(GW-4), and so for its `read_resource` tool, which reads through `resources/read` (DLV-6). On
-`resources/directory/read` it passes them on as sent: kb's own directories, a library and a
-folder, resolve them by kb's rule, so a `..` at the library is dropped and the address never
-leaves the library, while a skill's directory, and a folder inside one, match exactly, so a
-dotted one is `Directory not found`. A miss is reported under the address as sent (GW-4).
+Scope applies to the resolved address. The plugin layer resolves the dots before kb sees the
+address, on `resources/read` (GW-4), and so for its `read_resource` tool, which reads through
+`resources/read` (DLV-6), on `resources/directory/read` and on `skills/get`; kb's own `uris.parse`
+resolves them again, which changes nothing. So a dotted address reads, lists and gets what its
+resolved one does, a skill's directory and a folder inside one included. The library is a
+segment, so a `..` that climbs out of one resolves to another address (`skill://grafana/../n8n` is
+`skill://n8n`), read under the request's scope like any address; only a `..` with nothing left to
+pop names nothing, and a directory read of it is `Directory not found`. A miss is reported under
+the address as sent (GW-4).
 An escaped `/` (`%2F`) anywhere in an incoming address resolves to nothing (GW-4), and
 percent-escapes are never decoded. A URI that does not start with `skill://` resolves to nothing.
 
@@ -304,10 +307,10 @@ prefix (SKL-41) and without `skill://`.
 ([config-and-sources.md](config-and-sources.md)), the read first revalidates that one file against
 the server: library files and both fallbacks alike. A request that reads skills, agents or prompts
 first revalidates every file of each live skill, and each agent and prompt file, of the plugins its
-scope admits. A
-file that moved re-reads that plugin and serves it again, every other plugin kept as it is served,
-and from the next request on a skill's files, its `_manifest`, its extension entry and the
-plugin's agents and prompts describe the new bytes: the request that re-reads still reads what it began with.
+scope admits. A file that moved re-reads that plugin and serves it again, every other plugin kept as
+it is served, and from that request on a skill's files, its `_manifest`, its extension entry and
+the plugin's agents and prompts describe the new bytes: the request that re-reads reads the new
+bytes.
 A request that arrives while a refresh is publishing re-reads nothing.
 
 **SKL-38.** A revalidated file is trusted for 2 seconds. A revalidation that fails, including a
@@ -319,9 +322,9 @@ serves follows a live re-read (SKL-37): a skill's files, its `_manifest`, its ex
 the plugin's agents and prompts. kb's own listing rows, index lines and their descriptions, and
 files added or removed upstream, follow the next refresh, except that a skill a re-read leaves
 unserved drops out of them, and comes back when it serves again (SKL-45). Only files already
-harvested are watched, served or not: a prompt file skipped as broken serves from the request after
-the one that notices its fix, and a skill or a prompt file added to a live plugin is served from the
-next refresh.
+harvested are watched, served or not: a prompt file skipped as broken serves from the request that
+notices its fix, and a skill or a prompt file added to a live plugin is served from the next
+refresh.
 
 ## Addresses behind a gateway
 

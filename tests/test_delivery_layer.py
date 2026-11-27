@@ -8,7 +8,6 @@ function is handed. The ``Client`` is FastMCP's, which tests may import.
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from fastmcp import Client
@@ -21,7 +20,9 @@ _SKILLS_ID = "io.modelcontextprotocol/skills"
 
 
 def _delivery(listed):
-    return SimpleNamespace(resources=None, listed=listed, via=None)
+    """The ``delivery`` section's values: since 0.4.0 ``listed`` is the config's
+    comma string, and ``none`` lists no plugin kind."""
+    return {"listed": ",".join(sorted(listed)) or "none"}
 
 
 def _plugin(folder: Path, skills=("a", "b"), extras=True) -> Path:
@@ -43,10 +44,11 @@ def _plugin(folder: Path, skills=("a", "b"), extras=True) -> Path:
 def _served(tmp_path: Path, delivery=None, config=True, **plugin) -> QuickMCP:
     """A ``QuickMCP("mcp-kb")`` serving one plugin at ``lib``, and a resource of its own.
 
-    ``config=True`` passes ``SimpleNamespace(delivery=delivery)``; ``False`` passes
-    no config at all, which reaches ``getattr(config, "delivery", None)`` as None.
+    ``config=True`` passes ``{"delivery": delivery}``, the section's values in
+    code (0.4.0 takes values, never an object); ``False`` passes no config at all,
+    so ``delivery`` loads at its defaults, every input None.
     """
-    kwargs = {"config": SimpleNamespace(delivery=delivery)} if config else {}
+    kwargs = {"config": {"delivery": delivery or {}}} if config else {}
     mcp = QuickMCP("mcp-kb", **kwargs)
     staging = mcp.plugin_set()
     staging.add(
@@ -69,7 +71,7 @@ async def test_the_default_lists_a_skill_md_row_per_skill(tmp_path):
 
     Observed for ``skill://lib/a/SKILL.md``: name ``lib/a/SKILL.md``, description
     ``Skill a.``, mimeType ``text/markdown``. No config is passed, so
-    kubed-mcp's ``getattr(config, "delivery", None)`` is None.
+    kubed-mcp's ``delivery`` section is at its defaults, every input None.
     """
     mcp = _served(tmp_path, config=False)
     uris = await _uris(mcp)

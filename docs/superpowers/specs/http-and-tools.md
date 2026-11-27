@@ -29,9 +29,12 @@ captured at startup.
 **HTTP-5.** Over the `stdio` transport there are no HTTP routes, no headers and no query
 parameters, so every request setting in this file takes its default.
 
-**HTTP-6.** The server binds `HOST` (default `0.0.0.0`) and `PORT` (default `8000`), chosen with
-`--host`/`--port` or those environment variables. `TRANSPORT` (`--transport`) is `http` (default)
-or `stdio`. The rest of the command line is in [config-and-sources.md](config-and-sources.md).
+**HTTP-6.** How the server runs is the config's `serving` items, each set in the file, by its
+variable or with its flag (CFG-1). `transport` (`TRANSPORT`, `--transport`) is `http` (default) or
+`stdio`, kb's narrowing of kubed-mcp's four transports: `sse` or `streamable-http` is a config
+error (CFG-7). Over `http` the server binds `host` (`HOST`, `--host`, default `0.0.0.0`) and `port`
+(`PORT`, `--port`, default `8000`). `log_level` is HTTP-39's. The rest of the config is in
+[config-and-sources.md](config-and-sources.md).
 
 ## `GET /health`
 
@@ -183,9 +186,9 @@ HTTP request without `mcp-session-id` is never sent a list-changed notification.
 **HTTP-33.** The image's entrypoint is `mcp-kb`, which serves by default; `mcp-kb schema` prints the
 config JSON Schema and exits.
 
-**HTTP-34.** The image sets `CONFIG=/etc/mcp-kb/config.yaml`, `CACHE_DIR=/var/cache/mcp-kb`,
-`TRANSPORT=http`, `HOST=0.0.0.0` and `PORT=8000`, the same defaults the command line has, and
-`EXPOSE`s `8000`.
+**HTTP-34.** The image sets `CONFIG_FILE=/etc/mcp-kb/config.yaml`, which names the config it ships
+(HTTP-37), and `CACHE_DIR=/var/cache/mcp-kb`, `TRANSPORT=http`, `HOST=0.0.0.0` and `PORT=8000`, the
+same values as their defaults, and `EXPOSE`s `8000`.
 
 **HTTP-35.** The image runs as `USER 65534`. The user MUST be numeric, because a pod with
 `runAsNonRoot: true` cannot verify a named user.
@@ -205,7 +208,8 @@ without that signal.
 read-only when the cache directory is a writable mount.
 
 **HTTP-39.** Every log line goes to stderr in one format, `<UTC time> <LEVEL> <logger>: <message>`,
-at the level set by `LOG_LEVEL` (`--log-level`, default `INFO`) for every logger in the process.
+at the level set by `serving.log_level` (`LOG_LEVEL`, `--log-level`, default `INFO`) for every
+logger in the process. `LOG_LEVEL` is read case-insensitively, so `debug` is `DEBUG`.
 
 **HTTP-40.** Per-request traffic lines (uvicorn's access log, httpx's per-request lines) are
 written only when the level is `DEBUG`.

@@ -1,31 +1,35 @@
-"""Entry point: turn CLI flags and environment into a running server.
+"""Entry point: the ``mcp-kb`` console script, from argv and the environment.
 
-Every flag has an environment fallback because the container is configured with
-env vars while a developer reaches for flags. The config file, `CONFIG`, says
-*what* to serve; these flags say *how* to run it (transport, port, cache
-directory), and the split never blurs. The one other reader of the environment
-is `EnvRef.resolve` in `config.py`, which resolves a source's credential where
-it is declared rather than passing it through a plain `str` on the way.
+Three things here are kb's own: the ``serve`` or ``schema`` word in front,
+``--help``, and the guard that stops a boot whose environment still sets the
+``CONFIG`` kb no longer reads. Every other token goes to kubed-mcp's config
+loader with the environment, which reads the file ``CONFIG_FILE`` or
+``--config-file`` names, then each item's env var, then each item's flag. The
+names are written in ``config.py``'s sections, never here, so ``--help`` and the
+wiki read them off the schema. The one other reader of the environment is
+``EnvRef.resolve`` in ``config.py``, which resolves a source's credential where
+it is declared rather than passing it through a plain ``str`` on the way.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import logging
 import os
 import sys
 import time
-from pathlib import Path
+from collections.abc import Sequence
 
 from .app import create_app
-from .config import ConfigError, load_config, schema
+from .config import ConfigError, load, schema
 from .server import KnowledgeBase
 from .sources import AccessRefused
 
-DEFAULT_CONFIG = Path("/etc/mcp-kb/config.yaml")
-DEFAULT_CACHE_DIR = Path("/var/cache/mcp-kb")
-LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+COMMANDS = ("serve", "schema")
+"""The words ``mcp-kb`` takes in front: anything else is served, every token
+passed on, so ``mcp-kb --port 9000`` serves on 9000."""
+
+LEFTOVER = "mcp-kb: CONFIG is no longer read: name the config file with CONFIG_FILE"
 
 # The loggers that arrive with a handler or a level of their own. Each is
 # emptied, reset and made to propagate, so one line format and one level reach
@@ -43,60 +47,6 @@ THIRD_PARTY_LOGGERS = (
 # call and per probe from uvicorn, a line per WebDAV request from httpx. Held
 # at WARNING below DEBUG.
 TRAFFIC_LOGGERS = ("uvicorn.access", "httpx")
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="mcp-kb",
-        description=(
-            "Serve a knowledge base of skills, prompts and agent material "
-            "over MCP."
-        ),
-    )
-    parser.add_argument(
-        "command",
-        nargs="?",
-        default="serve",
-        choices=["serve", "schema"],
-        help="serve the catalogue, or print its config JSON Schema (default: serve)",
-    )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path(os.environ.get("CONFIG", DEFAULT_CONFIG)),
-        help="config file listing the sources to serve (env: CONFIG)",
-    )
-    parser.add_argument(
-        "--cache-dir",
-        type=Path,
-        default=Path(os.environ.get("CACHE_DIR", DEFAULT_CACHE_DIR)),
-        help="directory a non-file:// source materialises into (env: CACHE_DIR)",
-    )
-    parser.add_argument(
-        "--transport",
-        default=os.environ.get("TRANSPORT", "http"),
-        choices=["stdio", "http"],
-        help="transport to serve on (env: TRANSPORT)",
-    )
-    parser.add_argument(
-        "--host",
-        default=os.environ.get("HOST", "0.0.0.0"),
-        help="bind address for http transport (env: HOST)",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.environ.get("PORT", "8000")),
-        help="port for http transport (env: PORT)",
-    )
-    parser.add_argument(
-        "--log-level",
-        type=str.upper,
-        default=os.environ.get("LOG_LEVEL", "INFO"),
-        choices=LOG_LEVELS,
-        help="the least severe log line written, for every logger (env: LOG_LEVEL)",
-    )
-    return parser
 
 
 def configure_logging(level: str) -> None:
@@ -134,29 +84,85 @@ def configure_logging(level: str) -> None:
             )
 
 
+def named_items(published: dict) -> list[tuple[str, str, str]]:
+    """``(arg, env, description)`` for each item of ``published`` with a flag.
+
+    In schema order: the root's properties first, then the properties of each
+    section a root property ``$ref``s into ``$defs``, one level down.
+    """
+    defs = published.get("$defs", {})
+    root = published.get("properties", {})
+    levels = [root]
+    for prop in root.values():
+        ref = prop.get("$ref")
+        if ref:
+            levels.append(defs[ref.rsplit("/", 1)[-1]].get("properties", {}))
+    return [
+        (prop["arg"], prop.get("env", ""), prop.get("description", ""))
+        for props in levels
+        for prop in props.values()
+        if "arg" in prop
+    ]
+
+
+def split_command(argv: Sequence[str]) -> tuple[str, list[str]]:
+    """The command and the tokens after it: a first token in ``COMMANDS`` is the
+    command, and anything else is ``serve`` with every token kept."""
+    tokens = list(argv)
+    if tokens and tokens[0] in COMMANDS:
+        return tokens[0], tokens[1:]
+    return "serve", tokens
+
+
+def help_text() -> str:
+    """The usage, the config file's flag and one line per item, from the schema."""
+    lines = [
+        "usage: mcp-kb [serve|schema] [--config-file PATH] [--<item> VALUE ...]",
+        "  --config-file PATH  (env CONFIG_FILE)  "
+        "The YAML config file; none is read unless named.",
+    ]
+    lines += [
+        f"  {arg}  (env {env})  {description}"
+        for arg, env, description in named_items(schema())
+    ]
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the ``mcp-kb`` console script."""
-    args = build_parser().parse_args(argv)
-    if args.command == "schema":
+    tokens = sys.argv[1:] if argv is None else list(argv)
+    ahead = tokens[: tokens.index("--")] if "--" in tokens else tokens
+    if "-h" in ahead or "--help" in ahead:
+        print(help_text())
+        return
+    command, rest = split_command(tokens)
+    if command == "schema":
         print(json.dumps(schema(), indent=2))
         return
-    configure_logging(args.log_level)
+    if os.environ.get("CONFIG", "").strip():
+        # A deployment written for the old name would otherwise serve the
+        # image's own example config through its CONFIG_FILE, and say nothing.
+        print(LEFTOVER, file=sys.stderr)
+        raise SystemExit(2)
     try:
-        config = load_config(args.config)
+        loaded = load(rest)
     except ConfigError as exc:
         # A bad config must fail loudly at boot, not silently serve nothing.
         print(f"mcp-kb: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
+    config = loaded.config
+    configure_logging(config.serving.log_level)
     try:
-        knowledge_base = KnowledgeBase(config, args.cache_dir)
+        knowledge_base = KnowledgeBase(config, config.cache_dir)
     except AccessRefused as exc:
         # Exit rather than serve without it: see KnowledgeBase._cold_start.
         print(f"mcp-kb: {exc}", file=sys.stderr)
         raise SystemExit(3) from exc
-    # The parsed flags are the Serving run() reads: transport, host and port.
-    # uvicorn is given no log config of its own, so its lines go through the
-    # handler configure_logging installed and read like the rest.
-    create_app(knowledge_base).run(args, uvicorn_config={"log_config": None})
+    # run() reads the loaded config's serving section: transport, host, port
+    # and the log level. uvicorn is given no log config of its own, so its
+    # lines go through the handler configure_logging installed and read like
+    # the rest.
+    create_app(knowledge_base, loaded=loaded).run(uvicorn_config={"log_config": None})
 
 
 if __name__ == "__main__":

@@ -407,16 +407,24 @@ def test_nothing_inherits_the_build_tooling():
     assert "FROM builder" not in body
 
 
-def test_the_env_defaults_match_mains():
-    """The image's ``CONFIG``/``CACHE_DIR`` must be the same paths main.py falls
-    back to when the env vars are unset, or the two silently drift apart."""
-    from kubed.mcp_kb.main import DEFAULT_CACHE_DIR, DEFAULT_CONFIG
+def test_the_image_names_the_config_file_and_matches_the_defaults():
+    """The image names its config file with ``CONFIG_FILE``, never the ``CONFIG``
+    kb no longer reads, and the rest of its env are the config's own defaults,
+    or the two silently drift apart."""
+    from kubed.mcp_kb.config import Config, Serving
 
     runner = "\n".join(dockerfile_stages()["runner"])
-    config_match = re.search(r"\bCONFIG=(\S+?)\s*\\?$", runner, re.MULTILINE)
-    cache_match = re.search(r"\bCACHE_DIR=(\S+?)\s*\\?$", runner, re.MULTILINE)
-    assert config_match and pathlib.Path(config_match.group(1)) == DEFAULT_CONFIG
-    assert cache_match and pathlib.Path(cache_match.group(1)) == DEFAULT_CACHE_DIR
+    env = dict(re.findall(r"\b([A-Z_]+)=(\S+?)\s*\\?$", runner, re.MULTILINE))
+    assert "CONFIG" not in env
+    assert env["CONFIG_FILE"] == "/etc/mcp-kb/config.yaml"
+    assert f"COPY examples/config.yaml {env['CONFIG_FILE']}" in runner
+    assert pathlib.Path(env["CACHE_DIR"]) == Config.model_fields["cache_dir"].default
+    serving = Serving()
+    assert (env["TRANSPORT"], env["HOST"], int(env["PORT"])) == (
+        serving.transport,
+        serving.host,
+        serving.port,
+    )
 
 
 def test_the_copied_venv_is_proved_to_work_at_build_time():

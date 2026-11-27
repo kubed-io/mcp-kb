@@ -12,7 +12,7 @@ import sys
 import pytest
 
 from kubed.mcp_kb.config import schema
-from kubed.mcp_kb.main import build_parser
+from kubed.mcp_kb.main import named_items
 from kubed.mcp_kb.mcp import request, tools
 
 pytestmark = pytest.mark.unit
@@ -151,11 +151,9 @@ def test_installing_documents_every_url_parameter_and_header():
 
 @needs_wiki
 def test_deployment_documents_every_environment_variable():
-    """Read off the parser, which is the one place a variable is declared."""
+    """Read off the schema, which is where every name is written: each item's
+    env var, and kubed-mcp's own ``CONFIG_FILE``."""
     page = (WIKI / "Deployment.md").read_text()
-    declared = set()
-    for action in build_parser()._actions:
-        declared |= set(re.findall(r"\(env: (\w+)\)", action.help or ""))
-    assert declared, "no (env: …) fallbacks found — has main.py's help changed?"
+    declared = {"CONFIG_FILE", *(env for _, env, _ in named_items(schema()))}
     missing = [name for name in sorted(declared) if f"`{name}`" not in page]
     assert not missing, "no Deployment.md row for: " + ", ".join(missing)

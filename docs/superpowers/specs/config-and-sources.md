@@ -8,26 +8,62 @@ is [http-and-tools.md](http-and-tools.md).
 
 ## Running it
 
-**CFG-1.** A flag wins over its variable, which wins over the default.
+**CFG-1.** Every config item is set by, from lowest to highest: its default, the config file,
+its environment variable, its flag. A mapping merges key by key; a list or a value replaces what is
+below it whole. A blank value is unset.
 
-| Flag | Env | Default |
-|---|---|---|
-| `--config` | `CONFIG` | `/etc/mcp-kb/config.yaml` |
-| `--cache-dir` | `CACHE_DIR` | `/var/cache/mcp-kb` |
+| Item | Env | Flag | Default |
+|---|---|---|---|
+| the file | `CONFIG_FILE` | `--config-file` | none (the image: `/etc/mcp-kb/config.yaml`) |
+| `sources` | `KB_SOURCES` | `--sources` | `[]` |
+| `plugins` | `KB_PLUGINS` | `--plugins` | `[]` |
+| `libraries` | `KB_LIBRARIES` | `--libraries` | `[]` |
+| `cache_dir` | `CACHE_DIR` | `--cache-dir` | `/var/cache/mcp-kb` |
+| `serving.transport` | `TRANSPORT` | `--transport` | `http` (`stdio` or `http`) |
+| `serving.host` | `HOST` | `--host` | `0.0.0.0` |
+| `serving.port` | `PORT` | `--port` | `8000` |
+| `serving.log_level` | `LOG_LEVEL` | `--log-level` | `INFO` |
+| `telemetry.profiles` | `TELEMETRY_PROFILES` | `--telemetry-profiles` | none |
+| `telemetry.profile_cpu` | `TELEMETRY_PROFILE_CPU` | `--telemetry-profile-cpu` | `true` |
+| `telemetry.profile_memory` | `TELEMETRY_PROFILE_MEMORY` | `--telemetry-profile-memory` | `true` |
+| `telemetry.otel` | `TELEMETRY_OTEL` | `--telemetry-otel` | `false` |
+| `telemetry.tags` | `TELEMETRY_TAGS` | `--telemetry-tags` | `{}` |
+| `delivery.resources` | `DELIVERY_RESOURCES` | `--delivery-resources` | none |
+| `delivery.listed` | `DELIVERY_LISTED` | `--delivery-listed` | none |
+| `delivery.via` | `DELIVERY_VIA` | `--delivery-via` | none |
 
-**CFG-2.** The config file says what to serve, and in its `telemetry` section what the process
-reports; flags and environment say how to run. No setting exists in both. The `OTEL_*`, `POD_NAME`
-and `POD_NAMESPACE` variables are read by kubed-mcp's telemetry and the OpenTelemetry SDK, never by
-kb, and are no kb setting. Transport, host and port are in [http-and-tools.md](http-and-tools.md).
+**CFG-2.** There is one config. What to serve, how to run, what the process reports and the
+delivery defaults are all items of it, and each one can be set in the file, an env var or a flag.
+The `OTEL_*`, `POD_NAME` and `POD_NAMESPACE` variables are read by kubed-mcp's telemetry and the
+OpenTelemetry SDK, never by kb, and are no kb setting. What the `serving` items do is in
+[http-and-tools.md](http-and-tools.md).
 
 **CFG-3.** `mcp-kb schema` prints the config's JSON Schema and exits 0 without reading a config.
-`config.schema.json` in the repository is the same document.
+It is the whole config's schema, each item with its `env` and `arg`. `config.schema.json` in the
+repository is the same document.
+
+**CFG-16.** The file is named by `--config-file`, else `CONFIG_FILE`, and with neither no file is
+read. A named file that does not exist, is not a file, is not YAML or is not a mapping exits 2
+naming its path (CFG-7).
+
+**CFG-17.** `KB_SOURCES`, `KB_PLUGINS` and `KB_LIBRARIES`, and their flags, take a JSON array.
+`TELEMETRY_TAGS` and `--telemetry-tags` take a JSON object.
+
+**CFG-18.** When serving starts, the server logs one line on `kubed.mcp.config` naming each item
+not at its default, its value and where it came from: `config: <item>=<value> (<source>), …`, the
+source `file <path>`, `env <NAME>` or `arg <flag>`, or `config: all defaults`. A secret prints as
+`***`. A credential is an `{env: NAME}` reference (CFG-9), so the line names its variable, never
+its value.
+
+**CFG-20.** `mcp-kb serve` with `CONFIG` set exits 2 with `mcp-kb: CONFIG is no longer read: name
+the config file with CONFIG_FILE`. `--config` is an unknown flag (CFG-7).
 
 ## The config file
 
-**CFG-4.** The file is YAML with three optional top-level lists, `sources`, `plugins` and
-`libraries`, and an optional `telemetry` mapping (CFG-15). An empty file is a valid config with all
-three lists empty and every telemetry signal off.
+**CFG-4.** The file is YAML with three optional top-level lists `sources`, `plugins` and
+`libraries`, a `cache_dir`, and the mappings `serving`, `telemetry` (CFG-15) and `delivery`
+(CFG-19). An empty file, or none, is a valid config with all three lists empty, kb's run defaults,
+and every telemetry signal off.
 
 ```yaml
 sources:
@@ -47,9 +83,12 @@ libraries:
 and is unique within its own list.
 
 **CFG-7.** The whole config is validated before anything is fetched. A file that cannot be read,
-is not YAML or fails validation exits with code 2 and `mcp-kb: <reason>` on stderr.
+is not YAML or fails validation exits with code 2 and `mcp-kb: the config did not load:` on
+stderr, then one line per error, `<path> (<source>): <reason>`. A bad env var or flag, an unknown
+flag, and a positional argument other than `serve` or `schema` are config errors too.
 
-**CFG-8.** A validation error that quotes a URL has its `user:password@` masked as `***@`.
+**CFG-8.** No config error quotes a value it was given. One of kb's own messages that names an
+address has its `user:password@` masked as `***@`.
 
 **CFG-14.** A plugin's `skills` item is a folder, never a glob. Loading the config refuses an item
 holding `*`, `?` or `[` with `skills item '<item>' is a folder, not a glob` (PLG-9).
@@ -77,12 +116,14 @@ load time.
 
 ## Telemetry
 
-**CFG-15.** The optional `telemetry` mapping is kubed-mcp's `TelemetrySettings`, which the server
-kubed-mcp builds reads off the config: `profiles` (a Pyroscope address; setting it turns profiles
-on), `profile_cpu` and `profile_memory` (both `true` by default), `otel` (`false` by default;
+**CFG-15.** The optional `telemetry` mapping is kubed-mcp's built-in `telemetry` section, its items
+set by their `TELEMETRY_*` variables and `--telemetry-*` flags (CFG-1), which the server kubed-mcp
+builds reads off the config: `profiles` (a Pyroscope address; setting it turns profiles on),
+`profile_cpu` and `profile_memory` (both `true` by default), `otel` (`false` by default;
 OpenTelemetry traces and call metrics, configured by the standard `OTEL_*` variables) and `tags` (a
-string map of labels). Absent, every signal is off. An unknown key in it is a config error (CFG-5),
-and so is a `profiles` address carrying userinfo, as a source URL is (SRC-3). Profiles, traces and
+string map of labels). Absent, every signal is off. An unknown key in it is a config error (CFG-5).
+kb adds only the `profiles` guard: an address carrying userinfo is a config error, as a source URL
+is (SRC-3), and the error does not quote it. Profiles, traces and
 metrics carry the service name `OTEL_SERVICE_NAME`, else `mcp-kb`. Metrics leave as
 `OTEL_METRICS_EXPORTER` says: pushed over OTLP, or scraped from the exporter's own port with
 `prometheus`. The server adds no metrics route.
@@ -92,6 +133,17 @@ telemetry:
   profiles: http://pyroscope.example.com:4040
   otel: true
   tags: {team: platform}
+```
+
+## Delivery
+
+**CFG-19.** The optional `delivery` mapping is kubed-mcp's defaults for the delivery inputs:
+`resources`, `listed` and `via`, each set by its `DELIVERY_*` variable and `--delivery-*` flag
+(CFG-1), and none of them set by default. A request's own header or query parameter wins over it.
+
+```yaml
+delivery:
+  via: extension
 ```
 
 ## Sources
@@ -212,8 +264,7 @@ library file is read off disk each time.
 revalidates that file, and each request that reads skills, agents or prompts first revalidates
 every file of the live skills, and each agent and prompt file, of the plugins its scope admits
 (SKL-37): one request for its ETag, and a download only if the ETag differs from the local copy's.
-A skill's, an agent's or a prompt's edit found that way is served from the next request on, not to
-the request that found it.
+A skill's, an agent's or a prompt's edit found that way is served to the request that found it.
 
 **SRC-22.** A download is staged in `<cache>/src/<slug>/.work/` and renamed over the local copy in
 one step, so a reader sees one whole version of the file.
@@ -279,8 +330,9 @@ fingerprints like a plain tree.
 **SRC-35.** The catalogue is built before the server binds its port.
 
 **SRC-36.** Boot reuses `index.json` only when the server reads its format version and its config
-hash equals that of the parsed config, so formatting and comments do not count. The hash leaves
-`telemetry` out, so editing that section costs no refetch. The server writes version 12. It also
+hash equals that of the parsed config, so formatting and comments do not count. The hash covers
+`sources`, `plugins` and `libraries` alone, so editing `serving`, `cache_dir`, `telemetry` or
+`delivery` costs no refetch. The server writes version 12. It also
 reads version 11, for its `fetches` alone, ignoring its `plugins`, until every deployment has
 written 12.
 
@@ -303,7 +355,7 @@ else.
 | Exit code | Cause |
 |---|---|
 | 0 | `mcp-kb schema`, or a normal stop |
-| 2 | the config is unreadable, not YAML or invalid; or a bad command-line argument |
+| 2 | the config is unreadable, not YAML or invalid; or a bad command-line argument, or `CONFIG` is set |
 | 3 | a fetch built at boot had its credentials refused |
 
 ## Refresh

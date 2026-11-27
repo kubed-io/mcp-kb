@@ -154,7 +154,7 @@ sed "s#@ROOT@#$PWD#g" tests/fixtures/live/config.yaml > "$LIVE/config.yaml"
 cp -r tests/fixtures/live/dav "$LIVE/dav"
 python -m tests.webdav_server --root "$LIVE/dav" --port 8090 & DAV=$!
 for _ in $(seq 30); do curl -s -o /dev/null http://127.0.0.1:8090/kb/ && break; sleep 1; done
-LIVE_DAV_PASSWORD=s3cret-app-password mcp-kb --config "$LIVE/config.yaml" --cache-dir "$LIVE/cache" --host 127.0.0.1 --port 8000 & KB=$!
+LIVE_DAV_PASSWORD=s3cret-app-password mcp-kb --config-file "$LIVE/config.yaml" --cache-dir "$LIVE/cache" --host 127.0.0.1 --port 8000 & KB=$!
 for _ in $(seq 30); do curl -sf http://127.0.0.1:8000/health >/dev/null && break; sleep 1; done
 pytest -m live --kb-url http://127.0.0.1:8000 --kb-dav-dir="$LIVE/dav"
 kill "$KB" "$DAV"; rm -rf "$LIVE"

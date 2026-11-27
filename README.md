@@ -161,17 +161,23 @@ For custom config mounts, native Python setup on Windows or POSIX, and container
 
 ## ⚙️ Configuration
 
-Every flag has an environment fallback: containers are configured with env vars, developers reach for flags. These say **how** to run; the config file says **what** to serve.
+There is one config. Every row below after the first is an item of it, and each can be set in the config file too: containers are configured with env vars, developers reach for flags. A flag beats its env var, which beats the file, which beats the default. `mcp-kb --help` lists them all.
 
 | Env | Flag | Default | Notes |
 |---|---|---|---|
-| `CONFIG` | `--config` | `/etc/mcp-kb/config.yaml` | The config file listing the sources to serve |
+| `CONFIG_FILE` | `--config-file` | none (the image: `/etc/mcp-kb/config.yaml`) | The YAML config file; none is read unless named |
+| `KB_SOURCES` | `--sources` | `[]` | The config's `sources`, as JSON |
+| `KB_PLUGINS` | `--plugins` | `[]` | The config's `plugins`, as JSON |
+| `KB_LIBRARIES` | `--libraries` | `[]` | The config's `libraries`, as JSON |
 | `CACHE_DIR` | `--cache-dir` | `/var/cache/mcp-kb` | Where a non-`file://` source materialises, and where `index.json` lives |
 | `TRANSPORT` | `--transport` | `http` | `http` or `stdio` |
 | `HOST` | `--host` | `0.0.0.0` | Bind address, http only |
 | `PORT` | `--port` | `8000` | Port, http only |
+| `LOG_LEVEL` | `--log-level` | `INFO` | The level for every logger in the process |
+| `TELEMETRY_*` | `--telemetry-*` | kubed-mcp's | The `telemetry` section: profiles, traces and metrics |
+| `DELIVERY_*` | `--delivery-*` | none | The `delivery` section: the defaults for `resources`, `listed` and `via` |
 
-Profiles to Pyroscope and OpenTelemetry traces and metrics are switched on in the config file's `telemetry` section (`profiles: http://pyroscope.example.com:4040`, `otel: true`), with metrics pushed over OTLP or scraped from the exporter's own port with `OTEL_METRICS_EXPORTER=prometheus`. The image ships the packages, and a pip install needs `kubed-mcp-kb[telemetry]`.
+Profiles to Pyroscope and OpenTelemetry traces and metrics are switched on in the `telemetry` section (`profiles: http://pyroscope.example.com:4040`, `otel: true`, or `TELEMETRY_PROFILES` and `TELEMETRY_OTEL=true`), with metrics pushed over OTLP or scraped from the exporter's own port with `OTEL_METRICS_EXPORTER=prometheus`. The image ships the packages, and a pip install needs `kubed-mcp-kb[telemetry]`.
 
 Per request, on the MCP URL — each with a header form that beats it:
 

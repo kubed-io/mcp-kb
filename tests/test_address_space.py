@@ -411,14 +411,19 @@ async def _directory(url, uri):
     return answer["resources"]
 
 
-async def test_a_directory_read_drops_a_dot_segment_at_the_library(url):
-    """kubed-mcp passes dots through for ``resources/directory/read`` and kb
-    resolves them by its own rule: a `..` at the library is dropped, so the
-    address never leaves it."""
+async def test_a_directory_read_that_pops_past_the_root_names_nothing(url):
+    """Since kubed-mcp 0.4.1 it resolves the dots of a
+    ``resources/directory/read`` itself, as it does a read's (SKL-13): a `..`
+    that stays inside the library lists its folder, and one with nothing left
+    to pop, past ``skill://``, names nothing."""
+    from kubed.mcp.protocol import MCPError
+
     plain = await _directory(url, "skill://grafana")
     assert plain
-    assert await _directory(url, "skill://grafana/grafana-k6/../..") == plain
-    assert await _directory(url, "skill://grafana/../../..") == plain
+    assert await _directory(url, "skill://grafana/grafana-k6/..") == plain
+    for climbs in ("skill://grafana/grafana-k6/../..", "skill://grafana/../../.."):
+        with pytest.raises(MCPError, match="Directory not found"):
+            await _directory(url, climbs)
 
 
 async def test_a_dot_segment_read_out_of_scope_reads_as_a_missing_one(url):

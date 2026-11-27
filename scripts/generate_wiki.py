@@ -4,7 +4,7 @@
 Three pages describe things the code defines exactly once, and a hand-written
 copy of any of them would be wrong within a month:
 
-    Configuration.md   every field of every config model, from config.schema()
+    Configuration.md   every item of the composed config, from config.schema()
     Tools.md           the two resource tools, from a live server's tool list
     Endpoints.md       the HTTP surface, from spec.build_spec()
 
@@ -63,10 +63,11 @@ SEPARATOR = "\n\n"
 
 FOOTER_LINKS = "[Home](Home) · [Installing](Installing) · [Deployment](Deployment)"
 
-# The config models, in the order a reader meets them: the file itself, then
-# its three lists, then the selector a library may carry, then the two small
-# things a source points at, then the telemetry section, which is kubed-mcp's.
-# `Config` is the schema's root; the rest are its `$defs`.
+# The config models, in the order a reader meets them: the root, then its three
+# lists, then the selector a library may carry, then the two small things a
+# source points at, then the sections, which are kubed-mcp's: serving and
+# telemetry as kb changes them, and delivery as it is. `Config` is the schema's
+# root; the rest are its `$defs`.
 MODELS = [
     "Config",
     "SourceConfig",
@@ -75,7 +76,9 @@ MODELS = [
     "Selector",
     "BasicAuth",
     "EnvRef",
-    "TelemetrySettings",
+    "Serving",
+    "Telemetry",
+    "DeliverySettings",
 ]
 
 
@@ -188,40 +191,58 @@ def default_of(field: dict) -> str:
 def notes_of(field: dict) -> str:
     """What the schema constrains this field to, beyond its type.
 
-    pydantic carries no per-field descriptions in this config model — the prose
-    is in each model's docstring, printed above its table — so the column would
-    be empty. The constraints are the part a table can say better than prose:
-    a `refresh` pattern and a `cache` enum are exactly what someone writing the
-    file gets wrong.
+    A field's own description, where the model gives one (the items carry
+    `doc=`), leads; the rest of the prose is in each model's docstring, printed
+    above its table. The constraints are the part a table can say better than
+    prose: a `refresh` pattern and a `cache` enum are exactly what someone
+    writing the file gets wrong.
     """
     described = clean(field.get("description"))
-    parts = [described] if described else []
+    parts = []
     for branch in [field, *(field.get("anyOf") or [])]:
         if "enum" in branch:
             parts.append("one of " + ", ".join(f"`{v}`" for v in branch["enum"]))
         if "pattern" in branch:
             parts.append(f"matches `{branch['pattern']}`")
+    if described and parts:
+        # The description is a sentence of its own, so each constraint after
+        # it starts one, and the description's full stop is not doubled.
+        parts = [described.rstrip("."), *(p[:1].upper() + p[1:] for p in parts)]
+    elif described:
+        parts = [described]
     return ". ".join(parts)
 
 
+def named(field: dict, key: str) -> str:
+    """The env var or flag that sets a field, or an em dash when none does."""
+    return f"`{field[key]}`" if key in field else "—"
+
+
 def fields(model: dict) -> str:
+    """A model's fields as a table, with an Env and a Flag column after the
+    default when any of its fields can be set by name."""
     props = model.get("properties") or {}
     if not props:
         return "_No fields._"
     required = set(model.get("required") or [])
+    by_name = any("env" in f or "arg" in f for f in props.values())
     rows = []
     for name, field in props.items():
         mark = "**yes**" if name in required else "no"
+        names = [named(field, "env"), named(field, "arg")] if by_name else []
         rows.append(
             [
                 f"`{name}`",
                 type_of(field, link=True),
                 mark,
                 default_of(field),
+                *names,
                 notes_of(field),
             ]
         )
-    head = ["Field", "Type", "Required", "Default", "Notes"]
+    head = ["Field", "Type", "Required", "Default"]
+    head += ["Env", "Flag"] if by_name else []
+    head += ["Notes"]
     if not any(row[-1] for row in rows):
         return table([row[:-1] for row in rows], head[:-1])
     return table(rows, head)
@@ -255,13 +276,16 @@ def banner(source: str, page: str) -> str:
 
 
 def configuration_page() -> str:
-    """Every config model, from `Config.model_json_schema()`."""
+    """Every config model, from `config.schema()`: the composed config."""
     root = schema()
     defs = root.get("$defs", {})
     sections = []
     for name in MODELS:
         model = root if name == "Config" else defs[name]
         description = clean(model.get("description"))
+        if name == "Config" and not description:
+            # The composed root is a model kubed-mcp makes, with no docstring.
+            description = clean(Config.__doc__)
         sections.append(section(name, description, fields(model)))
 
     missing = sorted(set(defs) - set(MODELS))
@@ -278,11 +302,11 @@ def configuration_page() -> str:
 
 # Configuration
 
-The config file says **what** to serve. Environment variables and flags say
-**how** to run — transport, port, cache directory — and the two never overlap;
-those are in [Deployment](Deployment). A key this page does not list is an
-error rather than a value quietly ignored, because a config that serves nothing
-is the worst failure a config file has.
+Every item below can be set in the config file, from its environment variable
+or with its flag; a flag beats the variable, which beats the file, which beats
+the default. A key this page does not list is an error rather than a value
+quietly ignored, because a config that serves nothing is the worst failure a
+config file has.
 
 `mcp-kb schema` prints this as JSON Schema, and `config.schema.json` in the
 repository is the same document, so an editor with

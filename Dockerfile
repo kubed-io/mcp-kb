@@ -113,7 +113,7 @@ RUN python -c "import pyroscope, opentelemetry.sdk; from kubed.mcp_kb.server imp
 RUN mkdir -p /var/cache/mcp-kb && chown 65534:65534 /var/cache/mcp-kb
 VOLUME /var/cache/mcp-kb
 
-ENV CONFIG=/etc/mcp-kb/config.yaml \
+ENV CONFIG_FILE=/etc/mcp-kb/config.yaml \
     CACHE_DIR=/var/cache/mcp-kb \
     TRANSPORT=http \
     HOST=0.0.0.0 \

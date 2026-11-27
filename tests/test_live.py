@@ -120,22 +120,23 @@ def _knowledge_base(webdav, tmp_path, cache="live"):
 def test_an_edit_upstream_is_visible_on_the_next_read_without_a_refresh(
     webdav, tmp_path
 ):
-    """One request late (N6): the read that revalidates re-adds the plugin and
-    still serves the copy it pinned; the read after it serves the edit."""
+    """SKL-37: the read that revalidates re-adds the plugin and serves the edit
+    itself, its pin included (N6)."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     assert "first" in read_served(knowledge_base, URI)
 
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
 
-    assert "first" in read_served(knowledge_base, URI), "N6: the re-adding read"
-    assert "edited in nextcloud" in read_served(knowledge_base, URI)
+    assert "edited in nextcloud" in read_served(knowledge_base, URI), (
+        "N6: the re-adding read"
+    )
     assert knowledge_base.generation == 0, "no refresh happened; the read did the work"
 
 
-def test_the_rereading_read_builds_the_set_it_pinned(webdav, tmp_path):
+def test_the_rereading_read_builds_the_set_it_reread(webdav, tmp_path):
     """N6 and MD-57: the read whose view re-reads a live skill FastMCP now
-    refuses still builds the set it pinned, against that set's state, so it
-    serves the old copy; the read after it serves nothing at the skill."""
+    refuses builds the set the re-read served, against that set's state, so it
+    serves nothing at the skill, and nor does a read after it."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     # Served, and never read: a read now would keep a build of the set, which
     # the re-reading read would then share instead of making its own.
@@ -144,7 +145,7 @@ def test_the_rereading_read_builds_the_set_it_pinned(webdav, tmp_path):
 
     webdav.write("skills/x/SKILL.md", "---\nname: x\ndescription: ''\n---\nBody.\n")
 
-    assert "first" in (read_served(knowledge_base, URI) or ""), "N6: the re-adding read"
+    assert read_served(knowledge_base, URI) is None, "N6: the re-adding read"
     assert read_served(knowledge_base, URI) is None, "MD-57: x no longer builds"
 
 
@@ -167,15 +168,18 @@ def _skill_site(serving, view_key=None):
 
 
 def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
-    webdav, tmp_path, monkeypatch
+    webdav, tmp_path
 ):
     """A refresh publishing from another thread while a build is in flight: the
     build's rewriter reads the state its request's view pinned, not the new one;
     a build no view pinned reads what is published now (N13).
 
-    The refresh lands inside an ``agents/get``, after its view pinned: that
-    request answers from its own generation, kb's ``_meta`` key included, and
-    the next one from the new generation (AGT-17)."""
+    The refresh lands inside an ``agents/get``'s build, after its view and
+    kubed-mcp both pinned: that request answers from its own generation, kb's
+    ``_meta`` key included, and the next one from the new generation (AGT-17).
+    Since kubed-mcp 0.4.2 it takes its state after the view, so a refresh inside
+    the view would land before both pins; the build's first rewrite is where
+    one lands after them."""
     import contextvars
     from concurrent.futures import ThreadPoolExecutor
     from dataclasses import replace
@@ -203,19 +207,19 @@ def test_a_build_pinned_before_a_refresh_publishes_reads_its_own_state(
     # x renamed y: x's folder now holds a hidden file, so x no longer serves.
     webdav.write("skills/x/.draft.md", "draft\n")
     webdav.skill("y", "renamed")
-    reread = serving._reread_live
     refreshed: list[list[str]] = []
 
-    def refresh_inside_the_view(scope):
+    def refresh_inside_the_build(site, text):
         # The plugin layer has taken its state, and kb's view its published
-        # one: a refresh publishing from another thread now lands after the pin.
-        reread(scope)
+        # one: a refresh publishing from another thread now lands after both.
         if not refreshed:
             with ThreadPoolExecutor(1) as pool:
                 done = pool.submit(knowledge_base.refresh, force=True)
                 refreshed.append(done.result())
+        return text
 
-    monkeypatch.setattr(serving, "_reread_live", refresh_inside_the_view)
+    # After kb's own rewriter, as a build calls them in order.
+    serving._mcp.add_rewriter(refresh_inside_the_build)
 
     async def get_twice(client):
         first = await ext_request(client, "agents/get", name="notes_a")
@@ -283,14 +287,13 @@ def test_a_build_pinned_before_a_serve_that_raises_reads_its_own_generation(
 
 def test_an_edit_upstream_fastmcp_refuses_unlists_the_skill(webdav, tmp_path):
     """MD-57 for a live skill: once it no longer builds, nothing names it --
-    from the read after the one that re-adds its plugin (N6)."""
+    from the read that re-adds its plugin on (N6)."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     assert "skill://notes/x/SKILL.md" in read_served(knowledge_base, "skill://notes/_index.md")
 
     webdav.write("skills/x/SKILL.md", "---\nname: x\ndescription: ''\n---\nBody.\n")
 
-    assert "first" in read_served(knowledge_base, URI), "N6: the re-adding read"
-    assert read_served(knowledge_base, URI) is None
+    assert read_served(knowledge_base, URI) is None, "N6: the re-adding read"
     index = read_served(knowledge_base, "skill://notes/_index.md")
     assert index is None or "skill://notes/x" not in index
     assert knowledge_base.generation == 0, "the read did it, not a refresh"
@@ -299,15 +302,14 @@ def test_an_edit_upstream_fastmcp_refuses_unlists_the_skill(webdav, tmp_path):
 def test_a_skill_a_live_edit_breaks_is_logged_once(webdav, tmp_path, caplog):
     """K6 D5: a skill a live re-read newly skips is a ``skipped`` row, and the
     re-read logs it once, by kb, as a refresh would; a refresh after it does
-    not say it again. Read twice (N6)."""
+    not say it again. The read that re-reads is the one that skips it (N6)."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     assert "first" in read_served(knowledge_base, URI)
     reason = "description must contain 1-1024 characters"
 
     with caplog.at_level(logging.WARNING):
         webdav.write("skills/x/SKILL.md", "---\nname: x\ndescription: ''\n---\nBody.\n")
-        assert "first" in read_served(knowledge_base, URI), "N6: the re-adding read"
-        assert read_served(knowledge_base, URI) is None
+        assert read_served(knowledge_base, URI) is None, "N6: the re-adding read"
         knowledge_base.refresh(force=True)
 
     assert knowledge_base.generation == 1
@@ -332,9 +334,11 @@ async def _rendered(client, name, **arguments) -> str:
     return "".join(m.content.text for m in got.messages)
 
 
-async def test_a_live_prompt_edit_serves_from_the_next_request(webdav, tmp_path):
-    """PRM-58, PRM-59: the request that notices an edit still reads the old
-    build; the next one reads the edit, with its arguments."""
+async def test_a_live_prompt_edit_serves_from_the_request_that_notices_it(
+    webdav, tmp_path
+):
+    """PRM-58, PRM-59: the request that notices an edit re-reads it and serves
+    the edit, with its arguments."""
     webdav.write("prompts/p.md", PROMPT.format(body="the first body"))
     kb = _knowledge_base(webdav, tmp_path)
     async with Client(server_of(kb)) as client:
@@ -342,8 +346,7 @@ async def test_a_live_prompt_edit_serves_from_the_next_request(webdav, tmp_path)
         webdav.write(
             "prompts/p.md", ARGUED.format(body="the second, longer body {{ who }}")
         )
-        assert "the first body" in await _rendered(client, "notes_p")  # noticed here
-        assert "the second, longer body you" in await _rendered(
+        assert "the second, longer body you" in await _rendered(  # noticed here
             client, "notes_p", who="you"
         )
         (listed,) = [p for p in await client.list_prompts() if p.name == "notes_p"]
@@ -368,7 +371,7 @@ async def _keeps_the_last_good_build(webdav, tmp_path, caplog, broken, reason):
         webdav.write(
             "prompts/p.md", PROMPT.format(body="the third body, longest of all")
         )
-        assert "the first body" in await _rendered(client, "notes_p")  # noticed here
+        assert "the third body" in await _rendered(client, "notes_p")  # noticed here
         assert "the third body" in await _rendered(client, "notes_p")
 
 
@@ -402,7 +405,7 @@ def test_a_prompt_broken_by_a_refresh_does_not_block_a_live_skill_edit(
 ):
     """PRM-60: a refresh that finds the plugin's only prompt broken adds the
     plugin with no prompt read, so a later re-read has no prompt to vet, and a
-    skill's edit serves from the next request."""
+    skill's edit serves from the request that re-reads it."""
     webdav.write("prompts/p.md", PROMPT.format(body="the first body"))
     kb = _knowledge_base(webdav, tmp_path)
     assert "first" in read_served(kb, URI)
@@ -411,8 +414,7 @@ def test_a_prompt_broken_by_a_refresh_does_not_block_a_live_skill_edit(
     assert [p.name for p in kb.prompts] == []
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
     with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
-        assert "first" in read_served(kb, URI), "N6: the re-adding read"
-        assert "edited in nextcloud" in read_served(kb, URI)
+        assert "edited in nextcloud" in read_served(kb, URI), "N6: the re-adding read"
     assert not [r for r in caplog.records if "not read again" in r.getMessage()]
 
 
@@ -450,8 +452,7 @@ def test_a_broken_edit_to_a_file_that_lost_its_name_does_not_block_a_reread(
     webdav.write("prompts/b/p.md", "no frontmatter here, and longer than before\n")
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
     with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb"):
-        assert "first" in read_served(kb, URI), "N6: the re-adding read"
-        assert "edited in nextcloud" in read_served(kb, URI)
+        assert "edited in nextcloud" in read_served(kb, URI), "N6: the re-adding read"
     assert not [r for r in caplog.records if "not read again" in r.getMessage()]
 
 
@@ -463,8 +464,13 @@ def test_a_manifest_is_priced_against_the_server_before_it_is_served(
 ):
     """A size and a hash are claims about bytes. Served without revalidating,
     they describe the copy on disk and the very next read serves something
-    else."""
+    else.
+
+    The one read that re-adds the plugin prices the edit, and leaves the build
+    cache holding the one build it made, of the set the re-read served: no
+    build of the set before it is kept (N6)."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
+    mcp = serving_of(knowledge_base)._mcp
     manifest = "skill://notes/x/_manifest"
 
     def size() -> int:
@@ -472,10 +478,15 @@ def test_a_manifest_is_priced_against_the_server_before_it_is_served(
         return next(f["size"] for f in files if f["path"] == "SKILL.md")
 
     before = size()
+    generation = mcp.generation
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
 
-    assert size() == before, "N6: the read that re-adds still prices its pin"
-    assert size() > before
+    assert size() > before, "N6: the read that re-adds prices the edit"
+    assert mcp.generation == generation + 1
+    # Reads a kubed-mcp internal: the build cache is public nowhere, so a 0.5.x
+    # patch may move it.
+    built = list(mcp._plugins._memo.builds)
+    assert [key[0] for key in built] == [mcp.generation], built
 
 
 def test_a_new_upstream_file_needs_a_refresh(webdav, tmp_path):
@@ -690,8 +701,9 @@ def test_the_revalidator_follows_the_export_a_refresh_created(webdav, tmp_path):
 
     webdav.skill("x", "edited after the refresh, and longer than it was")
 
-    read_served(knowledge_base, URI)  # N6: this one re-adds the plugin
-    assert "edited after the refresh" in read_served(knowledge_base, URI)
+    assert "edited after the refresh" in read_served(knowledge_base, URI), (
+        "N6: the re-adding read"
+    )
     assert "first" in (retired / "SKILL.md").read_text(), "the retired export stands"
 
 
@@ -827,8 +839,8 @@ def _skill_view(knowledge_base) -> tuple[str, dict, dict]:
 
 def test_a_live_edit_reads_after_trust(webdav, tmp_path, clock):
     """D9: within the 2 s trust an edit is not looked for; past it, the read
-    that revalidates re-adds the plugin and still serves its pin, and the read
-    after it serves the edit, its ``_manifest`` and its entry agreeing (N6)."""
+    that revalidates re-adds the plugin and serves the edit, and the reads
+    after it serve it too, its ``_manifest`` and its entry agreeing (N6)."""
     knowledge_base = _knowledge_base(webdav, tmp_path)
     assert "first" in read_served(knowledge_base, URI)
 
@@ -836,7 +848,9 @@ def test_a_live_edit_reads_after_trust(webdav, tmp_path, clock):
     assert "first" in read_served(knowledge_base, URI), "trusted for 2 s"
 
     clock(2.5)
-    assert "first" in read_served(knowledge_base, URI), "N6: the re-adding read"
+    assert "edited in nextcloud" in read_served(knowledge_base, URI), (
+        "N6: the re-adding read"
+    )
     text, manifest, entry = _skill_view(knowledge_base)
 
     assert "edited in nextcloud" in text
@@ -861,7 +875,6 @@ def test_a_reread_keeps_every_other_plugin(webdav, tmp_path):
     assert set(before) == {"notes", "other"}
 
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
-    read_served(knowledge_base, URI)
     assert "edited in nextcloud" in read_served(knowledge_base, URI)
 
     after = {p.namespace: p for p in mcp.plugins}
@@ -884,7 +897,6 @@ def test_no_reread_while_a_refresh_publishes(webdav, tmp_path):
         assert "first" in read_served(knowledge_base, URI)
         assert mcp.generation == generation
 
-    read_served(knowledge_base, URI)
     assert "edited in nextcloud" in read_served(knowledge_base, URI)
     assert mcp.generation == generation + 1
 
@@ -905,9 +917,9 @@ async def test_an_out_of_scope_live_skill_is_not_revalidated(webdav, tmp_path):
 
 
 def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock, caplog):
-    """N6 for an agent: the request after the re-adding one serves the edit, on
-    ``agents/get`` and ``agents/list`` both; an edit that no longer parses
-    keeps the plugin's last good build, said once (AGT-16), and the next good
+    """N6 for an agent: the re-adding request serves the edit, and so does the
+    one after it, on ``agents/get`` and ``agents/list`` both; an edit that no longer
+    parses keeps the plugin's last good build, said once (AGT-16), and the next good
     one is served."""
     webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
     webdav.write(
@@ -942,7 +954,7 @@ def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock, caplog):
     first, got, listed = edit(
         AGENT.format(description="Helps, edited upstream.", body="Help, edited.")
     )
-    assert first["instructions"] == "Help first.", "N6: the re-adding request"
+    assert first["instructions"] == "Help, edited.", "N6: the re-adding request"
     assert got["instructions"] == "Help, edited."
     for key in ("io.kubed/agent", "io.kubed.mcp-kb/agent"):
         assert got["_meta"][key]["frontmatter"]["description"] == (
@@ -961,7 +973,7 @@ def test_a_live_agent_edit_reads_after_trust(webdav, tmp_path, clock, caplog):
     first, got, listed = edit(
         AGENT.format(description="Helps again.", body="Help, saved properly.")
     )
-    assert first["instructions"] == "Help, edited.", "N6: the re-adding request"
+    assert first["instructions"] == "Help, saved properly.", "N6: the re-adding request"
     assert got["instructions"] == "Help, saved properly."
     assert listed[name]["description"] == "Helps again."
 
@@ -1013,8 +1025,8 @@ def test_a_live_edit_taking_a_twins_name_serves_the_first_in_path_order(
     webdav, tmp_path, clock
 ):
     """AGT-16's carve-out: an edit that gives an agent the name another file of
-    its plugin serves still reads, so no build is kept. From the next request
-    the first file in path order is served under that name and the other is
+    its plugin serves still reads, so no build is kept. From the request that
+    re-reads it, the first file in path order is served under that name and the other is
     skipped (AGT-6), as a refresh of the same tree serves them."""
     webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
     webdav.write(
@@ -1044,7 +1056,7 @@ def test_a_live_edit_taking_a_twins_name_serves_the_first_in_path_order(
         return first, then, got
 
     first, then, got = run_client(knowledge_base, go)
-    assert first == {"notes_alpha", "notes_helper"}, "N6: the re-adding request"
+    assert first == {"notes_helper"}, "N6: the re-adding request"
     assert then == {"notes_helper"}, "AGT-6: one name, the first file in path order"
     assert got["instructions"] == "Alpha's, renamed."
     assert knowledge_base.generation == 0, "no refresh did it"
@@ -1088,7 +1100,7 @@ def test_a_live_watch_stamps_the_agents_the_manifest_lists(webdav, tmp_path, clo
     )
     clock(2.5)
     first, got = run_client(knowledge_base, twice)
-    assert first["instructions"] == "Role first.", "N6: the re-adding request"
+    assert first["instructions"] == "Role, edited.", "N6: the re-adding request"
     assert got["instructions"] == "Role, edited."
     assert mcp.generation == generation + 1
 
@@ -1159,9 +1171,8 @@ def test_a_publisher_that_raises_leaves_the_records_as_they_were(
         knowledge_base._harvests,
     ) == before
 
-    # Live re-reads resume against the tree being served (N6: one request late).
+    # Live re-reads resume against the tree being served (N6).
     webdav.skill("x", "edited live after the failed refresh, and longer again")
-    read_served(knowledge_base, URI)
     assert "edited live after the failed refresh" in read_served(knowledge_base, URI)
 
     webdav.skill("x", "edited for the refresh that publishes, much longer than that")
@@ -1172,7 +1183,6 @@ def test_a_publisher_that_raises_leaves_the_records_as_they_were(
     assert "edited for the refresh that publishes" in read_served(knowledge_base, URI)
 
     webdav.skill("x", "and live again after it, the longest edit of all of them")
-    read_served(knowledge_base, URI)
     assert "and live again after it" in read_served(knowledge_base, URI)
 
 
@@ -1303,8 +1313,7 @@ def test_no_reread_between_a_publish_and_its_swap(webdav, tmp_path, monkeypatch)
     assert knowledge_base.refresh() == [KEY]
 
     assert seen == {"moved": 0}
-    read_served(knowledge_base, URI)  # N6: this one re-adds the plugin
-    assert "edited again" in read_served(knowledge_base, URI)
+    assert "edited again" in read_served(knowledge_base, URI), "N6: the re-adding read"
 
 
 def test_a_reread_that_cannot_serve_says_so_once(webdav, tmp_path, monkeypatch, caplog):
@@ -1358,7 +1367,6 @@ def test_a_plugin_refused_at_publish_is_not_reread(webdav, tmp_path, monkeypatch
     webdav.requests.clear()
 
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
-    read_served(knowledge_base, URI)
     assert "edited in nextcloud" in read_served(knowledge_base, URI)
 
     assert asked == ["notes", "other", "notes"]
@@ -1385,7 +1393,6 @@ def test_a_kept_plugins_agents_are_not_read_again(webdav, tmp_path, monkeypatch)
 
     monkeypatch.setattr(serving_module, "_frontmatter", counted)
     webdav.skill("x", "edited in nextcloud, and rather longer than before")
-    read_served(knowledge_base, URI)
     assert "edited in nextcloud" in read_served(knowledge_base, URI)
 
     assert "agents/z.md" not in read
@@ -1434,7 +1441,6 @@ def test_a_kept_local_plugins_agents_are_not_read_again(webdav, tmp_path, caplog
     def reread(text: str, edit: str):
         agent.write_text(text)
         webdav.skill("x", edit)
-        read_served(knowledge_base, URI)
         assert edit in read_served(knowledge_base, URI), "the live plugin re-read"
         return run_client(knowledge_base, go)
 
@@ -1461,7 +1467,7 @@ def test_a_kept_local_plugins_agents_are_not_read_again(webdav, tmp_path, caplog
 
 def test_a_live_rename_renames_a_later_clashing_agent(webdav, tmp_path):
     """N6: a live edit of an agent's frontmatter ``name`` is served under the
-    new name from the next request, without a refresh, and a later plugin's
+    new name from the request that re-reads it, without a refresh, and a later plugin's
     agent it now clashes with is renamed ``<name>@<plugin>`` (PLUG-64)."""
     webdav.write(".claude-plugin/plugin.json", json.dumps({"name": "notes"}))
     webdav.write("agents/helper.md", AGENT.format(description="Helps.", body="Mine."))
@@ -1501,7 +1507,7 @@ def test_a_live_rename_renames_a_later_clashing_agent(webdav, tmp_path):
         return first, then, mine, kits
 
     first, then, mine, kits = run_client(knowledge_base, go)
-    assert first == {"notes_helper", "notes_aide"}, "N6: the re-adding request"
+    assert first == {"notes_aide", "notes_aide@kit"}, "N6: the re-adding request"
     assert then == {"notes_aide", "notes_aide@kit"}
     assert mine["instructions"] == "Mine, renamed."
     assert kits["instructions"] == "Kit's."

@@ -40,9 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Send profiles to Pyroscope, and traces and metrics over OpenTelemetry**, from a `telemetry` section in the config; the image ships the packages.
 - A client's instructions now say where each library's prompts and agents read, at their `prompts://` and `agents://` indexes.
 - Choose what `resources/list` lists with `Kb-Listed` (`?listed=`): `skills`, `prompts`, `agents` or `none`.
+- Set any config item from an env var or a flag: `KB_SOURCES`, `KB_PLUGINS`, `KB_LIBRARIES` (JSON), `CACHE_DIR`, `TRANSPORT`, `HOST`, `PORT`, `LOG_LEVEL`, `TELEMETRY_*` and `DELIVERY_*`.
+- The config file can set `cache_dir`, `serving` and `delivery` too.
 
 ### Changed
 
+- **BREAKING:** `CONFIG_FILE` and `--config-file` name the config file, in place of `CONFIG` and `--config`; a leftover `CONFIG` stops the boot, and outside the image no file is read unless one is named.
+- `mcp-kb schema` prints the whole config's schema, with each item's env var and flag.
 - Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Resource-Prefix` and `Kb-Resources`; the old `X-` names are still accepted.
 - **BREAKING:** A pin set under an old `X-` name (a gateway route header, a credential) no longer holds against a client-sent `Kb-` header, which now beats it; move such pins to the `Kb-` names.
 - **BREAKING:** Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
@@ -56,12 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** A skill's file that is not UTF-8 text, or has no or an unrecognised extension (such as `scripts/run`), reads as a blob, and `read_resource` no longer returns its text.
 - `list_resources` and `read_resource` are kubed-mcp's, and return the rows and contents `resources/list` and `resources/read` do.
 - `list_resources`, `read_resource` and the Agents extension exist only once a plugin with a skill, an agent or a prompt file is served, and the Skills extension once one with a skill is.
-- An edit to a live skill, agent or prompt is served from the request after the one that notices it, and a live agent or prompt saved mid-edit goes on serving its last good version.
+- A live agent or prompt saved mid-edit goes on serving its last good version.
 - A library can no longer be named `mcp-kb`, the server's own name.
 - `skills/get` of a skill that is not served answers `Unknown skill URI: <uri>`.
 - Plugin sources (git, WebDAV, `file://`) load through kubed-mcp plugin loaders.
 - `resources/list` lists each skill's `SKILL.md` and each library's `_files.md`; the `_index.md` files still read, unlisted.
-- Built on kubed-mcp 0.3: VS Code is listed `list_resources` and `read_resource` with no header, and `initialize` and `server/discover` report what they resolved in `_meta["io.kubed/delivery"]`.
+- Built on kubed-mcp 0.5: VS Code is listed `list_resources` and `read_resource` with no header, and `initialize` and `server/discover` report what they resolved in `_meta["io.kubed/delivery"]`.
 
 ### Fixed
 
