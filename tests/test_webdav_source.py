@@ -26,9 +26,11 @@ from kubed.mcp_kb.sources.webdav import (
     ETAGS_FILE,
     VERSION_FILE,
     client,
+    download,
     fetch_file,
     fingerprint_webdav,
     materialise_webdav,
+    remote_etags,
 )
 from tests.conftest import served
 from tests.webdav_server import FOLDER, PASSWORD, USERNAME
@@ -349,6 +351,27 @@ def test_fetch_file_returns_the_etag_unchanged_when_the_file_has_not_moved(
     assert webdav.method("GET") == [], "an unchanged file is not downloaded"
 
 
+def test_download_replaces_the_local_copy(webdav, tmp_path):
+    source = _fetch(webdav)
+    root = materialise_webdav(source, tmp_path)
+    webdav.skill("x", "edited in nextcloud, longer than before")
+
+    download(source, root, SKILL, client(source))
+
+    assert "edited in nextcloud" in _body(root)
+
+
+def test_remote_etags_lists_every_file_with_its_etag(webdav, tmp_path):
+    source = _fetch(webdav)
+
+    etags = remote_etags(source, client(source))
+
+    assert set(etags) >= {SKILL, "docs/guide.md"}
+    assert etags == json.loads(
+        (materialise_webdav(source, tmp_path) / ETAGS_FILE).read_text()
+    )
+
+
 def test_fetch_file_replaces_the_local_copy_when_the_etag_moved(webdav, tmp_path):
     source = _fetch(webdav)
     root = materialise_webdav(source, tmp_path)
@@ -371,33 +394,29 @@ def test_a_missing_upstream_file_leaves_the_local_copy(webdav, tmp_path):
     assert "first" in _body(root), "a deleted upstream file is not a deleted skill"
 
 
-def test_a_live_fetch_replaces_the_local_copy_rather_than_rewriting_it(
-    webdav, tmp_path
-):
+def test_download_replaces_the_local_copy_rather_than_rewriting_it(webdav, tmp_path):
     """The atomicity, pinned. A reader that already opened the file must read
     the bytes it opened all the way to the end -- which a rename gives it and a
     write over the same inode takes away."""
     source = _fetch(webdav)
     root = materialise_webdav(source, tmp_path)
-    recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
     webdav.skill("x", "edited in nextcloud, and very much longer than it was")
 
     with (root / SKILL).open("rb") as handle:
-        fetch_file(source, root, SKILL, etag=recorded)
+        download(source, root, SKILL, client(source))
         held = handle.read().decode()
 
     assert "first" in held, "a reader holding the old file must read the old file"
     assert "edited in nextcloud" in _body(root)
 
 
-def test_a_live_fetch_stages_its_download_outside_the_export(webdav, tmp_path):
+def test_download_stages_its_file_outside_the_export(webdav, tmp_path):
     """A download the kernel kills leaves its temp file behind, and ``finally``
     does not run. Inside the export that file counts towards the export's
     extent, so the tree looks truncated for good -- and ``collect`` walks the
     source's home, so it could never reach one buried in a skill directory."""
     source = _fetch(webdav)
     root = materialise_webdav(source, tmp_path)
-    recorded = json.loads((root / ETAGS_FILE).read_text())[SKILL]
     webdav.skill("x", "edited in nextcloud, and longer than before")
     staged = []
 
@@ -407,14 +426,11 @@ def test_a_live_fetch_stages_its_download_outside_the_export(webdav, tmp_path):
         def __init__(self, real):
             self._real = real
 
-        def info(self, rel):
-            return self._real.info(rel)
-
         def get_file(self, rel, local):
             staged.append(Path(local))
             return self._real.get_file(rel, local)
 
-    fetch_file(source, root, SKILL, etag=recorded, fs=_Watched(client(source)))
+    download(source, root, SKILL, _Watched(client(source)))
 
     assert staged, "nothing was downloaded, so this test proved nothing"
     for tmp in staged:
@@ -461,16 +477,16 @@ def test_a_name_that_needs_encoding_is_revalidated_like_any_other(webdav, tmp_pa
     root = materialise_webdav(source, tmp_path)
     webdav.write(rel, "edited upstream, and rather longer than before\n")
 
-    assert fetch_file(source, root, rel) is not None
+    download(source, root, rel, client(source))
     assert "edited upstream" in (root / rel).read_text()
 
 
-def test_fetch_file_refuses_a_path_that_leaves_the_export(webdav, tmp_path):
+def test_download_refuses_a_path_that_leaves_the_export(webdav, tmp_path):
     source = _fetch(webdav)
     root = materialise_webdav(source, tmp_path)
 
     with pytest.raises(SourceError, match="outside"):
-        fetch_file(source, root, "../escaped.md")
+        download(source, root, "../escaped.md", client(source))
 
 
 # -- through the catalogue -----------------------------------------------------

@@ -20,8 +20,9 @@ Three things this module is careful about:
   is -- so nothing that lands under the cache, in a log line or in the errors
   ``/health`` publishes can carry it. An HTTP failure is reported as its status
   and nothing more.
-- **A live read replaces one file, atomically.** ``fetch_file`` is the other
-  half of ``cache: live``: one PROPFIND, and only if the ETag moved, one GET
+- **A live read replaces one file, atomically.** ``download`` is the per-file
+  half of ``cache: live`` (``fetch_file`` wraps it with one PROPFIND, and only
+  if the ETag moved is there a GET): one GET
   into a temporary file in ``.work/`` beside the export that is then renamed
   over the local copy. A reader holding the old file reads the old file to its
   end, and a download that is killed half way through leaves nothing inside
@@ -117,7 +118,7 @@ def client(fetch: Fetch, *, timeout: float | None = None) -> WebdavFileSystem:
 def materialise_webdav(fetch: Fetch, cache: Path) -> Path:
     """Copy the folder into the cache under the digest of its ETags, and return it."""
     fs = client(fetch)
-    etags = _etags(fetch, fs)
+    etags = remote_etags(fetch, fs)
 
     def build(tmp: Path) -> None:
         with _reporting(fetch, "copy"):
@@ -152,7 +153,7 @@ def fingerprint_webdav(fetch: Fetch, cache: Path, root: Path) -> dict:
     exported = exports.exported(root)
     if exported is None:
         raise SourceError(f"{fetch.key}: nothing exported under the cache")
-    etags = _etags(fetch, client(fetch))
+    etags = remote_etags(fetch, client(fetch))
     return {
         "exported": exported[0],
         "files": exports.count(root),
@@ -195,6 +196,17 @@ def fetch_file(
     if current == recorded and target.is_file():
         return current
 
+    download(fetch, root, rel, fs)
+    return current
+
+
+def download(fetch: Fetch, root: Path, rel: str, fs: WebdavFileSystem) -> None:
+    """Download one file over its local copy, atomically.
+
+    Raises ``SourceError`` (``AccessRefused`` for a 401 or a 403) and refuses a
+    ``rel`` that leaves ``root``.
+    """
+    target = _inside(fetch, root, rel)
     target.parent.mkdir(parents=True, exist_ok=True)
     # Staged beside the export, never inside it: a download killed part way
     # through would otherwise leave a file the export's own count includes and
@@ -211,7 +223,6 @@ def fetch_file(
         tmp.replace(target)
     finally:
         tmp.unlink(missing_ok=True)
-    return current
 
 
 # -- the folder ----------------------------------------------------------------
@@ -222,13 +233,14 @@ def _exports(fetch: Fetch, cache: Path) -> Exports:
     return Exports.under(cache, fetch.slug, stamp=VERSION_FILE, version=VERSION)
 
 
-def _etags(fetch: Fetch, fs: WebdavFileSystem) -> dict[str, str]:
+def remote_etags(fetch: Fetch, fs: WebdavFileSystem) -> dict[str, str]:
     """``{path: etag}`` for every file in the folder, in path order.
 
-    One recursive listing, which is one PROPFIND per directory -- webdav4
-    passes the ETag through from the same response that enumerates the
-    children, so a listing prices every file's freshness for free. Sorted, so
-    two equal folders produce two equal dicts and one digest.
+    One recursive listing, which is one ``Depth: 1`` PROPFIND per directory
+    (webdav4's walk), not ``Depth: infinity``, which Nextcloud refuses by
+    default. webdav4 passes the ETag through from the same response that
+    enumerates the children, so a listing prices every file's freshness for
+    free. Sorted, so two equal folders produce two equal dicts and one digest.
     """
     with _reporting(fetch, "listing"):
         try:
