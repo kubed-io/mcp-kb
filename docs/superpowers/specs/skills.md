@@ -187,7 +187,10 @@ text whatever its type. A library file named `_manifest` is not JSON.
 **SKL-24.** A skill's `_manifest` names the skill by its `name` and lists every file a read of the
 skill serves (SKL-21), sorted by path: the same files as its extension entry (SKL-46). Size and
 hash describe the bytes a read returns under the same request headers, after kb's rewriter
-(SKL-60) and the prefix, so they equal the entry's.
+(SKL-60) and the prefix, so they equal the entry's. The `_manifest` is a view: it reads at its
+exact URI and is in no entry's `resources` (SKL-46), as the `_index.md` and `_index.json` beside
+every directory are (SKL-56, SKL-57). A host that verifies a skill by SEP-2640 refuses a view
+reached from inside the skill.
 
 ```json
 {"skill": "loki",
@@ -246,6 +249,11 @@ frontmatter as written. Every text file of a skill (SKL-22) has its line endings
 Everything else is served as written. The gateway prefix (SKL-41) is the plugin layer's to write,
 after kb's rewriter.
 
+**SKL-63.** No text kb's rewriter writes into a skill's file (SKL-60) names a view (SKL-24). A
+qualified name reads as a skill's `SKILL.md` (SKL-55), and a placeholder as a library, a skill's
+directory or a path below one (SKL-25, SKL-52). A view's address the skill's author wrote is served
+as written.
+
 **SKL-26.** A read returns only the file addressed. Nothing a file cites is fetched with it.
 
 ## Library files
@@ -266,7 +274,9 @@ path and is in scope.
 **SKL-30.** When a path under a skill names no file of the skill, it reads the file at the same
 path below the root of the skill's own plugin: `skill://penpot/penpot-router/shared/api.md` reads
 that plugin's `shared/api.md`. It never reaches another plugin's root. Neither serves an agent file
-(AGT-3).
+(AGT-3). The fallback reads through `resources/read`, and so through the
+`read_resource` tool, alone. Its file is in no entry (SKL-33), so a host that verifies a skill's
+files against its entry, as a Via `extension` client does, refuses it.
 
 **SKL-31.** When a library-level path names no library file, it reads the file at that path from
 the first in-scope plugin root of the library, in the library's order, that has one. It does not
@@ -277,8 +287,8 @@ apply to a path inside any skill's address, under any scope. Neither serves an a
 the library, served or skipped.
 
 **SKL-33.** A file the skill has always wins over the fallback. Nothing is redirected: each address
-reads the same bytes in place. Neither fallback adds a row to any listing, `_files.md` or
-`_manifest`.
+reads the same bytes in place. Neither fallback adds a row to any listing, `_files.md`,
+`_manifest` or extension entry.
 
 ## Misses and directories
 
@@ -398,7 +408,7 @@ under it still name it.
 
 `frontmatter` is the served `SKILL.md`'s frontmatter as FastMCP parses it: the YAML between the
 `---` lines, so a block-scalar value ending the block has no final newline. `resources` holds every
-file a read of the skill serves (SKL-21), `SKILL.md` included, by URI.
+file a read of the skill serves (SKL-21), `SKILL.md` included, by URI, and no view (SKL-24).
 
 **SKL-47.** Each `digest` and `size` describe the UTF-8 bytes `resources/read` returns for that URI
 under the same request headers, and equal the skill's `_manifest` (SKL-24). An entry is offered
@@ -421,7 +431,8 @@ with `-32602` `Unknown skill URI: <uri>`.
 message, as in [scoping-and-instructions.md](scoping-and-instructions.md).
 
 **SKL-51.** `resources/directory/read` takes `uri` and lists one directory's direct children as
-`Resource` objects, sorted by URI, a page of 100 at a time with a decimal `cursor`. A directory is a
+`Resource` objects, sorted by URI, a page of 100 at a time with a decimal `cursor`. Every result
+carries `resultType: "complete"`: a skill's directory's, a library's and a folder's. A directory is a
 library, a folder, a skill's root or a folder inside a skill (SEP-2640): its URI has no trailing `/`
 and it is never listed. A subdirectory is a child with `mimeType` `inode/directory`; the indexes,
 `_files.md` and `_manifest` are beside a directory, not in it. A library's or folder's children are
@@ -435,9 +446,9 @@ file, an absent address and an out-of-scope one fail alike with `-32602` `Direct
 `resources/directory/read` returns for it, every page at once, with `mimeType`
 `application/json`. Like the directory, it is not found where the directory is. It is text a client
 reads, so with a prefix (SKL-41) every address in it, each `uri` included, carries the prefix, as
-the `_index.md` beside it does and the plugin layer's `_index.json` inside a skill does (N18).
+the `_index.md` beside it does and the plugin layer's `_index.json` inside a skill does (N18). It is a view (SKL-24).
 
 **SKL-57.** Inside a skill, an `_index.md` beside its root and each of its folders reads one
 `<uri>: <description>` line per child, a file's description being its first `# ` heading, else
 `File from <name> skill`, and a folder's `A folder of the <name> skill`. Its text carries the prefix
-(SKL-41). A library's and a folder's `_index.md` are SKL-17's.
+(SKL-41). A library's and a folder's `_index.md` are SKL-17's. It is a view (SKL-24).

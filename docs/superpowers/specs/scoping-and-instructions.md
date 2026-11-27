@@ -256,7 +256,7 @@ INS-6 (which libraries), INS-7 (their order) and INS-13 (a `[<library>]` heading
 selected) hold under every Via.
 
 **INS-21.** Under `extension` the footer is fixed, whatever `resources` resolved to:
-`Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its _manifest lists the other files it ships.`
+`Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its entry lists the files it ships.`
 It is written with the prefix as INS-16 says.
 
 **INS-22.** Under `local` a library whose description and notes are both empty has no section, and
@@ -324,5 +324,5 @@ Prompts: prompts://grafana/_index.md
 Penpot design tooling.
 Skills: skill://penpot/_index.md
 
-Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its _manifest lists the other files it ships.
+Skills arrive through the Skills extension; each reads at skill://<library>/<path>/SKILL.md, and its entry lists the files it ships.
 ```

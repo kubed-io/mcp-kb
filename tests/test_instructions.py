@@ -1226,3 +1226,13 @@ async def test_mcp_text_is_unchanged(server_url, mode, case, way):  # noqa: F811
         server_url + query, mode, {**headers, **extra}, extension=extension
     )
     assert text == (prefixed(expected, prefix) if prefix else expected)
+
+
+@pytest.mark.unit
+def test_the_extension_footer_names_no_view():
+    assert EXTENSION_FOOTER == (
+        "Skills arrive through the Skills extension; each reads at "
+        "skill://<library>/<path>/SKILL.md, and its entry lists the files it ships."
+    )
+    assert "_manifest" not in EXTENSION_FOOTER
+    assert "_manifest" in footer(resources=True)

@@ -23,8 +23,7 @@ RESOURCES_FOOTER = (
 TOOLS_FOOTER = "Read these with read_resource."
 EXTENSION_FOOTER = (
     "Skills arrive through the Skills extension; each reads at "
-    "skill://<library>/<path>/SKILL.md, and its _manifest lists the other "
-    "files it ships."
+    "skill://<library>/<path>/SKILL.md, and its entry lists the files it ships."
 )
 
 
