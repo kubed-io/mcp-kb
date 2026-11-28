@@ -11,7 +11,7 @@ from kubed.mcp.protocol import types
 
 from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
-from tests.conftest import key_of, make_config, server_of
+from tests.conftest import extension_kb, key_of, make_config, server_of
 from tests.test_skills_extension import request
 
 KB_INFO = {"name": "mcp-kb", "version": dist_version("kubed-mcp-kb")}
@@ -31,7 +31,7 @@ async def call(client, name, **args):
 # The handshake era does not stamp _meta on results; the initialize test covers it.
 @pytest.mark.parametrize("mode", ["auto"])
 async def test_every_result_names_kb_and_its_version(skills_dir, mode):
-    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    server = extension_kb(make_config(skills_dir), skills_dir / "cache")
     async with Client(server_of(server), mode=mode) as client:
         listing = await request(client, "skills/list")
     assert listing["_meta"][types.SERVER_INFO_META_KEY] == KB_INFO
@@ -51,6 +51,14 @@ async def delivery(client, mode):
     if mode == "legacy":
         return client.initialize_result.meta[DELIVERY_META]
     return (await request(client, "server/discover"))["_meta"][DELIVERY_META]
+
+
+@pytest.mark.unit
+async def test_extension_kb_serves_via_extension(skills_dir):
+    kb = extension_kb(make_config(skills_dir), skills_dir / "cache")
+    async with Client(server_of(kb)) as client:
+        assert (await delivery(client, "auto"))["via"] == "extension"
+        assert len((await request(client, "skills/list"))["skills"]) == 4
 
 
 @pytest.mark.unit

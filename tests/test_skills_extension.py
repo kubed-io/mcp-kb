@@ -21,7 +21,13 @@ from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.config import Config
 from kubed.mcp_kb.mcp.request import AGENTS_EXTENSION_ID, EXTENSION_ID
 from kubed.mcp_kb.mcp.scope import Scope
-from tests.conftest import DEEP_YAML, make_config, server_of
+from tests.conftest import (
+    DEEP_YAML,
+    VIA_EXTENSION,
+    extension_kb,
+    make_config,
+    server_of,
+)
 from tests.test_header_scope import server_url  # noqa: F401 - shared HTTP fixture
 from tests.test_plugin_serving import market
 
@@ -44,7 +50,7 @@ def _sha(text: str) -> str:
 
 @pytest.mark.parametrize("mode", ["auto", "legacy"])
 async def test_discovery_get_and_verified_reads(skills_dir, mode):
-    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    server = extension_kb(make_config(skills_dir), skills_dir / "cache")
     async with Client(server_of(server), mode=mode) as client:
         caps = client.session.server_capabilities
         assert caps.resources is not None
@@ -110,7 +116,7 @@ async def test_a_skill_holding_a_dot_file_is_offered_without_it(skills_dir):
     """SKL-3: a skill holding a dot file is offered, and its entry names
     every file but the dot file."""
     (skills_dir / "flatsource" / "alpha" / ".env").write_text("secret")
-    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    server = extension_kb(make_config(skills_dir), skills_dir / "cache")
     async with Client(server_of(server)) as client:
         listing = await request(client, "skills/list")
         alpha = await request(client, "skills/get", uri=ALPHA)
@@ -185,7 +191,7 @@ async def test_an_invalid_skill_is_not_served_at_all(skills_dir):
     path = skills_dir / "flatsource" / "alpha" / "SKILL.md"
     path.write_text("---\nname: alpha\n---\nMissing description.\n", encoding="utf-8")
     (path.parent / "notes.md").write_text("notes\n")
-    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    server = extension_kb(make_config(skills_dir), skills_dir / "cache")
     async with Client(server_of(server)) as client:
         listing = await request(client, "skills/list")
         assert len(listing["skills"]) == 3
@@ -206,9 +212,10 @@ async def test_frontmatter_too_deep_for_the_parser_is_not_served(skills_dir):
         f"---\nname: alpha\ndescription: d\nx: {DEEP_YAML}\n---\nBody.\n",
         encoding="utf-8",
     )
-    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    server = extension_kb(make_config(skills_dir), skills_dir / "cache")
     async with Client(server_of(server)) as client:
         listing = await request(client, "skills/list")
+        assert listing["skills"]
         assert ALPHA not in {s["uri"] for s in listing["skills"]}
         with pytest.raises(MCPError, match="Resource not found"):
             await client.read_resource(ALPHA)
@@ -221,7 +228,7 @@ def test_a_prefix_that_breaks_a_skill_fails_it_under_that_prefix_only(skills_dir
     (skills_dir / "flatsource" / "alpha" / "SKILL.md").write_text(
         f"---\nname: alpha\ndescription: {words}\n---\nBody.\n"
     )
-    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    server = extension_kb(make_config(skills_dir), skills_dir / "cache")
 
     async def read(url):
         from fastmcp.client.transports import StreamableHttpTransport
@@ -248,7 +255,7 @@ async def test_http_scope_and_header_precedence(server_url):  # noqa: F811
 
     transport = StreamableHttpTransport(
         f"{server_url}?library=deepsource",
-        headers={"Kb-Library": "flatsource"},
+        headers={"Kb-Library": "flatsource", **VIA_EXTENSION},
     )
     async with Client(transport) as client:
         listing = await request(client, "skills/list")
@@ -452,8 +459,8 @@ async def test_a_skill_one_prefix_cannot_build_is_named_nowhere_under_it(skills_
     server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
     with _serve(server) as url:
         for headers in (
-            {"Kb-Resource-Prefix": "kb+"},
-            {},
+            {**VIA_EXTENSION, "Kb-Resource-Prefix": "kb+"},
+            VIA_EXTENSION,
         ):
             transport = StreamableHttpTransport(url, headers=headers)
             async with Client(transport) as client:
@@ -650,7 +657,7 @@ async def test_a_directory_read_is_complete(skills_dir, uri):
 @pytest.mark.unit
 async def test_no_entry_lists_a_view_and_each_view_reads(skills_dir):
     """SKL-24, SKL-46, SKL-56, SKL-57: a view is in no entry, and reads at its URI."""
-    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    server = extension_kb(make_config(skills_dir), skills_dir / "cache")
     async with Client(server_of(server)) as client:
         listing = await request(client, "skills/list")
         assert listing["skills"]

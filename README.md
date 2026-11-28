@@ -40,7 +40,7 @@ skill://<library>/<path>                     one of those files
 
 A library, a folder or a skill's own directory is not a file — reading one is not found, and the error names the file to read instead. Progressive disclosure lives in the addresses rather than in a tool list, so the listing names each skill's `SKILL.md`; indexes read, unlisted.
 
-Skills-aware clients can also use `skills/list` and `skills/get`. The server advertises `io.modelcontextprotocol/skills` and returns each skill's frontmatter and complete file manifest, with SHA-256 digests of the bytes served by `resources/read`. The same library, category and tag scopes apply.
+Skills-aware clients can also use `skills/list` (send `Kb-Via: extension`) and `skills/get`. The server advertises `io.modelcontextprotocol/skills` and returns each skill's frontmatter and complete file manifest, with SHA-256 digests of the bytes served by `resources/read`. The same library, category and tag scopes apply.
 
 Agent-aware clients can call `agents/list` and `agents/get` for the subagents your plugins ship. This is **experimental**: it follows the MCP Agent Discovery draft (agents-wg proposal 0000 at `137d88b`), and the same library, category and tag scopes apply.
 

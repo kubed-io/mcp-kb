@@ -318,5 +318,5 @@ deeply, a placeholder that is not a declared argument, or a required argument wi
 re-read is refused: the plugin keeps its last good build, its skills and agents included, and kb
 logs one warning. It tries again when a file of the plugin moves.
 
-**PRM-64.** Under Via `extension` or `local`, `prompts/list` lists no plugin prompt, and
-`prompts/get` still serves one (DLV-9). kb adds no filter of its own.
+**PRM-64.** Under Via `local`, `prompts/list` lists no plugin prompt, and `prompts/get` still
+serves one (DLV-9). Under `mcp` and `extension` it lists them all. kb adds no filter of its own.

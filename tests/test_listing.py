@@ -18,6 +18,7 @@ from kubed.mcp_kb.config import Config, load
 from kubed.mcp_kb.mcp.pins import what_is_wrong
 from kubed.mcp_kb.mcp.scope import Scope
 from tests.conftest import (
+    VIA_EXTENSION,
     build_library_files,
     http_client,
     load_all_skills,
@@ -229,6 +230,7 @@ MAX_INPUTS = [
 async def test_the_max_cuts_both_listings_alike(server_url, headers, query, listed):
     async with http_client(server_url + query, headers) as client:
         rows = [str(r.uri) for r in await client.list_resources()]
+    async with http_client(server_url + query, {**headers, **VIA_EXTENSION}) as client:
         entries = (await request(client, "skills/list"))["skills"]
     assert {u for u in rows if u.endswith("/SKILL.md")} == set(listed)
     assert {e["uri"] for e in entries} == set(listed)
@@ -238,13 +240,29 @@ async def test_the_max_cuts_both_listings_alike(server_url, headers, query, list
 
 
 @pytest.mark.integration
+async def test_skills_list_follows_via(server_url):  # SKL-62
+    for headers, entries, rows in [
+        ({}, set(), set(ORDER)),
+        (VIA_EXTENSION, set(ORDER), set()),
+        ({"Kb-Via": "local"}, set(), set()),
+    ]:
+        async with http_client(server_url, headers) as client:
+            listed = (await request(client, "skills/list"))["skills"]
+            assert {e["uri"] for e in listed} == entries
+            resources = [str(r.uri) for r in await client.list_resources()]
+            assert {u for u in resources if u.endswith("/SKILL.md")} == rows
+            got = await request(client, "skills/get", uri=BETA)
+            assert got["skill"]["uri"] == BETA
+
+
+@pytest.mark.integration
 async def test_a_cut_skill_still_gets_reads_and_is_indexed(server_url):
     folders = {
         DELTA: "skill://deepsource/plugin-b/_index.md",
         ALPHA: "skill://flatsource/_index.md",
         BETA: "skill://flatsource/_index.md",
     }
-    async with http_client(server_url, {"Kb-Max": "1"}) as client:
+    async with http_client(server_url, {"Kb-Max": "1", **VIA_EXTENSION}) as client:
         entries = (await request(client, "skills/list"))["skills"]
         assert {e["uri"] for e in entries} == {GAMMA}
         for uri, index in folders.items():
@@ -290,8 +308,8 @@ async def test_the_echo_says_the_max(server_url, headers, echoed, mode):
         assert (await delivery(client, mode))["max"] == echoed
 
 
-def operator_app(skills_dir, tmp_path, how, max_, reverse=False):
-    """An app over the synthetic tree, its max set as an operator does: env or flag."""
+def operator_app(skills_dir, tmp_path, how, max_, reverse=False, via=None):
+    """An app over the synthetic tree, set as an operator does: env or flag."""
     declared = make_config(skills_dir).model_dump(mode="json", exclude_none=True)
     for library in declared["libraries"]:
         library.pop("list_skills", None)  # a computed field, not a config item
@@ -304,6 +322,11 @@ def operator_app(skills_dir, tmp_path, how, max_, reverse=False):
         environ["DELIVERY_MAX"] = str(max_)
     else:
         argv += ["--delivery-max", str(max_)]
+    if via is not None:
+        if how == "env":
+            environ["DELIVERY_VIA"] = via
+        else:
+            argv += ["--delivery-via", via]
     loaded = load(argv, environ=environ)
     return create_app(KnowledgeBase(loaded.config, tmp_path / "cache"), loaded=loaded)
 
@@ -316,7 +339,7 @@ async def listed_by(app):
 @pytest.mark.unit
 @pytest.mark.parametrize("how", ["env", "flag"])
 async def test_delivery_max_sets_the_servers_cap(skills_dir, tmp_path, how):
-    app = operator_app(skills_dir, tmp_path, how, 2)
+    app = operator_app(skills_dir, tmp_path, how, 2, via="extension")
     assert await listed_by(app) == {GAMMA, DELTA}
 
 
@@ -326,5 +349,7 @@ async def test_the_config_order_of_libraries_decides_what_a_cap_keeps(
     skills_dir, tmp_path, how
 ):
     """SKL-64: flatsource declared first is the library whose skills are kept."""
-    app = operator_app(skills_dir, tmp_path, how, 1, reverse=True)
+    app = operator_app(
+        skills_dir, tmp_path, how, 1, reverse=True, via="extension"
+    )
     assert await listed_by(app) == {ALPHA}

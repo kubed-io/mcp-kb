@@ -879,15 +879,18 @@ async def test_via_is_read_under_kb_names(tmp_path, mode, headers, query, via):
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("via", ["extension", "local"])
-async def test_via_presets_list_no_plugin_prompts(tmp_path, via):
+async def test_only_local_unlists_the_plugins_prompts(tmp_path):  # PRM-64
     kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    names = {}
     with served(kb) as url:
-        async with _via_client(url, "default", {"Kb-Via": via}) as client:
-            assert [p.name for p in await client.list_prompts()] == []
-        async with _via_client(url, "default") as client:
-            names = sorted(p.name for p in await client.list_prompts())
-    assert names == ["lib_hello", "lib_top"]
+        for via in ("mcp", "extension", "local"):
+            async with _via_client(url, "default", {"Kb-Via": via}) as client:
+                names[via] = sorted(p.name for p in await client.list_prompts())
+    assert names == {
+        "mcp": ["lib_hello", "lib_top"],
+        "extension": ["lib_hello", "lib_top"],
+        "local": [],
+    }
 
 
 def _skill_rows(resources):
@@ -958,8 +961,8 @@ async def test_local_unlists_skills_and_agents_and_extension_does_not(tmp_path):
                 agent["agent"],
             )
     found = (SKILL_ROWS[0], "lib_helper")
-    assert listed["mcp"] == (SKILL_ROWS, ["lib_helper"], *found)
-    assert listed["extension"] == listed["mcp"]
+    assert listed["mcp"] == ([], ["lib_helper"], *found)
+    assert listed["extension"] == (SKILL_ROWS, ["lib_helper"], *found)
     assert listed["local"] == ([], [], *found)
     assert listed["local, listed"] == listed["local"]
 
@@ -1153,12 +1156,14 @@ async def test_via_follows_a_refresh(tmp_path, mode, via):
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("via", ["extension", "local"])
-async def test_a_hidden_prompt_still_gets_under_via(tmp_path, via):
+@pytest.mark.parametrize(
+    ("via", "listed"), [("extension", ["lib_hello", "lib_top"]), ("local", [])]
+)
+async def test_a_hidden_prompt_still_gets_under_via(tmp_path, via, listed):  # PRM-64
     kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
     with served(kb) as url:
         async with _via_client(url, "default", {"Kb-Via": via}) as client:
-            assert await client.list_prompts() == []
+            assert sorted(p.name for p in await client.list_prompts()) == listed
             got = await client.get_prompt("lib_top")
     assert "Body." in got.messages[0].content.text
 

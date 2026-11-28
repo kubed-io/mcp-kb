@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A restart with clients connected closes their streams cleanly; `GRACEFUL_TIMEOUT` (15 s) sets how long in-flight calls get.
 - Send `Kb-Via: extension` or `local` (or `?via=`) and the instructions point at where your client gets its skills.
 - A client now connects knowing what each library in its scope is for; set a library's `description`, `notes` and `listSkills` to shape it.
-- Discover and load verified skills in MCP Skills clients through `skills/list` and `skills/get`.
+- Discover and load verified skills in MCP Skills clients through `skills/list` (send `Kb-Via: extension`) and `skills/get`.
 - Skill links work behind a multiplexing gateway: set `Kb-Resource-Prefix` (or `?prefix=`), e.g. `kb+`, and kb writes it in front of every address in text.
 - A library can list `categories`, and `Kb-Category` (`?category=`) selects every library listing one.
 - Commands in subfolders of a plugin's `commands` are served as `<library>_<folder>_<name>`.
@@ -68,11 +68,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `skills/get` of a skill that is not served answers `Unknown skill URI: <uri>`.
 - Plugin sources (git, WebDAV, `file://`) load through kubed-mcp plugin loaders.
 - `resources/list` lists each skill's `SKILL.md` and each library's `_files.md`; the `_index.md` files still read, unlisted.
-- Built on kubed-mcp 0.6: VS Code is listed `list_resources` and `read_resource` with no header, and `initialize` and `server/discover` report what they resolved in `_meta["io.kubed/delivery"]`.
+- Built on kubed-mcp 0.8: VS Code is listed `list_resources` and `read_resource` with no header, and `initialize` and `server/discover` report what they resolved in `_meta["io.kubed/delivery"]`.
 - kubed-mcp 0.5.2 or later is required: it is what leaves a skill's hidden files (a `.gitkeep`, a `.env`) out while serving the rest of the skill.
 
 ### Fixed
 
+- A pod that has just started keeps answering, `/health` and `server/discover` included, while it builds what its first clients are served.
 - A slow Nextcloud no longer stalls other requests or fails health probes: live sources revalidate in the background.
 - A command or skill citing a skill of its own plugin through `${CLAUDE_PLUGIN_ROOT}/skills/<skill>/…` now renders an address that reads.
 - Docker quick start works without a checkout; native setup documents explicit config and cache paths on Windows and POSIX systems.

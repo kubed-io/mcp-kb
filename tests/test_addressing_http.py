@@ -15,7 +15,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 from kubed.mcp.protocol import MCPError
 
 from kubed.mcp_kb import KnowledgeBase
-from tests.conftest import make_config, server_of
+from tests.conftest import VIA_EXTENSION, make_config, server_of
 from tests.test_server import DELIVERY_META, VS_CODE
 from tests.test_skills_extension import request
 
@@ -274,7 +274,7 @@ async def skills_request(url, method, headers, **params):
 
 @pytest.mark.integration
 async def test_skills_extension_with_the_prefix(server_url):
-    listed = (await skills_request(server_url, "skills/list", BOTH))["skills"]
+    listed = (await skills_request(server_url, "skills/list", {**BOTH, **VIA_EXTENSION}))["skills"]
     assert listed
     for entry in listed:
         assert entry["uri"].startswith("skill://flatsource/")

@@ -164,19 +164,20 @@ def test_the_pygit2_floor_has_the_api_the_git_source_calls():
 def test_the_kubed_mcp_range_keeps_the_fixes_kb_relies_on():
     """The floor is the oldest kubed-mcp with what kb counts on, the ceiling a break.
 
-    0.6.1 warms FastMCP's state store at start, so a session's first request
-    does not stall for about two seconds, and 0.5.2 is the first release that
-    leaves a skill's hidden files (a `.env`) out, which kb no longer guards
-    itself. Pre-1.0, a minor is a break: 0.7 waits for its owner.
+    0.8.0 labels profiles with the image's source and writes .pyroscope.yaml,
+    0.7.1 keeps a cold pod answering while it builds, and 0.7.0 lists one way
+    per Via. 0.5.2 is the first release that leaves a skill's hidden files (a
+    `.env`) out, which kb no longer guards itself. Pre-1.0, a minor is a break:
+    0.9 waits for its owner.
     """
     data = tomllib.loads(PYPROJECT.read_text())
     pin = next(
         d for d in data["project"]["dependencies"] if d.startswith("kubed-mcp>=")
     )
     floor, ceiling = pin.removeprefix("kubed-mcp>=").split(",")
-    assert _version(floor) >= (0, 6, 1)
+    assert _version(floor) >= (0, 8, 0)
     assert _version(floor) >= (0, 5, 2)
-    assert _version(ceiling.removeprefix("<")) == (0, 7)
+    assert _version(ceiling.removeprefix("<")) == (0, 9)
 
 
 def test_the_webdav4_floor_is_the_one_the_suite_was_run_against():

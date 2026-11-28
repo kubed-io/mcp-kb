@@ -29,6 +29,7 @@ from kubed.mcp_kb.mcp.scope import Scope
 from kubed.mcp_kb.mcp.skills import EMPTY
 from tests.conftest import (
     ext_request,
+    extension_kb,
     http_client,
     make_config,
     serve_http,
@@ -83,8 +84,11 @@ def market(
     )
 
 
-def kit(tmp_path: Path, **more: str) -> KnowledgeBase:
-    """Library ``lib`` whose one entry ``kit`` is its main plugin (SKL-59)."""
+def kit(tmp_path: Path, *, extension: bool = False, **more: str) -> KnowledgeBase:
+    """Library ``lib`` whose one entry ``kit`` is its main plugin (SKL-59).
+
+    ``extension`` serves Via ``extension``, where ``skills/list`` lists skills.
+    """
     config = market(
         tmp_path,
         [{"name": "kit", "source": "./", "tags": ["t"]}],
@@ -98,7 +102,8 @@ def kit(tmp_path: Path, **more: str) -> KnowledgeBase:
             **more,
         },
     )
-    return KnowledgeBase(config, tmp_path / "cache")
+    build = extension_kb if extension else KnowledgeBase
+    return build(config, tmp_path / "cache")
 
 
 async def _text(client, uri: str) -> str:
@@ -115,7 +120,7 @@ async def _miss(client, uri: str) -> tuple:
 
 
 async def test_every_skill_reads_at_its_address(skills_dir):
-    knowledge_base = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    knowledge_base = extension_kb(make_config(skills_dir), skills_dir / "cache")
     catalogue = knowledge_base.catalogue
     async with Client(server_of(knowledge_base)) as client:
         listing = await ext_request(client, "skills/list")
@@ -301,7 +306,7 @@ async def test_a_refused_add_is_a_conflict(tmp_path, monkeypatch):
         return real(self, address, namespace=namespace, manifest=manifest)
 
     monkeypatch.setattr(PluginSet, "add", add)
-    knowledge_base = KnowledgeBase(config, tmp_path / "cache")
+    knowledge_base = extension_kb(config, tmp_path / "cache")
     async with Client(server_of(knowledge_base)) as client:
         assert await _text(client, "skill://lib/a/sa/SKILL.md")
         with pytest.raises(MCPError):
@@ -324,6 +329,7 @@ async def test_kb_names_only_what_kubed_mcp_serves(tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.mcp.skills"):
         knowledge_base = kit(
             tmp_path,
+            extension=True,
             **{
                 "skills/empty/SKILL.md": "---\nname: empty\ndescription: ''\n---\nE\n",
                 "skills/other/SKILL.md": OTHER.replace("Other.", "See kit:empty."),
@@ -339,6 +345,7 @@ async def test_kb_names_only_what_kubed_mcp_serves(tmp_path, caplog):
             await client.read_resource("skill://lib/empty")
     assert "See kit:empty." in other
     assert "empty" not in index
+    assert listing["skills"]
     assert "skill://lib/empty/SKILL.md" not in [e["uri"] for e in listing["skills"]]
     assert "SKILL.md" not in hint.value.message
     # I3: one line, kb's skipped row; the parity note and the layer's own line,
@@ -475,6 +482,7 @@ async def test_a_skill_holding_a_hidden_path_is_served_without_it(
     with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.mcp.skills"):
         knowledge_base = kit(
             tmp_path,
+            extension=True,
             **{
                 "skills/vault/SKILL.md": "---\nname: vault\ndescription: V.\n---\nV\n",
                 "skills/vault/ref.md": "ref\n",
@@ -555,7 +563,7 @@ async def test_a_skill_kb_did_not_find_is_not_served(tmp_path, caplog, monkeypat
 
     monkeypatch.setattr(harvest, "skill_dirs", missing_other)
     with caplog.at_level(logging.WARNING, logger="kubed.mcp_kb.mcp.skills"):
-        knowledge_base = kit(tmp_path)
+        knowledge_base = kit(tmp_path, extension=True)
         server_of(knowledge_base)
         async with Client(server_of(knowledge_base)) as client:
             for uri in ("skill://lib/other/SKILL.md", "skill://lib/other/_manifest"):

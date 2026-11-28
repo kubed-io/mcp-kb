@@ -246,7 +246,8 @@ plugin as itself at its namespace (`<library>` for the main plugin,
 `<library>/<plugin name>` for the rest, SKL-59) and from kb's own address through
 `ServedTrees`, and serves the set before the snapshot swaps. kubed-mcp then
 serves every file, the `_manifest`, `skills/list` and `skills/get`, and the
-folders inside a skill, built per view and prefix. kb's scope is the view: the
+folders inside a skill, built per view and prefix. `skills/list` lists skills only to a Via
+`extension` request; under the default each skill is a `resources/list` row (DLV-9). kb's scope is the view: the
 `(namespace, address)` pairs a request's scope admits, which is the build key,
 and every scope admitting nothing shares `EMPTY` (SCP-36). Three rules keep it
 one set of bytes:
