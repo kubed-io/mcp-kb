@@ -1,11 +1,10 @@
 """The server ``instructions``, built for each connection.
 
 What a client is told on connecting depends on its scope, whether it reads
-resources and whether it declared the Skills extension, so there is no one text
-to hand FastMCP at construction. kubed-mcp calls ``ScopedInstructions`` with
-each ``initialize`` and ``server/discover`` request's resolution, so the
-footer follows its resolved ``resources`` setting and the Skills extension is
-the one it resolved. The prefix is kubed-mcp's to write over the text returned.
+resources, so there is no one text to hand FastMCP at construction. kubed-mcp
+calls ``ScopedInstructions`` with each ``initialize`` and ``server/discover``
+request's resolution, so the footer follows its resolved ``resources`` setting.
+The prefix is kubed-mcp's to write over the text returned.
 
 The text is built from one snapshot, read once per answer: its catalogue for
 the skills, and its ``folders`` for where the prompts and agents are served
@@ -37,7 +36,7 @@ from typing import TYPE_CHECKING
 from ..catalogue.instructions import build_instructions, footer
 from ..catalogue.snapshot import Snapshot
 from ..config import redact
-from .request import EXTENSION_ID, requested_scope
+from .request import requested_scope
 
 if TYPE_CHECKING:
     from kubed.mcp.delivery import Resolved
@@ -67,7 +66,6 @@ class ScopedInstructions:
                 snapshot.catalogue,
                 scope,
                 resources=delivery.resources == "on",
-                skills_extension=EXTENSION_ID in (delivery.extensions or ()),
                 folders=snapshot.folders(scope),
                 via=delivery.via,
                 skills=(

@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** A deployment serving more than 100 skills now lists only the first 100 (in config order) in `skills/list` and `resources/list` unless `Kb-Max` (`?max=`, `DELIVERY_MAX`) is set, `all` for every one; a cut skill still reads, and the instructions say when the list was cut.
 - **BREAKING:** `CONFIG_FILE` and `--config-file` name the config file, in place of `CONFIG` and `--config`; a leftover `CONFIG` stops the boot, and outside the image no file is read unless one is named.
 - `mcp-kb schema` prints the whole config's schema, with each item's env var and flag.
+- Under the default `Kb-Via`, a client pinned to one library is told its skills' names, a Skills-extension client included.
 - Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Resource-Prefix` and `Kb-Resources`; the old `X-` names are still accepted.
 - **BREAKING:** A pin set under an old `X-` name (a gateway route header, a credential) no longer holds against a client-sent `Kb-` header, which now beats it; move such pins to the `Kb-` names.
 - **BREAKING:** Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.

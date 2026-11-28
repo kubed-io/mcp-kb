@@ -1,7 +1,7 @@
 """The server ``instructions`` for one request, as text.
 
-Pure: a catalogue, a scope, three inputs (whether the client reads resources,
-whether it declared the Skills extension, and its Via), kubed-mcp's count of
+Pure: a catalogue, a scope, two inputs (whether the client reads resources,
+and its Via), kubed-mcp's count of
 skills listed and cut as two plain ints, and where the prompts and
 agents are served in, a string out. No FastMCP, so the wording is tested
 without a server and the middleware only decides when to call it.
@@ -88,17 +88,15 @@ def build_instructions(
     scope: Scope,
     *,
     resources: bool,
-    skills_extension: bool,
     folders: Mapping[str, Folders] | None = None,
     via: Via = "mcp",
     skills: tuple[int, int] | None = None,
 ) -> str:
     """One section per selected library, the cut line if any, then the footer.
 
-    Skill names are listed only under ``mcp``, when exactly one library is
-    selected, it asks for them, and the client has no skills extension to
-    discover them with. Under ``local`` a section is the description and notes
-    alone, and one with neither is left out, heading too (INS-20, INS-22).
+    Skill names are listed under ``mcp``, when exactly one library is
+    selected and it asks for them. Under ``local`` a section is the description
+    and notes alone, and one with neither is left out, heading too (INS-20, INS-22).
     ``folders`` is ``Snapshot.folders`` for the scope: where each library's
     prompts and agents are served, pointed at after its skills (INS-19).
     ``skills`` is ``(listed, cut)``, kubed-mcp's count for the request: when
@@ -109,9 +107,7 @@ def build_instructions(
     single = len(selected) == 1
     sections = []
     for text in selected:
-        names = (
-            via == "mcp" and single and text.list_skills and not skills_extension
-        )
+        names = via == "mcp" and single and text.list_skills
         found = (folders or {}).get(text.name, Folders())
         lines = _section(catalogue, scope, text, names, found, via)
         if not lines:
