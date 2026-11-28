@@ -41,6 +41,8 @@ on:
     # The worked example shipped in the image: it decides which sources the
     # image serves out of the box.
     - examples/config.yaml
+    # a commit that only regenerates the source map is still checked
+    - .pyroscope.yaml
   workflow_dispatch:
     inputs:
       push:
@@ -133,3 +135,29 @@ jobs:
         username: ${{ env.PUSH == 'true' && fromJson(steps.secrets.outputs.dockerhub).username || '' }}
         password: ${{ env.PUSH == 'true' && fromJson(steps.secrets.outputs.dockerhub).password || '' }}
         repository: kubed/mcp-kb
+
+    # The committed .pyroscope.yaml should be what this image implies. A kubed-mcp
+    # or Python patch makes it stale with no commit of ours, so this warns and never
+    # fails. build-image's bake is two-arch with no --load: the image exists only
+    # once pushed, so a dry run skips this and the image is pulled by its short sha.
+    # A release (workflow_call with a tag) skips it too.
+    - name: Check .pyroscope.yaml
+      if: env.PUSH == 'true' && !inputs.tag
+      shell: bash
+      run: |
+        sha=$(git rev-parse --short HEAD)
+        set +e
+        diff=$(docker run -i --rm --entrypoint python "kubed/mcp-kb:${sha}" \
+          -m kubed.mcp.pyroscope --check kubed-mcp-kb < .pyroscope.yaml)
+        status=$?
+        set -e
+        if [ "$status" -ne 0 ]; then
+          echo "::warning title=.pyroscope.yaml::does not match kubed/mcp-kb:${sha} (exit ${status}); regenerate it with --write kubed-mcp-kb in the image"
+          {
+            echo "### .pyroscope.yaml does not match kubed/mcp-kb:${sha}"
+            echo
+            echo '```diff'
+            echo "$diff"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
