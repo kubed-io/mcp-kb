@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Pyroscope profiles link each frame to its source at the image's own commit.
 - A restart with clients connected closes their streams cleanly; `GRACEFUL_TIMEOUT` (15 s) sets how long in-flight calls get.
 - Send `Kb-Via: extension` or `local` (or `?via=`) and the instructions point at where your client gets its skills.
 - A client now connects knowing what each library in its scope is for; set a library's `description`, `notes` and `listSkills` to shape it.

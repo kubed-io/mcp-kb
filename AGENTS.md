@@ -172,6 +172,10 @@ names with a prefix, and these names are the agent's API.
   `OTEL_METRICS_EXPORTER=prometheus` and `OTEL_EXPORTER_PROMETHEUS_HOST=0.0.0.0`
   for a scrape from another pod. The server adds no metrics route. Only the
   image installs the `telemetry` extra.
+  The image sets `SERVICE_REPOSITORY` and `SERVICE_GIT_REF` after its last `RUN`, from the bake's
+  `GIT_SHA`. `.pyroscope.yaml` is generated in the image by
+  `python -m kubed.mcp.pyroscope --write kubed-mcp-kb`, never edited. It goes stale with a
+  kubed-mcp, FastMCP or Python bump, and `image.yml` only warns when it does.
 - **Anything that changes what the catalogue holds** goes through
   `KnowledgeBase.refresh` and produces a new `Snapshot`; never mutate one. The
   one other swap is `KnowledgeBase.renarrowed`: after a live re-read,

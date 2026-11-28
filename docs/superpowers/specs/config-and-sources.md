@@ -127,7 +127,11 @@ OpenTelemetry traces, call metrics and the interpreter's garbage-collection metr
 and `tags` (a string map of labels). Absent, every signal is off. An unknown key in it is a config
 error (CFG-5). kb adds only the `profiles` guard: an address carrying userinfo is a config error, as
 a source URL is (SRC-3), and the error does not quote it. Profiles, traces and metrics carry the
-service name `OTEL_SERVICE_NAME`, else `mcp-kb`. Metrics leave as `OTEL_METRICS_EXPORTER` says:
+service name `OTEL_SERVICE_NAME`, else `mcp-kb`. Profiles from the image also carry
+`service_repository` and `service_git_ref` (HTTP-49), unless `tags` sets either one, because `tags`
+wins. The repository's `.pyroscope.yaml` maps each frame's file to its source at those labels: kb's
+own in this repository, and kubed-mcp, FastMCP and the standard library on GitHub at the versions
+the image installs. Metrics leave as `OTEL_METRICS_EXPORTER` says:
 pushed over OTLP, or scraped from the exporter's own port with `prometheus`. The server adds no
 metrics route.
 

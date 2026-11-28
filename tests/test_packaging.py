@@ -37,6 +37,7 @@ PYPROJECT = REPO / "pyproject.toml"
 IMAGE_WORKFLOW = REPO / ".github" / "workflows" / "image.yml"
 TEST_WORKFLOW = REPO / ".github" / "workflows" / "test.yml"
 DOCKERFILE = REPO / "Dockerfile"
+COMPOSE = REPO / "docker-compose.yaml"
 
 sys.path.insert(0, str(REPO / "scripts"))
 import requirements  # noqa: E402 - needs the path above
@@ -444,6 +445,23 @@ def test_the_image_names_the_config_file_and_matches_the_defaults():
         serving.host,
         serving.port,
     )
+
+
+def test_the_image_names_its_source_after_every_run():
+    """HTTP-49: the labels change with every commit, so nothing below them may rebuild."""
+    runner = dockerfile_stages()["runner"]
+    at = runner.index("ARG GIT_SHA")
+    assert not [ln for ln in runner[at:] if ln.startswith("RUN ")]
+    tail = "\n".join(runner[at:])
+    assert "SERVICE_REPOSITORY=https://github.com/kubed-io/mcp-kb" in tail
+    assert "SERVICE_GIT_REF=${GIT_SHA}" in tail
+    assert runner[-1] == 'ENTRYPOINT ["mcp-kb"]'
+
+
+def test_the_bake_passes_the_commit_and_no_stand_in():
+    """An empty ref is no label; `latest` would link every frame to a 404."""
+    args = yaml.safe_load(COMPOSE.read_text())["services"]["mcp-kb"]["build"]["args"]
+    assert args["GIT_SHA"] == "${GIT_SHA:-}"
 
 
 def test_the_copied_venv_is_proved_to_work_at_build_time():
