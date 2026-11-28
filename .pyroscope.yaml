@@ -1,0 +1,48 @@
+# Pyroscope's source code links (kubed-io/pyroscope components/github): where each frame's
+# file lives on GitHub. The image installs everything under the venv's site-packages, so even
+# kb's own code needs a mapping. Each ref must match what the image installs: bump it with
+# kubed-mcp, fastmcp or the Python image (quick-mcp#100 plans to generate this file at build).
+version: v1
+source_code:
+  mappings:
+  # kb's own code, in this repository
+  - path:
+    - prefix: /opt/venv/lib/python3.14/site-packages/kubed/mcp_kb/
+    - prefix: opt/venv/lib/python3.14/site-packages/kubed/mcp_kb/
+    language: python
+    source:
+      local:
+        path: kubed/mcp_kb
+  # kubed-mcp
+  - path:
+    - prefix: /opt/venv/lib/python3.14/site-packages/kubed/mcp/
+    - prefix: opt/venv/lib/python3.14/site-packages/kubed/mcp/
+    language: python
+    source:
+      github:
+        owner: kubed-io
+        repo: quick-mcp
+        ref: v0.6.1
+        path: kubed/mcp
+  # FastMCP: the package sits in its monorepo's fastmcp_slim/
+  - path:
+    - prefix: /opt/venv/lib/python3.14/site-packages/fastmcp/
+    - prefix: opt/venv/lib/python3.14/site-packages/fastmcp/
+    language: python
+    source:
+      github:
+        owner: PrefectHQ
+        repo: fastmcp
+        ref: v4.2.6
+        path: fastmcp_slim/fastmcp
+  # the standard library, from the image's interpreter
+  - path:
+    - prefix: /usr/local/lib/python3.14/
+    - prefix: usr/local/lib/python3.14/
+    language: python
+    source:
+      github:
+        owner: python
+        repo: cpython
+        ref: v3.14.10
+        path: Lib
