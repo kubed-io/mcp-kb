@@ -422,6 +422,7 @@ async def test_a_declared_extension_without_via_reads_from_resources(tmp_path):
             uris = [str(r.uri) for r in await client.list_resources()]
             assert len([u for u in uris if u.endswith("/alpha/SKILL.md")]) == 1
             assert "Skills (skill://lib/_index.md): " in client.instructions
+            assert "alpha" in client.instructions
 
 
 @pytest.mark.integration
@@ -929,7 +930,6 @@ async def test_a_listed_at_vias_level_or_before_overrides_the_preset(
 
 @pytest.mark.integration
 async def test_local_unlists_skills_and_agents_and_extension_does_not(tmp_path):
-
     cases = {
         "mcp": {"Kb-Via": "mcp"},
         "extension": {"Kb-Via": "extension"},
@@ -1149,7 +1149,7 @@ async def test_via_follows_a_refresh(tmp_path, mode, via):
 @pytest.mark.parametrize(
     ("via", "listed"), [("extension", ["lib_hello", "lib_top"]), ("local", [])]
 )
-async def test_a_hidden_prompt_still_gets_under_via(tmp_path, via, listed):  # PRM-64
+async def test_a_plugin_prompt_gets_under_every_via(tmp_path, via, listed):  # PRM-64
     kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
     with served(kb) as url:
         async with _via_client(url, "default", {"Kb-Via": via}) as client:
@@ -1159,6 +1159,8 @@ async def test_a_hidden_prompt_still_gets_under_via(tmp_path, via, listed):  # P
 
 
 # -- the ``mcp`` text, pinned as captured before Via existed -------------------
+# (every case but ``declared``, which is newer: a declared extension under the
+# default Via is told the names, INS-11)
 
 _DEEP = "Skills: skill://deepsource/_index.md\nPrompts: prompts://deepsource/deepsource-prompts/_index.md"
 _FLAT = "Skills: skill://flatsource/_index.md\nPrompts: prompts://flatsource/flatsource-prompts/_index.md"
@@ -1199,7 +1201,7 @@ MCP_TEXTS = {
         False,
         f"[deepsource]\n{_DEEP}\n\n[flatsource]\n{_FLAT}\n\n" + TOOLS_FOOTER,
     ),
-    "extension": (
+    "declared": (
         "",
         {"Kb-Library": "flatsource"},
         True,

@@ -60,7 +60,10 @@ async def test_discovery_get_and_verified_reads(skills_dir, mode):
         assert listing["ttlMs"] == 0
         assert listing["cacheScope"] == "private"
         assert len(listing["skills"]) == 4
-        assert len(await client.list_resources()) < len(listing["skills"]) + 4
+        # Under ``extension`` the skills are in ``skills/list``, not in
+        # ``resources/list`` (DLV-9); no other test holds that for this Via.
+        rows = [str(r.uri) for r in await client.list_resources()]
+        assert not [uri for uri in rows if uri.endswith("/SKILL.md")]
         assert await client.list_tools() == []
         for entry in listing["skills"]:
             got = await request(client, "skills/get", uri=entry["uri"])
@@ -75,9 +78,11 @@ async def test_discovery_get_and_verified_reads(skills_dir, mode):
 
 async def test_fastmcps_client_reads_every_skill_and_verifies_it(skills_dir):
     """``read_skill`` checks every file against the entry's digest (MD-59)."""
-    server = KnowledgeBase(make_config(skills_dir), skills_dir / "cache")
+    server = extension_kb(make_config(skills_dir), skills_dir / "cache")
     async with Client(server_of(server), extensions=[SkillsClientExtension()]) as client:
-        for entry in await client.list_skills():
+        entries = await client.list_skills()
+        assert len(entries) == 4
+        for entry in entries:
             skill = await client.read_skill(entry.uri)
             assert "SKILL.md" in skill.files
 
@@ -186,7 +191,7 @@ async def test_a_skill_folder_is_a_directory_with_its_indexes(skills_dir):
             await request(client, "resources/directory/read", uri=f"{root}/SKILL.md")
 
 
-async def test_an_invalid_skill_is_not_served_at_all(skills_dir):
+async def test_an_invalid_skill_is_not_served_at_all(skills_dir, tmp_path):
     """MD-56: refused by FastMCP, so neither read, listed nor offered."""
     path = skills_dir / "flatsource" / "alpha" / "SKILL.md"
     path.write_text("---\nname: alpha\n---\nMissing description.\n", encoding="utf-8")
@@ -202,8 +207,13 @@ async def test_an_invalid_skill_is_not_served_at_all(skills_dir):
             await request(client, "skills/get", uri=ALPHA)
         index = (await client.read_resource("skill://flatsource/_index.md"))[0].text
         assert "alpha" not in index
-        full = await client.list_resources()
-        assert all("alpha" not in str(r.uri) for r in full)
+    # Under the default Via the skills are ``resources/list`` rows: the refused
+    # one's must be left out of them as well.
+    default = KnowledgeBase(make_config(skills_dir), tmp_path / "default-cache")
+    async with Client(server_of(default)) as client:
+        rows = [str(r.uri) for r in await client.list_resources()]
+    assert "skill://flatsource/beta/SKILL.md" in rows
+    assert all("alpha" not in uri for uri in rows)
 
 
 async def test_frontmatter_too_deep_for_the_parser_is_not_served(skills_dir):
