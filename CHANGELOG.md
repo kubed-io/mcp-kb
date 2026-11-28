@@ -27,10 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Pyroscope profiles link each frame to its source at the image's own commit.
 - A restart with clients connected closes their streams cleanly; `GRACEFUL_TIMEOUT` (15 s) sets how long in-flight calls get.
 - Send `Kb-Via: extension` or `local` (or `?via=`) and the instructions point at where your client gets its skills.
 - A client now connects knowing what each library in its scope is for; set a library's `description`, `notes` and `listSkills` to shape it.
-- Discover and load verified skills in MCP Skills clients through `skills/list` and `skills/get`.
+- Discover and load verified skills in MCP Skills clients through `skills/list` (send `Kb-Via: extension`) and `skills/get`.
 - Skill links work behind a multiplexing gateway: set `Kb-Resource-Prefix` (or `?prefix=`), e.g. `kb+`, and kb writes it in front of every address in text.
 - A library can list `categories`, and `Kb-Category` (`?category=`) selects every library listing one.
 - Commands in subfolders of a plugin's `commands` are served as `<library>_<folder>_<name>`.
@@ -50,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** A deployment serving more than 100 skills now lists only the first 100 (in config order) in `skills/list` and `resources/list` unless `Kb-Max` (`?max=`, `DELIVERY_MAX`) is set, `all` for every one; a cut skill still reads, and the instructions say when the list was cut.
 - **BREAKING:** `CONFIG_FILE` and `--config-file` name the config file, in place of `CONFIG` and `--config`; a leftover `CONFIG` stops the boot, and outside the image no file is read unless one is named.
 - `mcp-kb schema` prints the whole config's schema, with each item's env var and flag.
+- Under the default `Kb-Via`, a client pinned to one library is told its skills' names, a Skills-extension client included.
 - Per-request settings are now `Kb-Library`, `Kb-Category`, `Kb-Tag`, `Kb-Resource-Prefix` and `Kb-Resources`; the old `X-` names are still accepted.
 - **BREAKING:** A pin set under an old `X-` name (a gateway route header, a credential) no longer holds against a client-sent `Kb-` header, which now beats it; move such pins to the `Kb-` names.
 - **BREAKING:** Library keys are camelCase only: `plugin_selector:` is no longer accepted, use `pluginSelector:`.
@@ -68,11 +70,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `skills/get` of a skill that is not served answers `Unknown skill URI: <uri>`.
 - Plugin sources (git, WebDAV, `file://`) load through kubed-mcp plugin loaders.
 - `resources/list` lists each skill's `SKILL.md` and each library's `_files.md`; the `_index.md` files still read, unlisted.
-- Built on kubed-mcp 0.6: VS Code is listed `list_resources` and `read_resource` with no header, and `initialize` and `server/discover` report what they resolved in `_meta["io.kubed/delivery"]`.
+- Built on kubed-mcp 0.8: VS Code is listed `list_resources` and `read_resource` with no header, and `initialize` and `server/discover` report what they resolved in `_meta["io.kubed/delivery"]`.
 - kubed-mcp 0.5.2 or later is required: it is what leaves a skill's hidden files (a `.gitkeep`, a `.env`) out while serving the rest of the skill.
 
 ### Fixed
 
+- A pod that has just started keeps answering, `/health` and `server/discover` included, while it builds what its first clients are served.
 - A slow Nextcloud no longer stalls other requests or fails health probes: live sources revalidate in the background.
 - A command or skill citing a skill of its own plugin through `${CLAUDE_PLUGIN_ROOT}/skills/<skill>/…` now renders an address that reads.
 - Docker quick start works without a checkout; native setup documents explicit config and cache paths on Windows and POSIX systems.

@@ -7,12 +7,14 @@ from pathlib import Path
 
 import frontmatter
 import pytest
+from kubed.mcp import DeliverySettings, load_config
 
+from kubed.mcp_kb import KnowledgeBase
 from kubed.mcp_kb.app import create_app
 from kubed.mcp_kb.catalogue import harvest
 from kubed.mcp_kb.catalogue.prompts import parse_prompt, stem
 from kubed.mcp_kb.catalogue.skills import LibraryFiles, load_skills
-from kubed.mcp_kb.config import Config
+from kubed.mcp_kb.config import SECTIONS, Config
 from kubed.mcp_kb.plugins import Fetch, Globs, Plugin
 
 # The WebDAV server fixture lives in its own module -- it is a server, not a
@@ -109,6 +111,24 @@ def _passes_end_with_their_test(monkeypatch):
 # One app per knowledge base, so a test that reaches the server twice -- a route
 # added, then the ASGI app built -- reaches the same one.
 _APPS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+# The header a client sends to be listed the Skills extension's way (DLV-9).
+VIA_EXTENSION: dict[str, str] = {"Kb-Via": "extension"}
+
+
+def extension_kb(config: Config, cache: Path) -> KnowledgeBase:
+    """A knowledge base whose app serves Via ``extension``, the one in-memory way.
+
+    A ``fastmcp.Client`` sends no header, so in memory the Via is the config's:
+    ``server_of``, ``serving_of`` and ``serve_http`` then serve ``extension``.
+    """
+    loaded = load_config(
+        sections=SECTIONS, config=[config, DeliverySettings(via="extension")]
+    )
+    kb = KnowledgeBase(loaded.config, cache)
+    _APPS[kb] = create_app(kb, loaded=loaded)
+    return kb
 
 
 def server_of(knowledge_base):

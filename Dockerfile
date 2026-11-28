@@ -124,4 +124,13 @@ EXPOSE 8000
 # non-numeric USER and refuses to start the container.
 USER 65534
 
+# Where this image's code lives, for Pyroscope's source links: kubed-mcp labels
+# every profile service_repository and service_git_ref from these. Last, after
+# every RUN: GIT_SHA changes with every commit, and an ARG is part of the cache
+# key of each RUN below it, so here only these metadata layers change. A build
+# given no GIT_SHA (a plain local one) sets the ref empty, which is no label.
+ARG GIT_SHA
+ENV SERVICE_REPOSITORY=https://github.com/kubed-io/mcp-kb \
+    SERVICE_GIT_REF=${GIT_SHA}
+
 ENTRYPOINT ["mcp-kb"]

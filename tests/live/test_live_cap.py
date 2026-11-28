@@ -1,4 +1,7 @@
-"""SKL-64, INS-24: the unscoped cut of a running kb, derived from its own route."""
+"""SKL-64, INS-24: the unscoped cut of a running kb, derived from its own route.
+
+It reads the default listing: the ``SKILL.md`` rows of ``resources/list``.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,6 @@ import pytest
 from kubed.mcp.protocol import MCPError
 
 from tests.live.kb import connect, health, read, rpc
-from tests.test_skills_extension import request
 
 pytestmark = pytest.mark.live
 
@@ -43,7 +45,11 @@ async def test_the_unscoped_cut_is_named_by_the_route(kb_url):
     found = await indexed(kb_url)
     assert found, "the index walk reached no skill"
     async with connect(kb_url) as client:  # unscoped, no Kb-Max
-        listed = {e["uri"] for e in (await request(client, "skills/list"))["skills"]}
+        listed = {
+            str(r.uri)
+            for r in await client.list_resources()
+            if str(r.uri).endswith("/SKILL.md")
+        }
         told = client.instructions or ""
     total = len(found)
     cut = sorted(set(found) - listed)

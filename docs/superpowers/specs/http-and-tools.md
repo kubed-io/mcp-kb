@@ -205,6 +205,10 @@ packages import in it. A plain install of the package carries neither; with a te
 (CFG-15), such an install logs one warning per signal that is on, naming the extra, and serves
 without that signal.
 
+**HTTP-49.** The image sets `SERVICE_REPOSITORY=https://github.com/kubed-io/mcp-kb` and
+`SERVICE_GIT_REF` to the commit it was built from. A build given no commit sets `SERVICE_GIT_REF`
+empty, which is no label. Both are set after the image's last `RUN`.
+
 **HTTP-38.** The process writes only under the cache directory, so the root filesystem MAY be
 read-only when the cache directory is a writable mount.
 

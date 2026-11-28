@@ -180,12 +180,9 @@ are built for that request. The same request gets the same text from either.
 
 **INS-2.** The text is built from the current catalogue, the request's scope, whether the client
 reads resources, which is kubed-mcp's resolved `resources` setting for the request (DLV-2,
-DLV-15; see [http-and-tools.md](http-and-tools.md)), its resolved `via` and `extensions`
-(whether the client declared the Skills extension), and the request's resource prefix, which is
-INS-16's.
-
-**INS-3.** The client declared the Skills extension when `io.modelcontextprotocol/skills` is
-among the extensions kubed-mcp resolved for the request (DLV-11).
+DLV-15; see [http-and-tools.md](http-and-tools.md)), its resolved `via`, and the request's
+resource prefix, which is INS-16's. Whether the client declared an extension changes nothing in
+it.
 
 **INS-4.** A session keeps the text it was given. No notification changes it. A new connection
 gets text built from the catalogue as it is then.
@@ -213,8 +210,9 @@ neither can open a new section.
 `Skills: skill://<library>/_index.md`. INS-19 adds the prompt and agent pointers after it.
 
 **INS-11.** The pointer also lists skill names when all of these hold: the request's Via is `mcp`
-(INS-20), exactly one library is selected, that library's `listSkills` is true, and the client has
-not declared the Skills extension. It then reads `Skills (skill://<library>/_index.md): <names>`.
+(INS-20), exactly one library is selected, and that library's `listSkills` is true. A client that
+declared the Skills extension gets them too. It then reads
+`Skills (skill://<library>/_index.md): <names>`.
 
 **INS-12.** The names are the paths below the library of the skills in scope, sorted, joined by
 `, `. A scope narrowed by tag lists only the skills it admits.
@@ -232,8 +230,7 @@ else the one it serves now.
   the scope one of that kind. Only then is that folder there (kubed-mcp's PLUG-68).
 - Otherwise the line names the `_index.md` of each plugin namespace that serves one, in the
   library's plugin order, joined by `, `.
-- The lines are written under `mcp` and `extension` (INS-20), whether or not the client declared
-  an extension, and in the INS-11 form. INS-6 still decides which libraries have a section.
+- The lines are written under `mcp` and `extension` (INS-20), and in the INS-11 form. INS-6 still decides which libraries have a section.
 - The prefix is written as INS-16 says.
 
 ```

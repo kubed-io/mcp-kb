@@ -39,6 +39,7 @@ from tests.conftest import (
 )
 from tests.test_header_scope import server_url  # noqa: F401 - shared HTTP fixture
 from tests.test_plugin_serving import market
+from tests.test_skills_extension import request
 
 RES_FOOTER = (
     "Read a listed skill at skill://<library>/<path>/SKILL.md; read its "
@@ -79,7 +80,6 @@ def _build(
     catalogue,
     scope=EVERYTHING,
     resources=True,
-    skills_extension=False,
     folders=None,
     **via,
 ):
@@ -87,7 +87,6 @@ def _build(
         catalogue,
         scope,
         resources=resources,
-        skills_extension=skills_extension,
         folders=folders,
         **via,
     )
@@ -126,14 +125,6 @@ def test_list_skills_false_drops_the_names(tmp_path):
     text = LibraryText("penpot", list_skills=False)
     cat = _catalogue(tmp_path, {text: ["router"]})
     assert _build(cat) == "Skills: skill://penpot/_index.md\n\n" + RES_FOOTER
-
-
-@pytest.mark.unit
-def test_skills_extension_drops_the_names(tmp_path):
-    text = LibraryText("penpot")
-    cat = _catalogue(tmp_path, {text: ["router"]})
-    out = _build(cat, skills_extension=True)
-    assert out == "Skills: skill://penpot/_index.md\n\n" + RES_FOOTER
 
 
 @pytest.mark.unit
@@ -228,16 +219,6 @@ def test_each_section_gets_its_own_lines_and_an_unselected_library_none(tmp_path
     )
     assert _build(cat, folders=folders, resources=False).endswith(
         "Agents: agents://b/_index.md\n\n" + TOOLS_FOOTER
-    )
-
-
-@pytest.mark.unit
-def test_a_declared_skills_extension_keeps_the_lines(tmp_path):
-    cat = _catalogue(tmp_path, {LibraryText("lib"): ["x"]})
-    folders = {"lib": Folders(prompts=("lib",), agents=("lib/b",))}
-    assert _build(cat, skills_extension=True, folders=folders) == (
-        "Skills: skill://lib/_index.md\nPrompts: prompts://lib/_index.md\n"
-        "Agents: agents://lib/b/_index.md\n\n" + RES_FOOTER
     )
 
 
@@ -418,17 +399,30 @@ async def test_a_single_library_lists_paths_by_default(tmp_path, mode):
 
 @pytest.mark.integration
 @ERAS
-async def test_declared_skills_extension_drops_names(tmp_path, mode):
+async def test_a_declared_extension_is_told_the_names(tmp_path, mode):
     root = tmp_path / "market"
     _market(root, "Loud.", "alpha")
     kb = KnowledgeBase(_library_config(root), tmp_path / "cache")
     with served(kb) as url:
         plain = await told(url, mode)
         declared = await told(url, mode, extension=True)
-    assert "alpha" in plain
-    assert "Skills (skill://lib/_index.md): " in plain
-    assert "alpha" not in declared
-    assert "Skills: skill://lib/_index.md" in declared.splitlines()
+    assert declared == plain
+    assert "Skills (skill://lib/_index.md): " in declared and "alpha" in declared
+
+
+@pytest.mark.integration
+async def test_a_declared_extension_without_via_reads_from_resources(tmp_path):
+    root = tmp_path / "market"
+    _market(root, "Loud.", "alpha")
+    kb = KnowledgeBase(_library_config(root), tmp_path / "cache")
+    with served(kb) as url:
+        transport = StreamableHttpTransport(url)
+        async with Client(transport, extensions=[SkillsClientExtension()]) as client:
+            assert (await request(client, "skills/list"))["skills"] == []
+            uris = [str(r.uri) for r in await client.list_resources()]
+            assert len([u for u in uris if u.endswith("/alpha/SKILL.md")]) == 1
+            assert "Skills (skill://lib/_index.md): " in client.instructions
+            assert "alpha" in client.instructions
 
 
 @pytest.mark.integration
@@ -554,7 +548,7 @@ def test_the_fn_builds_from_the_resolution(tmp_path):
     off = _resolved("off", frozenset(), None, "mcp")
     assert fn(off).endswith(TOOLS_FOOTER)
     declared = _resolved("on", frozenset({EXTENSION_ID}), None, "mcp")
-    assert fn(declared).startswith("Skills: skill://penpot/_index.md")
+    assert fn(declared) == fn(on)  # INS-11: a declaration changes nothing under mcp
     extension = _resolved("on", None, None, "extension")
     text = fn(extension)
     assert text.endswith(EXTENSION_FOOTER) and "Skills (" not in text
@@ -595,7 +589,7 @@ def test_prefixed_pointer_and_footer(tmp_path):
     text = LibraryText("flatsource")
     cat = _catalogue(tmp_path, {text: ["alpha", "beta"]})
     out = prefixed(
-        build_instructions(cat, EVERYTHING, resources=True, skills_extension=False),
+        build_instructions(cat, EVERYTHING, resources=True),
         "kb+",
     )
     assert out.splitlines()[0] == (
@@ -612,7 +606,7 @@ def test_prefixed_pointer_without_names_and_notes(tmp_path):
     a = LibraryText("a", "A.", "Start at skill://a/x/SKILL.md.")
     cat = _catalogue(tmp_path, {a: ["x"]})
     out = prefixed(
-        build_instructions(cat, EVERYTHING, resources=True, skills_extension=False),
+        build_instructions(cat, EVERYTHING, resources=True),
         "kb+",
     )
     assert "Start at kb+skill://a/x/SKILL.md." in out.splitlines()
@@ -623,7 +617,7 @@ def test_prefixed_multi_library_pointers(tmp_path):
     a, b = LibraryText("a", "A."), LibraryText("b", "B.")
     cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
     out = prefixed(
-        build_instructions(cat, EVERYTHING, resources=True, skills_extension=False),
+        build_instructions(cat, EVERYTHING, resources=True),
         "kb+",
     )
     lines = out.splitlines()
@@ -637,10 +631,9 @@ def test_the_text_is_built_unprefixed(tmp_path):
     cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
     for scope in (EVERYTHING, Scope(library="a")):
         for resources in (True, False):
-            for ext in (True, False):
-                for via in ("mcp", "extension", "local"):
-                    kw = {"resources": resources, "skills_extension": ext, "via": via}
-                    assert "kb+" not in build_instructions(cat, scope, **kw)
+            for via in ("mcp", "extension", "local"):
+                kw = {"resources": resources, "via": via}
+                assert "kb+" not in build_instructions(cat, scope, **kw)
     assert _build(cat, Scope(library="a")).endswith(RES_FOOTER)
 
 
@@ -879,15 +872,18 @@ async def test_via_is_read_under_kb_names(tmp_path, mode, headers, query, via):
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("via", ["extension", "local"])
-async def test_via_presets_list_no_plugin_prompts(tmp_path, via):
+async def test_only_local_unlists_the_plugins_prompts(tmp_path):  # PRM-64
     kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
+    names = {}
     with served(kb) as url:
-        async with _via_client(url, "default", {"Kb-Via": via}) as client:
-            assert [p.name for p in await client.list_prompts()] == []
-        async with _via_client(url, "default") as client:
-            names = sorted(p.name for p in await client.list_prompts())
-    assert names == ["lib_hello", "lib_top"]
+        for via in ("mcp", "extension", "local"):
+            async with _via_client(url, "default", {"Kb-Via": via}) as client:
+                names[via] = sorted(p.name for p in await client.list_prompts())
+    assert names == {
+        "mcp": ["lib_hello", "lib_top"],
+        "extension": ["lib_hello", "lib_top"],
+        "local": [],
+    }
 
 
 def _skill_rows(resources):
@@ -934,8 +930,6 @@ async def test_a_listed_at_vias_level_or_before_overrides_the_preset(
 
 @pytest.mark.integration
 async def test_local_unlists_skills_and_agents_and_extension_does_not(tmp_path):
-    from tests.test_skills_extension import request
-
     cases = {
         "mcp": {"Kb-Via": "mcp"},
         "extension": {"Kb-Via": "extension"},
@@ -958,8 +952,8 @@ async def test_local_unlists_skills_and_agents_and_extension_does_not(tmp_path):
                 agent["agent"],
             )
     found = (SKILL_ROWS[0], "lib_helper")
-    assert listed["mcp"] == (SKILL_ROWS, ["lib_helper"], *found)
-    assert listed["extension"] == listed["mcp"]
+    assert listed["mcp"] == ([], ["lib_helper"], *found)
+    assert listed["extension"] == (SKILL_ROWS, ["lib_helper"], *found)
     assert listed["local"] == ([], [], *found)
     assert listed["local, listed"] == listed["local"]
 
@@ -1027,9 +1021,8 @@ def test_via_mcp_is_the_default(tmp_path):
     cat = _catalogue(tmp_path, {a: ["x"], b: ["y"]})
     for scope in (EVERYTHING, Scope(library="a")):
         for resources in (True, False):
-            for ext in (True, False):
-                kw = {"resources": resources, "skills_extension": ext}
-                assert _build(cat, scope, via="mcp", **kw) == _build(cat, scope, **kw)
+            kw = {"resources": resources}
+            assert _build(cat, scope, via="mcp", **kw) == _build(cat, scope, **kw)
 
 
 # -- the hook reads Via, and never fails (INS-20, INS-23) ---------------------
@@ -1153,17 +1146,21 @@ async def test_via_follows_a_refresh(tmp_path, mode, via):
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("via", ["extension", "local"])
-async def test_a_hidden_prompt_still_gets_under_via(tmp_path, via):
+@pytest.mark.parametrize(
+    ("via", "listed"), [("extension", ["lib_hello", "lib_top"]), ("local", [])]
+)
+async def test_a_plugin_prompt_gets_under_every_via(tmp_path, via, listed):  # PRM-64
     kb = KnowledgeBase(_three(tmp_path), tmp_path / "cache")
     with served(kb) as url:
         async with _via_client(url, "default", {"Kb-Via": via}) as client:
-            assert await client.list_prompts() == []
+            assert sorted(p.name for p in await client.list_prompts()) == listed
             got = await client.get_prompt("lib_top")
     assert "Body." in got.messages[0].content.text
 
 
 # -- the ``mcp`` text, pinned as captured before Via existed -------------------
+# (every case but ``declared``, which is newer: a declared extension under the
+# default Via is told the names, INS-11)
 
 _DEEP = "Skills: skill://deepsource/_index.md\nPrompts: prompts://deepsource/deepsource-prompts/_index.md"
 _FLAT = "Skills: skill://flatsource/_index.md\nPrompts: prompts://flatsource/flatsource-prompts/_index.md"
@@ -1204,11 +1201,12 @@ MCP_TEXTS = {
         False,
         f"[deepsource]\n{_DEEP}\n\n[flatsource]\n{_FLAT}\n\n" + TOOLS_FOOTER,
     ),
-    "extension": (
+    "declared": (
         "",
         {"Kb-Library": "flatsource"},
         True,
-        f"{_FLAT}\n\n" + RES_FOOTER,
+        "Skills (skill://flatsource/_index.md): alpha, beta\n" + _FLAT_PROMPTS
+        + "\n\n" + RES_FOOTER,
     ),
 }
 

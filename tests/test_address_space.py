@@ -792,8 +792,8 @@ async def test_a_skill_nested_inside_a_skill_is_the_outer_skills_files(tmp_path)
     from kubed.mcp.protocol import types
     from pydantic import TypeAdapter
 
-    from kubed.mcp_kb import KnowledgeBase
     from kubed.mcp_kb.config import Config
+    from tests.conftest import extension_kb
 
     root = tmp_path / "src"
     (root / "skills" / "x" / "y" / "refs").mkdir(parents=True)
@@ -810,7 +810,7 @@ async def test_a_skill_nested_inside_a_skill_is_the_outer_skills_files(tmp_path)
             "libraries": [{"name": "lib", "plugins": ["lib"]}],
         }
     )
-    kb = KnowledgeBase(config, tmp_path / "cache")
+    kb = extension_kb(config, tmp_path / "cache")
 
     async with Client(server_of(kb)) as client:
         index = (await client.read_resource("skill://lib/_index.md"))[0].text

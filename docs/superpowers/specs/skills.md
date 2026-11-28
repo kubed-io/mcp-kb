@@ -425,9 +425,10 @@ out still answers `skills/get` and `resources/read`, and stays in every `_index.
 `_index.json`. A `cursor` the server never issued is ignored, which is kubed-mcp's known deviation
 from SEP-2640.
 
-**SKL-62.** Under Via `local`, `skills/list` lists no skill, and `skills/get` still serves each one
-in scope (DLV-9, DLV-10). Under `mcp` and `extension` it lists them up to the request's max
-(SKL-64). `Listed` does not change it. kb adds no filter of its own. Under `local` none is listed
+**SKL-62.** Under Via `extension`, `skills/list` lists the in-scope skills up to the request's max
+(SKL-64). Under `mcp` and `local` it lists no skill, and `skills/get` still serves each one in
+scope (DLV-9, DLV-10). Under `mcp` the skills are listed as `resources/list` rows instead
+(SKL-14). `Listed` does not change it. kb adds no filter of its own. Under `local` none is listed
 and none counts as cut.
 
 **SKL-64.** A listing the max cuts (SKL-14, SKL-48) keeps the first skills in the plugin layer's
